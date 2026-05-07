@@ -1,0 +1,9 @@
+PyQt6
+requests
+python-dotenv
+sounddevice
+numpy
+keyboard
+openai
+pyttsx3
+edge-tts
