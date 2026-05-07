@@ -1,0 +1,27 @@
+# Virtual environment
+.venv/
+
+# API keys and credentials — NEVER commit these
+credentials.env
+.env
+*.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Debug audio files
+debug_last_recording.wav
+
+# Temp test files
+temp_edge_tts_*.py
+
+# PyInstaller
+dist/
+build/
+*.spec
+
+# OS
+Thumbs.db
+desktop.ini
