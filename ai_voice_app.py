@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Juha Lempiäinen. All rights reserved.
+# Use permitted. Modification and redistribution of source code prohibited.
+# See LICENSE for full terms.
+
 # =========================
 # SELF INSTALL DEPENDENCIES
 # =========================

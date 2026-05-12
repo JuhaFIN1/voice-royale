@@ -1,5 +1,8 @@
 # AI Voice Router
 
+Copyright (c) 2026 Juha Lempiäinen. All rights reserved.
+Use permitted. Modification and redistribution of source code prohibited — see [LICENSE](LICENSE).
+
 Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speech, translates it with GPT-4.1-mini, and speaks the result via TTS — all routed to any audio output device you choose.
 
 ## Features
