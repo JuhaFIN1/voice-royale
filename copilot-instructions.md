@@ -1,30 +1,57 @@
 # Copilot Instructions for AI Voice Router
 
-This workspace contains a Windows desktop Python app for AI voice routing built with PyQt6.
+Windows desktop Python app for AI-powered voice translation, built with PyQt6.
 
-## Project Focus
-- Single-file app: `ai_voice_app.py`
-- UI is a dark-themed PyQt6 desktop app
-- Audio input/output routing using `sounddevice`
-- Multiple TTS backends: Edge TTS, ElevenLabs, local fallback
-- Persistent history/favorites in `speech_history.json`
-- Global hotkey support and no console window when packaged
+## Architecture
 
-## Guidance for Copilot
-- Prefer editing `ai_voice_app.py` unless the user explicitly requests a new file
-- Keep the UI responsive and avoid blocking the main thread
+Single file: `ai_voice_app.py` (~2100 lines)
+
+Key sections:
+- **lines 10–32**: `install_deps()` — auto pip install on startup
+- **lines 140–193**: Language dicts (`LANGS`, `LANG_FLAG_CODES`, `EDGE_VOICES`)
+- **lines 643–782**: `WakeListener` — wake-word detection (Porcupine + Whisper fallback)
+- **lines 784+**: `App(QWidget)` — main UI class
+- **lines 2005+**: `open_settings_dialog()` — settings window
+
+## Core Flow
+
+1. Wake-word heard (Porcupine or Whisper VAD)
+2. Record audio for `wake_command_seconds` seconds
+3. Whisper API transcribes
+4. `parse_voice_command()` — GPT-4.1-mini extracts target language + translates
+5. TTS (Edge TTS / ElevenLabs / pyttsx3) plays to selected output devices
+
+## Guidance
+
+- Edit `ai_voice_app.py` unless the user explicitly requests a new file
+- Keep UI responsive — all audio/API work runs in daemon threads
 - Do not introduce unnecessary dependencies
-- Use `QListWidget` or `QComboBox` for selection controls, with clear visual styling
-- For audio output, support selecting multiple devices when possible
-- Preserve existing user data and history format when migrating
-- Keep code concise and maintainable
+- Flag icons: use ONLY `fillRect` in `create_flag_icon()` — PyQt6 strict-mode crashes on `setBrush`/`drawEllipse`
+- Adding a language: update `LANGS`, `LANG_FLAG_CODES`, `EDGE_VOICES`, and `create_flag_icon()` elif chain
+- Multi-device playback: `play_wav_bytes()` handles threading automatically
 
-## When responding
-- Provide short, actionable answers
-- Mention the exact file changed, if any
-- Do not make broad architectural changes unless asked
+## Settings (app_settings.json)
+
+| Key | Default |
+|---|---|
+| `hotkey` | `ctrl+alt+space` |
+| `wake_keyword` | `jarvis` |
+| `wake_custom_ppn_path` | `""` |
+| `picovoice_access_key` | `""` |
+| `default_target_lang` | `Auto` |
+| `default_tts_backend` | Edge TTS |
+| `wake_command_seconds` | `6.0` |
+
+## Supported Languages (15)
+
+Auto, English, German, Swedish, Finnish, Russian, Italian,
+Dutch, Norwegian, Danish, Romanian, Latvian, Lithuanian,
+Japanese, Chinese, Hungarian
 
 ## User Preferences
-- The app is meant for Windows desktop use
-- Prioritize reliable audio routing and user-friendly device selection
-- Avoid using unstable emoji rendering in PyQt6 controls
+
+- Windows desktop only
+- Reliable audio routing and user-friendly device selection
+- Avoid unstable emoji rendering in PyQt6 controls
+- Short, actionable answers — mention exact file changed
+- No broad architectural changes unless asked
