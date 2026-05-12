@@ -158,6 +158,11 @@ LANGS = {
     "Japanese": "Japanese",
     "Chinese": "Chinese",
     "Hungarian": "Hungarian",
+    "Polish": "Polish",
+    "Czech": "Czech",
+    "Catalan": "Catalan",
+    "Belarusian": "Belarusian",
+    "Spanish": "Spanish",
 }
 
 LANG_FLAG_CODES = {
@@ -176,6 +181,11 @@ LANG_FLAG_CODES = {
     "Japanese": "jp",
     "Chinese": "cn",
     "Hungarian": "hu",
+    "Polish": "pl",
+    "Czech": "cz",
+    "Catalan": "ca",
+    "Belarusian": "by",
+    "Spanish": "es",
 }
 
 # Edge TTS voices mapping
@@ -195,6 +205,11 @@ EDGE_VOICES = {
     "Japanese": "ja-JP-NanamiNeural",
     "Chinese": "zh-CN-XiaoxiaoNeural",
     "Hungarian": "hu-HU-NoemiNeural",
+    "Polish": "pl-PL-ZofiaNeural",
+    "Czech": "cs-CZ-VlastaNeural",
+    "Catalan": "ca-ES-JoanaNeural",
+    "Belarusian": "ru-RU-SvetlanaNeural",
+    "Spanish": "es-ES-ElviraNeural",
 }
 
 # =========================
@@ -861,6 +876,27 @@ class App(QWidget):
             painter.fillRect(0, 0, 20, 5, Qt.GlobalColor.red)
             painter.fillRect(0, 5, 20, 4, Qt.GlobalColor.white)
             painter.fillRect(0, 9, 20, 5, Qt.GlobalColor.green)
+        elif country_code == "pl":
+            painter.fillRect(0, 0, 20, 7, Qt.GlobalColor.white)
+            painter.fillRect(0, 7, 20, 7, Qt.GlobalColor.red)
+        elif country_code == "cz":
+            painter.fillRect(0, 0, 20, 7, Qt.GlobalColor.white)
+            painter.fillRect(0, 7, 20, 7, Qt.GlobalColor.red)
+            painter.fillRect(0, 0, 8, 14, Qt.GlobalColor.blue)
+        elif country_code == "ca":
+            painter.fillRect(0, 0, 20, 14, Qt.GlobalColor.yellow)
+            painter.fillRect(0, 2, 20, 2, Qt.GlobalColor.red)
+            painter.fillRect(0, 5, 20, 2, Qt.GlobalColor.red)
+            painter.fillRect(0, 8, 20, 2, Qt.GlobalColor.red)
+            painter.fillRect(0, 11, 20, 2, Qt.GlobalColor.red)
+        elif country_code == "by":
+            painter.fillRect(0, 0, 20, 10, Qt.GlobalColor.red)
+            painter.fillRect(0, 10, 20, 4, Qt.GlobalColor.green)
+            painter.fillRect(0, 0, 3, 14, Qt.GlobalColor.white)
+        elif country_code == "es":
+            painter.fillRect(0, 0, 20, 4, Qt.GlobalColor.red)
+            painter.fillRect(0, 4, 20, 6, Qt.GlobalColor.yellow)
+            painter.fillRect(0, 10, 20, 4, Qt.GlobalColor.red)
         else:
             painter.fillRect(0, 0, 20, 14, Qt.GlobalColor.lightGray)
 

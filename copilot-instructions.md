@@ -42,11 +42,12 @@ Key sections:
 | `default_tts_backend` | Edge TTS |
 | `wake_command_seconds` | `6.0` |
 
-## Supported Languages (15)
+## Supported Languages (21)
 
 Auto, English, German, Swedish, Finnish, Russian, Italian,
 Dutch, Norwegian, Danish, Romanian, Latvian, Lithuanian,
-Japanese, Chinese, Hungarian
+Japanese, Chinese, Hungarian, Polish, Czech, Catalan,
+Belarusian, Spanish
 
 ## User Preferences
 
