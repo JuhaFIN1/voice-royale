@@ -7,3 +7,5 @@ keyboard
 openai
 pyttsx3
 edge-tts
+pvporcupine
+scipy

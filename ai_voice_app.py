@@ -2019,12 +2019,23 @@ def open_settings_dialog(parent_app: "App") -> None:
 
     # Wake keyword (built-in Porcupine list) + custom .ppn path
     builtin_keywords = sorted(pvporcupine.KEYWORDS) if PORCUPINE_AVAILABLE else []
-    keyword_combo = _QComboBox()
-    for kw in builtin_keywords:
-        keyword_combo.addItem(kw)
-    if settings.get("wake_keyword") in builtin_keywords:
-        keyword_combo.setCurrentText(settings["wake_keyword"])
-    form.addRow("Wake keyword (built-in):", keyword_combo)
+    if PORCUPINE_AVAILABLE:
+        keyword_combo = _QComboBox()
+        for kw in builtin_keywords:
+            keyword_combo.addItem(kw)
+        if settings.get("wake_keyword") in builtin_keywords:
+            keyword_combo.setCurrentText(settings["wake_keyword"])
+        keyword_widget = keyword_combo
+        def _get_keyword():
+            return keyword_combo.currentText()
+        form.addRow("Wake keyword (built-in):", keyword_widget)
+    else:
+        keyword_edit = QLineEdit(settings.get("wake_keyword", "jarvis"))
+        keyword_edit.setPlaceholderText("e.g. jarvis  (Whisper mode — any word works)")
+        keyword_widget = keyword_edit
+        def _get_keyword():
+            return keyword_edit.text().strip().lower() or "jarvis"
+        form.addRow("Wake keyword (Whisper):", keyword_widget)
 
     custom_row = _QHBoxLayout()
     custom_path_edit = QLineEdit(settings.get("wake_custom_ppn_path", ""))
@@ -2082,7 +2093,7 @@ def open_settings_dialog(parent_app: "App") -> None:
 
     if dlg.exec() == QDialog.DialogCode.Accepted:
         new_settings = {
-            "wake_keyword": keyword_combo.currentText(),
+            "wake_keyword": _get_keyword(),
             "wake_custom_ppn_path": custom_path_edit.text().strip(),
             "picovoice_access_key": access_key_edit.text().strip(),
             "hotkey": hotkey_edit.text().strip() or "ctrl+alt+space",
