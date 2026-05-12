@@ -36,6 +36,7 @@ install_deps()
 # =========================
 import io
 import json
+import math
 import threading
 import time
 import traceback
@@ -53,6 +54,7 @@ from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QFrame,
     QLabel,
@@ -60,12 +62,53 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
     QHBoxLayout,
 )
+
+# =========================
+# UI STYLE CONSTANTS
+# =========================
+METER_LABEL_STYLE = "color: #aab; font-size: 11px; font-weight: bold;"
+METER_STYLE_MIC = (
+    "QProgressBar { background: #111620; border: 1px solid #3b4a6b; border-radius: 3px; }"
+    "QProgressBar::chunk { background: qlineargradient(x1:0, x2:1,"
+    " stop:0 #22cc44, stop:0.55 #cccc22, stop:1 #cc2222); border-radius: 2px; }"
+)
+METER_STYLE_OUT = (
+    "QProgressBar { background: #111620; border: 1px solid #3b4a6b; border-radius: 3px; }"
+    "QProgressBar::chunk { background: qlineargradient(x1:0, x2:1,"
+    " stop:0 #2266ff, stop:0.55 #aa44cc, stop:1 #cc2222); border-radius: 2px; }"
+)
+LIST_STYLE = """
+    QListWidget {
+        background: #171c2d;
+        border: 1px solid #3b4a6b;
+        border-radius: 6px;
+        font-family: "Segoe UI", sans-serif;
+        font-weight: bold;
+    }
+    QListWidget::item {
+        background: #2a3441;
+        border: 1px solid #3b4a6b;
+        border-radius: 4px;
+        margin: 2px;
+        padding: 4px;
+        color: #ffffff;
+    }
+    QListWidget::item:hover {
+        background: #3b4a6b;
+        border: 1px solid #4f5f7f;
+    }
+    QListWidget::item:selected {
+        background: #50648f;
+        border: 1px solid #6b7fa0;
+    }
+"""
 
 # =========================
 # CONFIG
@@ -102,6 +145,15 @@ LANGS = {
     "Finnish": "Finnish",
     "Russian": "Russian",
     "Italian": "Italian",
+    "Dutch": "Dutch",
+    "Norwegian": "Norwegian",
+    "Danish": "Danish",
+    "Romanian": "Romanian",
+    "Latvian": "Latvian",
+    "Lithuanian": "Lithuanian",
+    "Japanese": "Japanese",
+    "Chinese": "Chinese",
+    "Hungarian": "Hungarian",
 }
 
 LANG_FLAG_CODES = {
@@ -111,6 +163,15 @@ LANG_FLAG_CODES = {
     "Finnish": "fi",
     "Russian": "ru",
     "Italian": "it",
+    "Dutch": "nl",
+    "Norwegian": "no",
+    "Danish": "dk",
+    "Romanian": "ro",
+    "Latvian": "lv",
+    "Lithuanian": "lt",
+    "Japanese": "jp",
+    "Chinese": "cn",
+    "Hungarian": "hu",
 }
 
 # Edge TTS voices mapping
@@ -121,7 +182,105 @@ EDGE_VOICES = {
     "Finnish": "fi-FI-NooraNeural",
     "Russian": "ru-RU-SvetlanaNeural",
     "Italian": "it-IT-ElsaNeural",
+    "Dutch": "nl-NL-ColetteNeural",
+    "Norwegian": "nb-NO-PernilleNeural",
+    "Danish": "da-DK-ChristelNeural",
+    "Romanian": "ro-RO-AlinaNeural",
+    "Latvian": "lv-LV-EveritaNeural",
+    "Lithuanian": "lt-LT-OnaNeural",
+    "Japanese": "ja-JP-NanamiNeural",
+    "Chinese": "zh-CN-XiaoxiaoNeural",
+    "Hungarian": "hu-HU-NoemiNeural",
 }
+
+# =========================
+# APP SETTINGS (separate from credentials/history)
+# =========================
+SETTINGS_FILE = os.path.join(BASE_PATH, "app_settings.json")
+
+DEFAULT_SETTINGS = {
+    "wake_keyword": "jarvis",
+    "wake_custom_ppn_path": "",
+    "picovoice_access_key": os.getenv("PICOVOICE_ACCESS_KEY", ""),
+    "hotkey": "ctrl+alt+space",
+    "default_target_lang": "Auto",
+    "default_tts_backend": DEFAULT_TTS_BACKEND,
+    "wake_command_seconds": 6.0,
+}
+
+
+def load_settings() -> dict:
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            merged = {**DEFAULT_SETTINGS, **data}
+            return merged
+    except Exception:
+        pass
+    return dict(DEFAULT_SETTINGS)
+
+
+def save_settings(settings: dict) -> None:
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[DEBUG] Failed to save settings: {e}")
+
+
+# =========================
+# OPTIONAL: Picovoice Porcupine wake-word
+# =========================
+try:
+    import pvporcupine  # type: ignore
+    PORCUPINE_AVAILABLE = True
+except Exception:
+    pvporcupine = None
+    PORCUPINE_AVAILABLE = False
+
+
+# =========================
+# VOICE COMMAND PARSER (uses OpenAI to detect target language + translate)
+# =========================
+def parse_voice_command(transcript: str, default_lang: str) -> tuple[str, str]:
+    """Parse a voice command transcript and return (target_language, translated_text).
+
+    The user may say things like "translate to German, hello how are you" or
+    "saksaksi mitä kuuluu" — GPT extracts the target language and translates the rest.
+    If no language is specified, falls back to default_lang.
+    """
+    supported = ", ".join(k for k in LANGS.keys() if k != "Auto")
+    prompt = (
+        "You are a voice command parser for a translator app.\n"
+        f"Supported target languages: {supported}.\n"
+        f"Default target language (when not specified): {default_lang}.\n\n"
+        "Input: a transcribed voice command that may begin with a target-language hint "
+        "(in any language, e.g. 'translate to German', 'in German', 'saksaksi', 'auf Deutsch'). "
+        "Detect the target language, strip the language hint, and translate the remaining "
+        "message text into that target language.\n\n"
+        "Respond with ONLY a JSON object: {\"language\": \"<lang>\", \"translated\": \"<translation>\"}.\n"
+        "No code fences, no extra prose.\n\n"
+        f"Input: {transcript}"
+    )
+    response = client.responses.create(model="gpt-4.1-mini", input=prompt)
+    text = (getattr(response, "output_text", None) or "").strip()
+    # Strip code fences if model added them anyway
+    if text.startswith("```"):
+        text = text.strip("`")
+        # remove possible leading "json"
+        if text.lower().startswith("json"):
+            text = text[4:].lstrip()
+    try:
+        data = json.loads(text)
+        lang = data.get("language", default_lang)
+        translated = data.get("translated", "")
+        if lang not in LANGS or lang == "Auto":
+            lang = default_lang if default_lang in LANGS else "English"
+        return lang, translated.strip()
+    except Exception:
+        return default_lang, text  # fallback: treat raw as translation
+
 
 # =========================
 # AUDIO DEVICE HELPERS
@@ -443,8 +602,26 @@ def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None):
                 device_info = sd.query_devices(device_index)
                 if device_info['max_output_channels'] == 0:
                     return
-                sd.play(audio_data, samplerate=samplerate, device=device_index)
-                sd.wait()
+                try:
+                    sd.play(audio_data, samplerate=samplerate, device=device_index)
+                    sd.wait()
+                except Exception as first_err:
+                    # Fallback: resample to the device's preferred rate
+                    target_sr = int(device_info.get('default_samplerate') or 48000)
+                    if target_sr == samplerate:
+                        raise
+                    import scipy.signal
+                    float_audio = audio_data.astype(np.float32)
+                    if float_audio.ndim == 1:
+                        new_len = int(len(float_audio) * target_sr / samplerate)
+                        resampled = scipy.signal.resample(float_audio, new_len)
+                    else:
+                        new_len = int(float_audio.shape[0] * target_sr / samplerate)
+                        resampled = scipy.signal.resample(float_audio, new_len, axis=0)
+                    resampled_int16 = np.clip(resampled, -32768, 32767).astype(np.int16)
+                    print(f"[DEBUG] Resampled {samplerate}->{target_sr} Hz for device {device_index}")
+                    sd.play(resampled_int16, samplerate=target_sr, device=device_index)
+                    sd.wait()
             except Exception as e:
                 print(f"Warning: Failed to play to device {device_index}: {e}")
 
@@ -460,6 +637,148 @@ def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None):
 
     except Exception as e:
         raise RuntimeError(f"Audio playback failed: {e}") from e
+
+
+# =========================
+# WAKE-WORD LISTENER (Picovoice Porcupine with Whisper fallback)
+# =========================
+class WakeListener:
+    """Background wake-word detector. Uses Porcupine if available, otherwise Whisper VAD."""
+
+    def __init__(self, on_wake_callback, on_status_callback):
+        self.on_wake = on_wake_callback
+        self.on_status = on_status_callback
+        self._thread = None
+        self._stop_flag = threading.Event()
+        self._porcupine = None
+        self._device_index = None
+        self._mode = None
+        self._keyword = "jarvis"
+
+    def is_running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self, access_key: str, keyword: str, custom_ppn_path: str, device_index):
+        self._keyword = keyword.lower()
+        self._device_index = device_index
+
+        # Try Picovoice Porcupine first
+        if PORCUPINE_AVAILABLE and access_key:
+            try:
+                if custom_ppn_path and os.path.exists(custom_ppn_path):
+                    self._porcupine = pvporcupine.create(
+                        access_key=access_key, keyword_paths=[custom_ppn_path]
+                    )
+                else:
+                    self._porcupine = pvporcupine.create(
+                        access_key=access_key, keywords=[keyword]
+                    )
+                self._mode = "porcupine"
+            except Exception as e:
+                self.on_status(f"Porcupine init failed ({e}) — switching to Whisper mode")
+                self._porcupine = None
+                self._mode = "whisper"
+        else:
+            if not PORCUPINE_AVAILABLE:
+                self.on_status("pvporcupine not installed — using Whisper wake-word mode")
+            else:
+                self.on_status("No Picovoice key — using Whisper wake-word mode (add key in Settings for better efficiency)")
+            self._mode = "whisper"
+
+        self._stop_flag.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return True
+
+    def stop(self):
+        self._stop_flag.set()
+        if self._thread is not None:
+            self._thread.join(timeout=3.0)
+        self._thread = None
+        if self._porcupine is not None:
+            try:
+                self._porcupine.delete()
+            except Exception:
+                pass
+            self._porcupine = None
+        self._mode = None
+
+    def _run(self):
+        if self._mode == "porcupine":
+            self._run_porcupine()
+        else:
+            self._run_whisper()
+
+    def _run_porcupine(self):
+        sample_rate = self._porcupine.sample_rate
+        frame_length = self._porcupine.frame_length
+        try:
+            with sd.InputStream(
+                device=self._device_index,
+                channels=1,
+                samplerate=sample_rate,
+                blocksize=frame_length,
+                dtype="int16",
+            ) as stream:
+                self.on_status(f"👂 Porcupine listening (sr={sample_rate})")
+                while not self._stop_flag.is_set():
+                    data, _overflow = stream.read(frame_length)
+                    pcm = data[:, 0] if data.ndim > 1 else data
+                    result = self._porcupine.process(pcm.tolist())
+                    if result >= 0:
+                        self.on_status("✨ Wake-word detected!")
+                        self.on_wake()
+                        time.sleep(0.3)
+        except Exception as e:
+            self.on_status(f"Wake listener stopped: {e}")
+
+    def _run_whisper(self):
+        """Records 2.5s chunks, transcribes with Whisper, checks for wake keyword."""
+        sample_rate = 16000
+        chunk_duration = 2.5
+        silence_threshold = 0.008  # RMS below this = silence, skip
+
+        self.on_status(f"👂 Whisper mode listening for: '{self._keyword}'")
+
+        while not self._stop_flag.is_set():
+            try:
+                frames = int(chunk_duration * sample_rate)
+                recording = sd.rec(
+                    frames, samplerate=sample_rate, channels=1,
+                    dtype="float32", device=self._device_index
+                )
+                sd.wait()
+
+                if self._stop_flag.is_set():
+                    break
+
+                audio = recording.flatten()
+                rms = float(np.sqrt(np.mean(audio ** 2)))
+                if rms < silence_threshold:
+                    continue  # Silent chunk — skip transcription to save API cost
+
+                audio_int16 = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
+                wav_buf = io.BytesIO()
+                with wave.open(wav_buf, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(sample_rate)
+                    wf.writeframes(audio_int16.tobytes())
+                wav_bytes = wav_buf.getvalue()
+
+                try:
+                    transcript = transcribe_audio_wav(wav_bytes)
+                    if transcript and self._keyword in transcript.lower():
+                        self.on_status(f"✨ Wake-word '{self._keyword}' detected!")
+                        self.on_wake()
+                        time.sleep(1.0)
+                except Exception:
+                    pass
+
+            except Exception as e:
+                if not self._stop_flag.is_set():
+                    self.on_status(f"Wake listener error: {e}")
+                    time.sleep(1.0)
 
 
 # =========================
@@ -502,6 +821,42 @@ class App(QWidget):
             painter.fillRect(0, 0, 7, 14, Qt.GlobalColor.green)
             painter.fillRect(7, 0, 6, 14, Qt.GlobalColor.white)
             painter.fillRect(13, 0, 7, 14, Qt.GlobalColor.red)
+        elif country_code == "nl":
+            painter.fillRect(0, 0, 20, 5, Qt.GlobalColor.red)
+            painter.fillRect(0, 5, 20, 4, Qt.GlobalColor.white)
+            painter.fillRect(0, 9, 20, 5, Qt.GlobalColor.blue)
+        elif country_code == "no":
+            painter.fillRect(0, 0, 20, 14, Qt.GlobalColor.red)
+            painter.fillRect(4, 0, 4, 14, Qt.GlobalColor.white)
+            painter.fillRect(0, 5, 20, 4, Qt.GlobalColor.white)
+            painter.fillRect(5, 0, 2, 14, Qt.GlobalColor.blue)
+            painter.fillRect(0, 6, 20, 2, Qt.GlobalColor.blue)
+        elif country_code == "dk":
+            painter.fillRect(0, 0, 20, 14, Qt.GlobalColor.red)
+            painter.fillRect(5, 0, 3, 14, Qt.GlobalColor.white)
+            painter.fillRect(0, 5, 20, 4, Qt.GlobalColor.white)
+        elif country_code == "ro":
+            painter.fillRect(0, 0, 7, 14, Qt.GlobalColor.blue)
+            painter.fillRect(7, 0, 6, 14, Qt.GlobalColor.yellow)
+            painter.fillRect(13, 0, 7, 14, Qt.GlobalColor.red)
+        elif country_code == "lv":
+            painter.fillRect(0, 0, 20, 5, Qt.GlobalColor.darkRed)
+            painter.fillRect(0, 5, 20, 4, Qt.GlobalColor.white)
+            painter.fillRect(0, 9, 20, 5, Qt.GlobalColor.darkRed)
+        elif country_code == "lt":
+            painter.fillRect(0, 0, 20, 5, Qt.GlobalColor.yellow)
+            painter.fillRect(0, 5, 20, 4, Qt.GlobalColor.green)
+            painter.fillRect(0, 9, 20, 5, Qt.GlobalColor.red)
+        elif country_code == "jp":
+            painter.fillRect(0, 0, 20, 14, Qt.GlobalColor.white)
+            painter.fillRect(7, 3, 6, 8, Qt.GlobalColor.red)
+        elif country_code == "cn":
+            painter.fillRect(0, 0, 20, 14, Qt.GlobalColor.red)
+            painter.fillRect(2, 2, 4, 4, Qt.GlobalColor.yellow)
+        elif country_code == "hu":
+            painter.fillRect(0, 0, 20, 5, Qt.GlobalColor.red)
+            painter.fillRect(0, 5, 20, 4, Qt.GlobalColor.white)
+            painter.fillRect(0, 9, 20, 5, Qt.GlobalColor.green)
         else:
             painter.fillRect(0, 0, 20, 14, Qt.GlobalColor.lightGray)
 
@@ -517,242 +872,59 @@ class App(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AI Voice Router")
-        self.setGeometry(200, 200, 900, 560)
+        self.setGeometry(200, 200, 1100, 720)
         self.setStyleSheet(
             "QWidget { background: #1a1f2b; color: #f5f5f5; }"
             "QLabel { font-size: 13px; }"
-            "QPushButton { background: #3b4a6b; border: 1px solid #4f5f7f; padding: 10px; border-radius: 6px; }"
+            "QPushButton { background: #3b4a6b; border: 1px solid #4f5f7f; padding: 8px 12px; border-radius: 6px; }"
             "QPushButton:hover { background: #50648f; }"
             "QPushButton:disabled { background: #2d3346; color: #777777; }"
-            "QComboBox, QTextEdit { background: #252c40; border: 1px solid #3b4a6b; color: #f5f5f5; }"
+            "QComboBox, QTextEdit { background: #252c40; border: 1px solid #3b4a6b; color: #f5f5f5; padding: 4px; border-radius: 4px; }"
             "QListWidget { background: #171c2d; border: 1px solid #3b4a6b; }"
+            "QCheckBox { color: #ddd; }"
+            "QCheckBox::indicator { width: 16px; height: 16px; }"
+            "QCheckBox::indicator:unchecked { background: #252c40; border: 1px solid #3b4a6b; border-radius: 3px; }"
+            "QCheckBox::indicator:checked { background: #50a050; border: 1px solid #6bbf6b; border-radius: 3px; }"
         )
 
-        main_layout = QHBoxLayout()
-        left_panel = QVBoxLayout()
-        right_panel = QVBoxLayout()
-
-        self.status_text = QTextEdit()
-        self.status_text.setReadOnly(True)
-        self.status_text.setPlainText("Ready. Enter text, select language, then press Speak or use Ctrl+Alt+Space.\nUse Test Audio to verify your output device.")
-        self.status_text.setMinimumHeight(80)
-        self.status_text.setMaximumHeight(120)
-        self.status_text.setStyleSheet("font-weight: bold; color: #dcdcdc; background: #1a1f2b; border: 1px solid #3b4a6b;")
-        left_panel.addWidget(self.status_text)
-
-        self.translated_label = QLabel("Translated text will appear here.")
-        self.translated_label.setWordWrap(True)
-        self.translated_label.setMinimumHeight(40)
-        self.translated_label.setStyleSheet("color: #b0b0b0;")
-        left_panel.addWidget(self.translated_label)
-
-        self.textbox = QTextEdit()
-        self.textbox.setPlaceholderText("Type the phrase to speak...\nOr press Record & Speak to use voice input.")
-        self.textbox.setMinimumHeight(180)
-        left_panel.addWidget(self.textbox)
-
+        # Build language icons (used by langbox AND history list)
         self.lang_icons = self.build_language_icons()
-        self.langbox = QComboBox()
-        for lang in LANGS.keys():
-            icon = self.lang_icons.get(lang)
-            if icon:
-                self.langbox.addItem(icon, lang)
-            else:
-                self.langbox.addItem(lang)
-        left_panel.addWidget(QLabel("Target language:"))
-        left_panel.addWidget(self.langbox)
 
-        self.backend_combo = QComboBox()
-        backend_items = ["ElevenLabs", "Edge TTS (free)"]
-        for backend in backend_items:
-            self.backend_combo.addItem(backend)
-        self.backend_combo.setCurrentText(DEFAULT_TTS_BACKEND)
-        left_panel.addWidget(QLabel("TTS backend:"))
-        left_panel.addWidget(self.backend_combo)
+        # Load app settings (wake-word, hotkey, defaults...)
+        self.settings = load_settings()
 
-        self.device_list = QListWidget()
-        self.device_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
-        self.device_list.setMaximumHeight(200)
-        self.device_list.setStyleSheet("""
-            QListWidget {
-                background: #252c40;
-                border: 1px solid #3b4a6b;
-                border-radius: 4px;
-            }
-            QListWidget::item {
-                background: #2a3441;
-                border: 1px solid #3b4a6b;
-                border-radius: 2px;
-                margin: 1px;
-                padding: 2px;
-            }
-            QListWidget::item:selected {
-                background: #50648f;
-                border: 1px solid #6b7fa0;
-            }
-        """)
-        left_panel.addWidget(QLabel("Audio output devices (select multiple):"))
-        left_panel.addWidget(self.device_list)
-        self.device_list.itemSelectionChanged.connect(self.on_output_device_changed)
+        # Per-device row widgets — keyed by device index
+        # Each entry: {"checkbox", "name_label", "meter", "db_label", "container", "full_name"}
+        self._device_widgets = {}
 
-        device_button_layout = QHBoxLayout()
-        self.refresh_devices_button = QPushButton("🔄 Refresh Devices")
-        self.refresh_devices_button.clicked.connect(self.refresh_all_devices)
-        device_button_layout.addWidget(self.refresh_devices_button)
-        device_button_layout.addStretch()
-        left_panel.addLayout(device_button_layout)
-
-        self.input_device_combo = QComboBox()
-        left_panel.addWidget(QLabel("Audio input device (microphone):"))
-        left_panel.addWidget(self.input_device_combo)
-        self.input_device_combo.currentIndexChanged.connect(self.on_input_device_changed)
-
-        button_layout = QHBoxLayout()
-        self.speak_button = QPushButton("Speak")
-        self.speak_button.clicked.connect(self.on_speak)
-        button_layout.addWidget(self.speak_button)
-
-        self.record_button = QPushButton("🎤 Record")
-        self.record_button.clicked.connect(self.on_record_toggle)
-        button_layout.addWidget(self.record_button)
-
-        self.test_audio_button = QPushButton("🔊 Test Audio")
-        self.test_audio_button.clicked.connect(self.on_test_audio)
-        button_layout.addWidget(self.test_audio_button)
-
-        self.device_info_button = QPushButton("ℹ️ Device Info")
-        self.device_info_button.clicked.connect(self.on_device_info)
-        button_layout.addWidget(self.device_info_button)
-        left_panel.addLayout(button_layout)
-
-        self.favorite_button = QPushButton("⭐ Add Favorite")
-        self.favorite_button.clicked.connect(self.toggle_favorite)
-        left_panel.addWidget(self.favorite_button)
-
-        self.hotkey_label = QLabel("Global hotkey: Ctrl+Alt+Space")
-        self.hotkey_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hotkey_label.setStyleSheet("color: #99a6c8; margin-top: 12px;")
-        left_panel.addWidget(self.hotkey_label)
-
-        _meter_style_mic = (
-            "QProgressBar { background: #111620; border: 1px solid #3b4a6b; border-radius: 3px; }"
-            "QProgressBar::chunk { background: qlineargradient(x1:0, x2:1,"
-            " stop:0 #22cc44, stop:0.55 #cccc22, stop:1 #cc2222); border-radius: 2px; }"
+        # Wake listener (created later; status callback uses sig_status)
+        self._registered_hotkey = None
+        self.wake_listener = WakeListener(
+            on_wake_callback=self._on_wake_detected,
+            on_status_callback=self.append_status,
         )
-        _meter_style_out = (
-            "QProgressBar { background: #111620; border: 1px solid #3b4a6b; border-radius: 3px; }"
-            "QProgressBar::chunk { background: qlineargradient(x1:0, x2:1,"
-            " stop:0 #2266ff, stop:0.55 #aa44cc, stop:1 #cc2222); border-radius: 2px; }"
-        )
-        _label_style = "color: #778; font-size: 10px; min-width: 32px;"
 
-        mic_row = QHBoxLayout()
-        mic_lbl = QLabel("MIC")
-        mic_lbl.setStyleSheet(_label_style)
-        self.mic_level_bar = QProgressBar()
-        self.mic_level_bar.setRange(0, 1000)
-        self.mic_level_bar.setValue(0)
-        self.mic_level_bar.setTextVisible(False)
-        self.mic_level_bar.setFixedHeight(12)
-        self.mic_level_bar.setStyleSheet(_meter_style_mic)
-        mic_row.addWidget(mic_lbl)
-        mic_row.addWidget(self.mic_level_bar)
-        left_panel.addLayout(mic_row)
+        # ============ Top row: Speech card (left) + History card (right) ============
+        top_row = QHBoxLayout()
+        top_row.addWidget(self._build_speech_card(), 2)
+        top_row.addWidget(self._build_history_card(), 1)
 
-        out_row = QHBoxLayout()
-        out_lbl = QLabel("OUT")
-        out_lbl.setStyleSheet(_label_style)
-        self.output_level_bar = QProgressBar()
-        self.output_level_bar.setRange(0, 1000)
-        self.output_level_bar.setValue(0)
-        self.output_level_bar.setTextVisible(False)
-        self.output_level_bar.setFixedHeight(12)
-        self.output_level_bar.setStyleSheet(_meter_style_out)
-        out_row.addWidget(out_lbl)
-        out_row.addWidget(self.output_level_bar)
-        left_panel.addLayout(out_row)
+        # ============ Bottom: Outputs & Levels card ============
+        outputs_card = self._build_outputs_card()
+
+        # ============ Root layout ============
+        root = QVBoxLayout()
+        root.setContentsMargins(8, 8, 8, 8)
+        root.addLayout(top_row, 1)
+        root.addWidget(outputs_card)
+        self.setLayout(root)
 
         # Wire signals — safe cross-thread UI updates
-        self.sig_mic_level.connect(self.mic_level_bar.setValue)
-        self.sig_out_level.connect(self.output_level_bar.setValue)
+        self.sig_mic_level.connect(self._update_mic_meter)
+        self.sig_out_level.connect(self._update_output_meters)
         self.sig_status.connect(self._on_status)
 
-        main_layout.addLayout(left_panel, 2)
-
-        history_frame = QFrame()
-        history_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        history_frame.setStyleSheet("background: #151a28; border: 1px solid #2f3c5a; border-radius: 8px;")
-        right_layout = QVBoxLayout(history_frame)
-        right_layout.addWidget(QLabel("History (last 10)"))
-        self.history_list = QListWidget()
-        self.history_list.itemClicked.connect(self.on_history_item_selected)
-        self.history_list.setMinimumHeight(200)
-        self.history_list.setStyleSheet("""
-            QListWidget {
-                background: #171c2d;
-                border: 1px solid #3b4a6b;
-                border-radius: 6px;
-                font-family: "Segoe UI", sans-serif;
-                font-weight: bold;
-            }
-            QListWidget::item {
-                background: #2a3441;
-                border: 1px solid #3b4a6b;
-                border-radius: 4px;
-                margin: 2px;
-                padding: 4px;
-                font-family: "Segoe UI", sans-serif;
-                font-weight: bold;
-                color: #ffffff;
-            }
-            QListWidget::item:hover {
-                background: #3b4a6b;
-                border: 1px solid #4f5f7f;
-            }
-            QListWidget::item:selected {
-                background: #50648f;
-                border: 1px solid #6b7fa0;
-            }
-        """)
-        right_layout.addWidget(self.history_list)
-
-        right_layout.addWidget(QLabel("Favorites"))
-        self.favorites_list = QListWidget()
-        self.favorites_list.itemClicked.connect(self.on_history_item_selected)
-        self.favorites_list.setMinimumHeight(200)
-        self.favorites_list.setStyleSheet("""
-            QListWidget {
-                background: #171c2d;
-                border: 1px solid #3b4a6b;
-                border-radius: 6px;
-                font-family: "Segoe UI", sans-serif;
-                font-weight: bold;
-            }
-            QListWidget::item {
-                background: #2a3441;
-                border: 1px solid #3b4a6b;
-                border-radius: 4px;
-                margin: 2px;
-                padding: 4px;
-                font-family: "Segoe UI", sans-serif;
-                font-weight: bold;
-                color: #ffffff;
-            }
-            QListWidget::item:hover {
-                background: #3b4a6b;
-                border: 1px solid #4f5f7f;
-            }
-            QListWidget::item:selected {
-                background: #50648f;
-                border: 1px solid #6b7fa0;
-            }
-        """)
-        right_layout.addWidget(self.favorites_list)
-
-        main_layout.addWidget(history_frame, 1)
-
-        self.setLayout(main_layout)
-
+        # Load data + populate devices
         self.history_data = load_history_data()
         self.history = self.history_data.get("history", [])
         self.favorites = self.history_data.get("favorites", [])
@@ -771,6 +943,288 @@ class App(QWidget):
         self._mic_timer = QTimer(self)
         self._mic_timer.setInterval(40)
         self._mic_timer.timeout.connect(self._tick_mic_meter)
+
+    # ============ Card builders ============
+
+    def _make_card(self, title: str) -> tuple[QFrame, QVBoxLayout]:
+        frame = QFrame()
+        frame.setFrameShape(QFrame.Shape.StyledPanel)
+        frame.setStyleSheet(
+            "QFrame { background: #1a1f2b; border: 1px solid #2f3c5a; border-radius: 8px; }"
+        )
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(10, 8, 10, 10)
+        if title:
+            title_lbl = QLabel(title)
+            title_lbl.setStyleSheet("font-weight: bold; font-size: 14px; color: #cce; border: none;")
+            layout.addWidget(title_lbl)
+        return frame, layout
+
+    def _build_speech_card(self) -> QWidget:
+        frame, layout = self._make_card("Speech")
+
+        self.status_text = QTextEdit()
+        self.status_text.setReadOnly(True)
+        self.status_text.setPlainText("Ready. Type or record. Hotkey: Ctrl+Alt+Space")
+        self.status_text.setMinimumHeight(60)
+        self.status_text.setMaximumHeight(90)
+        self.status_text.setStyleSheet(
+            "font-weight: bold; color: #dcdcdc; background: #151a28;"
+            "border: 1px solid #2f3c5a; border-radius: 4px; padding: 4px;"
+        )
+        layout.addWidget(self.status_text)
+
+        # Target lang + TTS backend
+        options_row = QHBoxLayout()
+        options_row.addWidget(QLabel("Target:"))
+        self.langbox = QComboBox()
+        for lang in LANGS.keys():
+            icon = self.lang_icons.get(lang)
+            if icon:
+                self.langbox.addItem(icon, lang)
+            else:
+                self.langbox.addItem(lang)
+        default_lang = self.settings.get("default_target_lang", "Auto")
+        if self.langbox.findText(default_lang) >= 0:
+            self.langbox.setCurrentText(default_lang)
+        options_row.addWidget(self.langbox, 1)
+        options_row.addSpacing(12)
+        options_row.addWidget(QLabel("TTS:"))
+        self.backend_combo = QComboBox()
+        for backend in ("ElevenLabs", "Edge TTS (free)"):
+            self.backend_combo.addItem(backend)
+        self.backend_combo.setCurrentText(self.settings.get("default_tts_backend", DEFAULT_TTS_BACKEND))
+        options_row.addWidget(self.backend_combo, 1)
+        layout.addLayout(options_row)
+
+        self.translated_label = QLabel("Translated text will appear here.")
+        self.translated_label.setWordWrap(True)
+        self.translated_label.setMinimumHeight(40)
+        self.translated_label.setStyleSheet(
+            "color: #9ec0ff; padding: 8px; background: #151a28;"
+            "border: 1px solid #2f3c5a; border-radius: 4px;"
+        )
+        layout.addWidget(self.translated_label)
+
+        self.textbox = QTextEdit()
+        self.textbox.setPlaceholderText("Type the phrase to speak...\nOr press Record to use voice input.")
+        self.textbox.setMinimumHeight(140)
+        layout.addWidget(self.textbox, 1)
+
+        # Buttons
+        button_row = QHBoxLayout()
+        self.speak_button = QPushButton("🔊 Speak")
+        self.speak_button.clicked.connect(self.on_speak)
+        button_row.addWidget(self.speak_button)
+
+        self.record_button = QPushButton("🎤 Record")
+        self.record_button.clicked.connect(self.on_record_toggle)
+        button_row.addWidget(self.record_button)
+
+        self.test_audio_button = QPushButton("🧪 Test")
+        self.test_audio_button.clicked.connect(self.on_test_audio)
+        button_row.addWidget(self.test_audio_button)
+
+        self.favorite_button = QPushButton("⭐ Favorite")
+        self.favorite_button.clicked.connect(self.toggle_favorite)
+        button_row.addWidget(self.favorite_button)
+        layout.addLayout(button_row)
+
+        # Wake-word + settings row
+        ws_row = QHBoxLayout()
+        self.listen_button = QPushButton("👂 Start Listening")
+        self.listen_button.setCheckable(True)
+        self.listen_button.clicked.connect(self.toggle_wake_listener)
+        ws_row.addWidget(self.listen_button)
+
+        self.wake_status_label = QLabel("Wake-word listener: off")
+        self.wake_status_label.setStyleSheet("color: #99a6c8; font-size: 11px; border: none;")
+        ws_row.addWidget(self.wake_status_label, 1)
+
+        self.settings_button = QPushButton("⚙️ Settings")
+        self.settings_button.clicked.connect(lambda: open_settings_dialog(self))
+        ws_row.addWidget(self.settings_button)
+        layout.addLayout(ws_row)
+
+        # MIC meter row (inside speech card, as in chosen preview)
+        mic_row = QHBoxLayout()
+        mic_lbl = QLabel("MIC")
+        mic_lbl.setStyleSheet(METER_LABEL_STYLE)
+        mic_lbl.setMinimumWidth(60)
+        self.mic_level_bar = QProgressBar()
+        self.mic_level_bar.setRange(0, 1000)
+        self.mic_level_bar.setValue(0)
+        self.mic_level_bar.setTextVisible(False)
+        self.mic_level_bar.setFixedHeight(12)
+        self.mic_level_bar.setStyleSheet(METER_STYLE_MIC)
+        self.mic_db_label = QLabel("-∞ dB")
+        self.mic_db_label.setStyleSheet("color: #99a; font-family: 'Consolas', monospace; font-size: 11px;")
+        self.mic_db_label.setMinimumWidth(64)
+        self.mic_db_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        mic_row.addWidget(mic_lbl)
+        mic_row.addWidget(self.mic_level_bar, 1)
+        mic_row.addWidget(self.mic_db_label)
+        layout.addLayout(mic_row)
+
+        self.hotkey_label = QLabel(f"Global hotkey: {self.settings.get('hotkey', 'ctrl+alt+space')}")
+        self.hotkey_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hotkey_label.setStyleSheet("color: #99a6c8; font-size: 11px; margin-top: 4px;")
+        layout.addWidget(self.hotkey_label)
+
+        return frame
+
+    def _build_history_card(self) -> QWidget:
+        frame, layout = self._make_card("History (last 10)")
+
+        self.history_list = QListWidget()
+        self.history_list.itemClicked.connect(self.on_history_item_selected)
+        self.history_list.setMinimumHeight(180)
+        self.history_list.setStyleSheet(LIST_STYLE)
+        layout.addWidget(self.history_list, 1)
+
+        fav_title = QLabel("Favorites")
+        fav_title.setStyleSheet("font-weight: bold; font-size: 14px; color: #cce; border: none; margin-top: 6px;")
+        layout.addWidget(fav_title)
+
+        self.favorites_list = QListWidget()
+        self.favorites_list.itemClicked.connect(self.on_history_item_selected)
+        self.favorites_list.setMinimumHeight(180)
+        self.favorites_list.setStyleSheet(LIST_STYLE)
+        layout.addWidget(self.favorites_list, 1)
+
+        return frame
+
+    def _build_outputs_card(self) -> QWidget:
+        frame, layout = self._make_card("")
+
+        # Header row: title + action buttons
+        header = QHBoxLayout()
+        title_lbl = QLabel("Output Devices & Levels")
+        title_lbl.setStyleSheet("font-weight: bold; font-size: 14px; color: #cce; border: none;")
+        header.addWidget(title_lbl)
+        header.addStretch()
+        self.refresh_devices_button = QPushButton("🔄 Refresh")
+        self.refresh_devices_button.clicked.connect(self.refresh_all_devices)
+        header.addWidget(self.refresh_devices_button)
+        self.device_info_button = QPushButton("ℹ️ Info")
+        self.device_info_button.clicked.connect(self.on_device_info)
+        header.addWidget(self.device_info_button)
+        layout.addLayout(header)
+
+        # Scrollable container for per-device rows
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumHeight(140)
+        scroll.setMaximumHeight(220)
+        scroll.setStyleSheet(
+            "QScrollArea { border: 1px solid #2f3c5a; border-radius: 4px; background: #151a28; }"
+        )
+        container = QWidget()
+        container.setStyleSheet("background: #151a28;")
+        self._device_rows_layout = QVBoxLayout(container)
+        self._device_rows_layout.setSpacing(2)
+        self._device_rows_layout.setContentsMargins(4, 4, 4, 4)
+        self._device_rows_layout.addStretch()  # push items up
+        scroll.setWidget(container)
+        layout.addWidget(scroll)
+
+        # Input device row at the bottom
+        input_row = QHBoxLayout()
+        input_lbl = QLabel("Input mic:")
+        input_lbl.setStyleSheet("border: none;")
+        input_row.addWidget(input_lbl)
+        self.input_device_combo = QComboBox()
+        self.input_device_combo.currentIndexChanged.connect(self.on_input_device_changed)
+        input_row.addWidget(self.input_device_combo, 1)
+        layout.addLayout(input_row)
+
+        return frame
+
+    # ============ Per-device row helpers ============
+
+    def _add_device_row(self, device_index: int, display_name: str, full_name: str, was_selected: bool):
+        container = QWidget()
+        container.setStyleSheet(
+            "QWidget { background: #2a3441; border: 1px solid #3b4a6b; border-radius: 4px; }"
+        )
+        row = QHBoxLayout(container)
+        row.setContentsMargins(6, 4, 6, 4)
+        row.setSpacing(8)
+
+        cb = QCheckBox()
+        cb.setChecked(was_selected)
+        cb.stateChanged.connect(self.on_output_device_changed)
+
+        name_lbl = QLabel(display_name)
+        name_lbl.setStyleSheet("color: #ddd; font-size: 12px; border: none;")
+        name_lbl.setMinimumWidth(180)
+        name_lbl.setMaximumWidth(280)
+        name_lbl.setToolTip(full_name)
+
+        bar = QProgressBar()
+        bar.setRange(0, 1000)
+        bar.setValue(0)
+        bar.setTextVisible(False)
+        bar.setFixedHeight(12)
+        bar.setStyleSheet(METER_STYLE_OUT)
+
+        db_lbl = QLabel("-∞ dB")
+        db_lbl.setStyleSheet("color: #99a; font-family: 'Consolas', monospace; font-size: 11px; border: none;")
+        db_lbl.setMinimumWidth(64)
+        db_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        row.addWidget(cb)
+        row.addWidget(name_lbl)
+        row.addWidget(bar, 1)
+        row.addWidget(db_lbl)
+
+        # Insert before the trailing stretch
+        insert_index = max(0, self._device_rows_layout.count() - 1)
+        self._device_rows_layout.insertWidget(insert_index, container)
+
+        self._device_widgets[device_index] = {
+            "checkbox": cb,
+            "name_label": name_lbl,
+            "meter": bar,
+            "db_label": db_lbl,
+            "container": container,
+            "full_name": full_name,
+        }
+
+    def _clear_device_rows(self):
+        for idx, w in list(self._device_widgets.items()):
+            container = w["container"]
+            container.setParent(None)
+            container.deleteLater()
+        self._device_widgets = {}
+
+    # ============ Meter helpers ============
+
+    @staticmethod
+    def _level_to_db(value_int: int) -> str:
+        """Convert 0-1000 meter value to a dB string. Floor at -60 dB."""
+        if value_int <= 0:
+            return "-∞ dB"
+        linear = value_int / 1000.0
+        db = 20.0 * math.log10(max(linear, 1e-6))
+        if db < -60:
+            return "-∞ dB"
+        return f"{db:+.1f} dB"
+
+    def _update_mic_meter(self, value: int):
+        self.mic_level_bar.setValue(value)
+        self.mic_db_label.setText(self._level_to_db(value))
+
+    def _update_output_meters(self, value: int):
+        """Broadcast the output level to every checked device's meter."""
+        db_text = self._level_to_db(value)
+        for w in self._device_widgets.values():
+            if w["checkbox"].isChecked():
+                w["meter"].setValue(value)
+                w["db_label"].setText(db_text)
+            else:
+                w["meter"].setValue(0)
+                w["db_label"].setText("-∞ dB")
 
     def append_status(self, message: str):
         self.sig_status.emit(message)
@@ -920,14 +1374,13 @@ class App(QWidget):
                 self.textbox.setPlainText(item_text)
 
     def populate_output_devices(self):
-        self.device_list.clear()
+        self._clear_device_rows()
         devices = list_output_devices()
         if not devices:
-            item = QListWidgetItem("No audio output devices detected")
-            item.setData(Qt.ItemDataRole.UserRole, -1)
-            self.device_list.addItem(item)
             self.append_status("No audio output devices detected")
             return
+
+        saved_devices = self.history_data.get("selected_output_devices", []) or []
 
         # Prioritize routing-capable devices (VoiceMeeter, virtual, Rodecaster, etc.)
         routing_devices = [
@@ -939,23 +1392,13 @@ class App(QWidget):
             if not any(keyword in name.lower() for keyword in ["voicemeeter", "virtual", "vb-audio", "voice", "rodecaster", "rode caster"])
         ]
 
-        # Add routing devices first (recommended for audio routing)
         for index, name in routing_devices:
-            item = QListWidgetItem(f"🎛️ {name}")
-            item.setData(Qt.ItemDataRole.UserRole, index)
-            self.device_list.addItem(item)
-
-        # Then other devices
-        for index, name in other_devices[:8]:  # Allow more devices since user can select multiple
-            item = QListWidgetItem(f"🔊 {name}")
-            item.setData(Qt.ItemDataRole.UserRole, index)
-            self.device_list.addItem(item)
+            self._add_device_row(index, f"🎛️ {name}", name, was_selected=(index in saved_devices))
+        for index, name in other_devices[:8]:
+            self._add_device_row(index, f"🔊 {name}", name, was_selected=(index in saved_devices))
 
         device_count = len(routing_devices) + min(len(other_devices), 8)
         self.append_status(f"Found {device_count} output devices ({len(routing_devices)} routing-capable)")
-
-        # Restore previously selected devices
-        self.restore_selected_output_devices()
 
     def refresh_all_devices(self):
         self.populate_output_devices()
@@ -1016,36 +1459,26 @@ class App(QWidget):
                     break
 
     def get_selected_devices(self):
-        """Get list of selected output device indices"""
-        selected_devices = []
-        for i in range(self.device_list.count()):
-            item = self.device_list.item(i)
-            if item.isSelected():
-                device_index = item.data(Qt.ItemDataRole.UserRole)
-                if isinstance(device_index, int) and device_index >= 0:
-                    selected_devices.append(device_index)
+        """Get list of selected output device indices (or None if none)."""
+        selected_devices = [
+            idx for idx, w in self._device_widgets.items() if w["checkbox"].isChecked()
+        ]
         return selected_devices if selected_devices else None
 
     def get_selected_input_device(self):
         index = self.input_device_combo.currentData()
         return index if isinstance(index, int) and index >= 0 else None
 
-    def restore_selected_output_devices(self):
-        """Restore previously selected output devices from history"""
-        saved_devices = self.history_data.get("selected_output_devices", [])
-        if saved_devices:
-            for i in range(self.device_list.count()):
-                item = self.device_list.item(i)
-                device_index = item.data(Qt.ItemDataRole.UserRole)
-                if device_index in saved_devices:
-                    item.setSelected(True)
-
     def on_output_device_changed(self):
-        """Called when device selection changes - save to history"""
+        """Called when a device checkbox is toggled — persist selection."""
         selected_devices = self.get_selected_devices()
-        if selected_devices:
-            self.history_data["selected_output_devices"] = selected_devices
-            save_history_data(self.history_data)
+        self.history_data["selected_output_devices"] = selected_devices or []
+        save_history_data(self.history_data)
+        # Reset meters for unchecked devices immediately
+        for w in self._device_widgets.values():
+            if not w["checkbox"].isChecked():
+                w["meter"].setValue(0)
+                w["db_label"].setText("-∞ dB")
 
     def on_input_device_changed(self):
         selected_device = self.get_selected_input_device()
@@ -1054,10 +1487,177 @@ class App(QWidget):
             save_history_data(self.history_data)
 
     def register_hotkey(self):
+        # Unregister previous hotkey first (if any)
+        if self._registered_hotkey:
+            try:
+                keyboard.remove_hotkey(self._registered_hotkey)
+            except Exception:
+                pass
+            self._registered_hotkey = None
+
+        hk = self.settings.get("hotkey", "ctrl+alt+space")
         try:
-            keyboard.add_hotkey("ctrl+alt+space", self.on_hotkey_triggered)
+            self._registered_hotkey = keyboard.add_hotkey(hk, self.on_hotkey_triggered)
         except Exception as exc:
             self.append_status(f"Hotkey registration failed: {exc}")
+
+    def apply_settings_changes(self):
+        """Re-apply settings after the dialog saves them."""
+        # Defaults for langbox / backend (only if user hasn't changed since launch — apply anyway)
+        new_lang = self.settings.get("default_target_lang", "Auto")
+        if self.langbox.findText(new_lang) >= 0:
+            self.langbox.setCurrentText(new_lang)
+        new_backend = self.settings.get("default_tts_backend", DEFAULT_TTS_BACKEND)
+        if self.backend_combo.findText(new_backend) >= 0:
+            self.backend_combo.setCurrentText(new_backend)
+
+        self.hotkey_label.setText(f"Global hotkey: {self.settings.get('hotkey', 'ctrl+alt+space')}")
+        self.register_hotkey()
+
+        # If wake listener is running, restart it with new keyword/key
+        if self.wake_listener.is_running():
+            self.append_status("Restarting wake-word listener with new settings...")
+            self.wake_listener.stop()
+            self._start_wake_listener()
+
+    # ============ Wake-word listener controls ============
+
+    def toggle_wake_listener(self):
+        if self.wake_listener.is_running():
+            self.wake_listener.stop()
+            self.listen_button.setText("👂 Start Listening")
+            self.listen_button.setChecked(False)
+            self.wake_status_label.setText("Wake-word listener: off")
+        else:
+            ok = self._start_wake_listener()
+            if ok:
+                self.listen_button.setText("⏹️ Stop Listening")
+                self.listen_button.setChecked(True)
+                kw = self.settings.get("wake_keyword", "jarvis")
+                custom = self.settings.get("wake_custom_ppn_path", "")
+                kw_display = os.path.basename(custom) if custom else kw
+                self.wake_status_label.setText(f"Listening for: {kw_display}")
+            else:
+                self.listen_button.setChecked(False)
+
+    def _start_wake_listener(self) -> bool:
+        return self.wake_listener.start(
+            access_key=self.settings.get("picovoice_access_key", ""),
+            keyword=self.settings.get("wake_keyword", "jarvis"),
+            custom_ppn_path=self.settings.get("wake_custom_ppn_path", ""),
+            device_index=self.get_selected_input_device(),
+        )
+
+    def _on_wake_detected(self):
+        """Invoked from the wake-listener thread when wake-word is heard."""
+        # Hand off command capture to its own thread so the wake loop continues
+        threading.Thread(target=self._capture_wake_command, daemon=True).start()
+
+    def _capture_wake_command(self):
+        """Record audio for wake_command_seconds, transcribe, parse language, translate, play."""
+        try:
+            seconds = float(self.settings.get("wake_command_seconds", 6.0))
+            device_index = self.get_selected_input_device()
+            if device_index is None:
+                self.append_status("Wake command capture: no input device selected.")
+                return
+
+            device_info = sd.query_devices(device_index)
+            sample_rate = int(device_info.get("default_samplerate", 16000))
+            channels = 1
+            self.append_status(f"🎙️ Listening for command ({seconds:.1f}s)...")
+
+            frames = []
+
+            def _cb(indata, frame_count, time_info, status):
+                peak = float(np.max(np.abs(indata)))
+                if peak > self._mic_peak_ref[0]:
+                    self._mic_peak_ref[0] = peak
+                frames.append(indata.copy())
+
+            self._mic_peak_ref[0] = 0.0
+            self._mic_timer.start()
+            with sd.InputStream(
+                device=device_index, channels=channels, samplerate=sample_rate,
+                blocksize=1024, dtype="float32", callback=_cb,
+            ):
+                end_time = time.time() + seconds
+                while time.time() < end_time:
+                    time.sleep(0.05)
+            QTimer.singleShot(0, lambda: (self._mic_timer.stop(), self.mic_level_bar.setValue(0)))
+
+            if not frames:
+                self.append_status("Wake command: no audio captured.")
+                return
+
+            audio_data = np.concatenate(frames, axis=0).flatten()
+            max_val = float(np.max(np.abs(audio_data)))
+            if max_val > 0:
+                audio_data = audio_data / max_val
+            target_sr = 16000
+            if sample_rate != target_sr:
+                import scipy.signal
+                new_len = int(len(audio_data) * target_sr / sample_rate)
+                audio_data = scipy.signal.resample(audio_data, new_len).astype(np.float32)
+                sample_rate = target_sr
+            audio_int16 = (np.clip(audio_data, -1.0, 1.0) * 32767).astype(np.int16)
+
+            wav_buf = io.BytesIO()
+            with wave.open(wav_buf, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(sample_rate)
+                wf.writeframes(audio_int16.tobytes())
+            wav_bytes = wav_buf.getvalue()
+
+            self.append_status("Transcribing wake command...")
+            transcript = transcribe_audio_wav(wav_bytes)
+            if not transcript:
+                self.append_status("Wake command: empty transcription.")
+                return
+            self.append_status(f"Heard: {transcript}")
+
+            default_lang = self.langbox.currentText()
+            if default_lang == "Auto":
+                default_lang = "English"
+            self.append_status("Parsing language + translating...")
+            target_lang, translated = parse_voice_command(transcript, default_lang)
+            if not translated:
+                self.append_status("Wake command: nothing to translate.")
+                return
+
+            self.update_translated(translated)
+            self.append_status(f"→ ({target_lang}) {translated}")
+
+            # TTS
+            tts_backend = self.backend_combo.currentText()
+            try:
+                if tts_backend == "ElevenLabs":
+                    if not ELEVEN_API_KEY or not VOICE_ID:
+                        raise RuntimeError("ElevenLabs credentials missing.")
+                    wav_out = request_tts_wav(translated)
+                elif tts_backend.startswith("Edge TTS"):
+                    import asyncio
+                    wav_out = asyncio.run(request_edge_tts_wav(translated, target_lang))
+                else:
+                    wav_out = request_local_tts_wav(translated)
+            except requests.HTTPError as exc:
+                if tts_backend == "ElevenLabs" and exc.response is not None and exc.response.status_code == 402:
+                    wav_out = request_local_tts_wav(translated)
+                else:
+                    raise
+
+            self.add_to_history(translated)
+            play_wav_bytes(
+                wav_out,
+                device_indices=self.get_selected_devices(),
+                level_callback=self.update_output_level,
+            )
+            self.update_output_level(0.0)
+            self.append_status("Wake-translate complete.")
+        except Exception as exc:
+            self.append_status(f"Wake command error: {exc}")
+            traceback.print_exc()
 
     def on_speak(self):
         text = self.textbox.toPlainText().strip()
@@ -1196,10 +1796,12 @@ class App(QWidget):
             QTimer.singleShot(0, lambda t=new_text: self.textbox.setPlainText(t))
             self.append_status(f"Transcribed: {transcribed}")
 
-            # Ask to translate+play if target language is set
+            # Auto-translate+play if target language is set (no confirmation dialog)
             target_lang = self.langbox.currentText()
-            if target_lang != "Auto":
-                QTimer.singleShot(0, lambda t=transcribed: self.ask_play_transcribed(t))
+            print(f"[DEBUG] Recording target_lang: '{target_lang}'")
+            if target_lang and target_lang != "Auto":
+                self.append_status(f"Translating to {target_lang} and playing...")
+                threading.Thread(target=self.run_pipeline, args=(transcribed,), daemon=True).start()
 
         except Exception as exc:
             self.append_status(f"Error during recording: {exc}")
@@ -1229,6 +1831,14 @@ class App(QWidget):
     def update_output_level(self, peak: float):
         self.sig_out_level.emit(int(min(peak * 1000, 1000)))
 
+    def closeEvent(self, event):
+        try:
+            if self.wake_listener.is_running():
+                self.wake_listener.stop()
+        except Exception:
+            pass
+        super().closeEvent(event)
+
     def ask_play_transcribed(self, transcribed: str):
         from PyQt6.QtWidgets import QMessageBox
 
@@ -1248,11 +1858,11 @@ class App(QWidget):
         input_device = self.get_selected_input_device()
 
         if selected_devices:
-            device_names = []
-            for i in range(self.device_list.count()):
-                item = self.device_list.item(i)
-                if item.isSelected():
-                    device_names.append(item.text())
+            device_names = [
+                self._device_widgets[idx]["full_name"]
+                for idx in selected_devices
+                if idx in self._device_widgets
+            ]
             output_name = ", ".join(device_names)
         else:
             output_name = "None selected"
@@ -1288,11 +1898,11 @@ class App(QWidget):
             self.append_status("No valid audio output device selected.")
             return
 
-        device_names = []
-        for i in range(self.device_list.count()):
-            item = self.device_list.item(i)
-            if item.isSelected():
-                device_names.append(item.text())
+        device_names = [
+            self._device_widgets[idx]["full_name"]
+            for idx in selected_devices
+            if idx in self._device_widgets
+        ]
         device_name = ", ".join(device_names) if device_names else "selected devices"
 
         self.append_status(f"Testing audio output to: {device_name}")
@@ -1365,11 +1975,11 @@ class App(QWidget):
             self.add_to_history(text)
             selected_devices = self.get_selected_devices()
             if selected_devices:
-                device_names = []
-                for i in range(self.device_list.count()):
-                    item = self.device_list.item(i)
-                    if item.isSelected():
-                        device_names.append(item.text())
+                device_names = [
+                    self._device_widgets[idx]["full_name"]
+                    for idx in selected_devices
+                    if idx in self._device_widgets
+                ]
                 device_name = ", ".join(device_names) if device_names else "multiple devices"
             else:
                 device_name = "default device"
@@ -1387,6 +1997,107 @@ class App(QWidget):
             traceback.print_exc()
         finally:
             self.set_controls_enabled(True)
+
+
+# =========================
+# SETTINGS DIALOG
+# =========================
+def open_settings_dialog(parent_app: "App") -> None:
+    """Open the settings dialog and apply changes if the user clicks Save."""
+    from PyQt6.QtWidgets import (
+        QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QFileDialog,
+        QComboBox as _QComboBox, QPushButton as _QPushButton, QHBoxLayout as _QHBoxLayout,
+    )
+
+    dlg = QDialog(parent_app)
+    dlg.setWindowTitle("Settings")
+    dlg.setMinimumWidth(520)
+    dlg.setStyleSheet(parent_app.styleSheet())
+
+    settings = dict(parent_app.settings)
+    form = QFormLayout()
+
+    # Wake keyword (built-in Porcupine list) + custom .ppn path
+    builtin_keywords = sorted(pvporcupine.KEYWORDS) if PORCUPINE_AVAILABLE else []
+    keyword_combo = _QComboBox()
+    for kw in builtin_keywords:
+        keyword_combo.addItem(kw)
+    if settings.get("wake_keyword") in builtin_keywords:
+        keyword_combo.setCurrentText(settings["wake_keyword"])
+    form.addRow("Wake keyword (built-in):", keyword_combo)
+
+    custom_row = _QHBoxLayout()
+    custom_path_edit = QLineEdit(settings.get("wake_custom_ppn_path", ""))
+    custom_path_edit.setPlaceholderText("Optional: path to a custom .ppn file (overrides built-in)")
+    browse_btn = _QPushButton("Browse...")
+    def _browse():
+        path, _ = QFileDialog.getOpenFileName(dlg, "Select .ppn wake-word file", "", "Porcupine PPN (*.ppn)")
+        if path:
+            custom_path_edit.setText(path)
+    browse_btn.clicked.connect(_browse)
+    custom_row.addWidget(custom_path_edit, 1)
+    custom_row.addWidget(browse_btn)
+    custom_widget = QWidget()
+    custom_widget.setLayout(custom_row)
+    form.addRow("Custom wake .ppn:", custom_widget)
+
+    # Picovoice access key
+    access_key_edit = QLineEdit(settings.get("picovoice_access_key", ""))
+    access_key_edit.setPlaceholderText("Get a free key at console.picovoice.ai")
+    form.addRow("Picovoice AccessKey:", access_key_edit)
+
+    # Hotkey
+    hotkey_edit = QLineEdit(settings.get("hotkey", "ctrl+alt+space"))
+    hotkey_edit.setPlaceholderText("e.g. ctrl+alt+space")
+    form.addRow("Global hotkey:", hotkey_edit)
+
+    # Default target language
+    lang_combo = _QComboBox()
+    for lang in LANGS.keys():
+        lang_combo.addItem(lang)
+    lang_combo.setCurrentText(settings.get("default_target_lang", "Auto"))
+    form.addRow("Default target language:", lang_combo)
+
+    # Default TTS backend
+    backend_combo = _QComboBox()
+    for b in ("ElevenLabs", "Edge TTS (free)"):
+        backend_combo.addItem(b)
+    backend_combo.setCurrentText(settings.get("default_tts_backend", DEFAULT_TTS_BACKEND))
+    form.addRow("Default TTS backend:", backend_combo)
+
+    # Wake command capture seconds
+    seconds_edit = QLineEdit(str(settings.get("wake_command_seconds", 6.0)))
+    seconds_edit.setPlaceholderText("Seconds to record after wake-word")
+    form.addRow("Command capture (s):", seconds_edit)
+
+    # Buttons
+    btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+    btns.accepted.connect(dlg.accept)
+    btns.rejected.connect(dlg.reject)
+
+    root = QVBoxLayout()
+    root.addLayout(form)
+    root.addWidget(btns)
+    dlg.setLayout(root)
+
+    if dlg.exec() == QDialog.DialogCode.Accepted:
+        new_settings = {
+            "wake_keyword": keyword_combo.currentText(),
+            "wake_custom_ppn_path": custom_path_edit.text().strip(),
+            "picovoice_access_key": access_key_edit.text().strip(),
+            "hotkey": hotkey_edit.text().strip() or "ctrl+alt+space",
+            "default_target_lang": lang_combo.currentText(),
+            "default_tts_backend": backend_combo.currentText(),
+        }
+        try:
+            new_settings["wake_command_seconds"] = float(seconds_edit.text())
+        except ValueError:
+            new_settings["wake_command_seconds"] = 6.0
+
+        parent_app.settings.update(new_settings)
+        save_settings(parent_app.settings)
+        parent_app.apply_settings_changes()
+        parent_app.append_status("Settings saved.")
 
 
 if __name__ == "__main__":
