@@ -127,8 +127,12 @@ LIST_STYLE = """
 # =========================
 def get_base_path():
     if getattr(sys, "frozen", False):
-        # EXE directory — user places credentials.env here; settings/history stay here between runs
-        return os.path.dirname(sys.executable)
+        # Store user data in %APPDATA%\AI Voice Router — writable without admin rights,
+        # survives reinstalls/upgrades since the installer never touches AppData.
+        appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
+        user_dir = os.path.join(appdata, "AI Voice Router")
+        os.makedirs(user_dir, exist_ok=True)
+        return user_dir
     return os.path.dirname(os.path.abspath(__file__))
 
 def get_assets_path():
