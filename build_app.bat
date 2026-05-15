@@ -2,12 +2,13 @@
 REM ============================================================
 REM  AI Voice Router — Full build: PyInstaller + Windows Installer
 REM
-REM  Output: installer_output\AI_Voice_Router_Setup_1.0.0.exe
+REM  Output: installer_output\AI_Voice_Router_Setup_%VERSION%.exe
 REM ============================================================
 
 set NAME=AI Voice Router
 set SCRIPT=ai_voice_app.py
 set VENV_PYTHON=.venv\Scripts\python.exe
+set VERSION=1.0.1
 set ISCC="C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 set INNO_INSTALLER_URL=https://files.jrsoftware.org/is/6/innosetup-6.3.3.exe
 set INNO_TEMP=%TEMP%\innosetup_installer.exe
@@ -95,7 +96,7 @@ echo.
 echo ============================================================
 echo  Step 3/3 — Done!
 echo.
-echo  Installer: installer_output\AI_Voice_Router_Setup_1.0.0.exe
+echo  Installer: installer_output\AI_Voice_Router_Setup_%VERSION%.exe
 echo.
 echo  Distribute that single file.
 echo  Users run it and follow the wizard.
