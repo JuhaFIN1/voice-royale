@@ -2016,22 +2016,17 @@ class App(QWidget):
                     self._mic_peak_ref[0] = peak
                 frames.append(indata.copy())
 
-            self.append_status(f"Opening stream: device={input_device_index}, ch={channels}, sr={sample_rate}")
             with sd.InputStream(device=input_device_index, channels=channels,
                                 samplerate=sample_rate, blocksize=blocksize,
                                 dtype="float32", callback=_audio_cb):
-                self.append_status("Stream opened OK — recording...")
                 while self.is_recording:
                     time.sleep(0.05)
-
-            max_peak = max_peak_ref[0]
 
             if not frames:
                 self.append_status("No audio data recorded")
                 return
 
             total_seconds = (len(frames) * blocksize) / sample_rate
-            self.append_status(f"Recording stopped: {total_seconds:.1f}s, peak: {max_peak:.4f}")
 
             # Concatenate and flatten to 1D float32
             audio_data = np.concatenate(frames, axis=0).flatten()
@@ -2043,13 +2038,12 @@ class App(QWidget):
             else:
                 self.append_status("Warning: recorded audio is silent")
 
-            # Resample on float32 BEFORE int16 conversion
+            # Resample to 16 kHz for Whisper
             target_sample_rate = 16000
             if sample_rate != target_sample_rate:
                 import scipy.signal
                 new_length = int(len(audio_data) * target_sample_rate / sample_rate)
                 audio_data = scipy.signal.resample(audio_data, new_length).astype(np.float32)
-                self.append_status(f"Resampled {sample_rate}→{target_sample_rate} Hz")
                 sample_rate = target_sample_rate
 
             audio_int16 = (np.clip(audio_data, -1.0, 1.0) * 32767).astype(np.int16)
@@ -2062,25 +2056,17 @@ class App(QWidget):
                 wf.writeframes(audio_int16.tobytes())
             wav_bytes = wav_bytes.getvalue()
 
-            # Save debug WAV so we can verify audio content
-            debug_wav = os.path.join(BASE_PATH, "debug_last_recording.wav")
-            with open(debug_wav, "wb") as f:
-                f.write(wav_bytes)
-            print(f"[DEBUG] WAV saved: {debug_wav} ({len(wav_bytes)} bytes, {total_seconds:.1f}s)")
-
             self.append_status(f"Sending {total_seconds:.1f}s audio to Whisper...")
             try:
                 transcribed = transcribe_audio_wav(wav_bytes)
-                print(f"[DEBUG] Whisper result: '{transcribed}'")
             except Exception as e:
-                print(f"[DEBUG] Transcription exception: {e}")
                 traceback.print_exc()
                 self.append_status(f"Transcription failed: {e}")
                 QTimer.singleShot(0, lambda err=str(e): __import__('PyQt6.QtWidgets', fromlist=['QMessageBox']).QMessageBox.critical(self, "Transcription Error", err))
                 return
 
             if not transcribed:
-                self.append_status("Whisper returned empty — try speaking louder or check the audio file: debug_last_recording.wav")
+                self.append_status("Whisper returned empty — try speaking louder or closer to the mic.")
                 return
 
             self.sig_set_textbox.emit(transcribed)
@@ -2088,7 +2074,6 @@ class App(QWidget):
 
             # Auto-translate+play if target language is set (no confirmation dialog)
             target_lang = self.langbox.currentText()
-            print(f"[DEBUG] Recording target_lang: '{target_lang}'")
             if target_lang and target_lang != "Auto":
                 self.append_status(f"Translating to {target_lang} and playing...")
                 threading.Thread(target=self.run_pipeline, args=(transcribed,), daemon=True).start()
