@@ -1,7 +1,7 @@
 [Setup]
 AppId={{F3A7C2E1-9B4D-4F8A-BC23-1E5D7A9F0C42}
 AppName=AI Voice Router
-AppVersion=1.0.2
+AppVersion=1.0.3
 AppPublisher=Juha Lempiäinen
 AppPublisherURL=https://github.com/JuhaFIN1/ai-voice-router
 AppSupportURL=https://github.com/JuhaFIN1/ai-voice-router/issues
@@ -9,13 +9,15 @@ DefaultDirName={autopf}\AI Voice Router
 DefaultGroupName=AI Voice Router
 AllowNoIcons=yes
 OutputDir=installer_output
-OutputBaseFilename=AI_Voice_Router_Setup_1.0.2
+OutputBaseFilename=AI_Voice_Router_Setup_1.0.3
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
 UninstallDisplayIcon={app}\AI Voice Router.exe
 DisableProgramGroupPage=no
+SetupIconFile=iconimage.ico
+UninstallDisplayName=AI Voice Router
 ; Close a running instance automatically before overwriting files
 CloseApplications=yes
 CloseApplicationsFilter=AI Voice Router.exe
@@ -30,6 +32,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 [Files]
 Source: "dist\AI Voice Router\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "credentials.env.example"; DestDir: "{app}"; Flags: ignoreversion
+Source: "iconimage.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\AI Voice Router"; Filename: "{app}\AI Voice Router.exe"

@@ -9,7 +9,7 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 
 **[→ Download installer (Windows)](https://github.com/JuhaFIN1/ai-voice-router/releases/latest)**
 
-Run `AI_Voice_Router_Setup_1.0.2.exe` — no Python needed. The first-run wizard guides you through setup.
+Run `AI_Voice_Router_Setup_1.0.3.exe` — no Python needed. The first-run wizard guides you through setup.
 
 > **Windows SmartScreen warning?** Click **"More info"** → **"Run anyway"**.
 > This appears because the installer is not commercially code-signed. The app is safe.
