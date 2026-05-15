@@ -2327,6 +2327,29 @@ def open_settings_dialog(parent_app: "App") -> None:
         lbl.setWordWrap(True)
         return lbl
 
+    # ── OpenAI API key ────────────────────────────────────────────────
+    api_key_row = _QHBoxLayout()
+    api_key_edit = QLineEdit(OPENAI_API_KEY)
+    api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+    api_key_edit.setPlaceholderText("sk-...")
+    show_key_btn = _QPushButton("Show")
+    show_key_btn.setFixedWidth(54)
+    show_key_btn.setCheckable(True)
+    def _toggle_key_visibility(checked):
+        api_key_edit.setEchoMode(QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password)
+        show_key_btn.setText("Hide" if checked else "Show")
+    show_key_btn.toggled.connect(_toggle_key_visibility)
+    api_key_row.addWidget(api_key_edit, 1)
+    api_key_row.addWidget(show_key_btn)
+    api_key_widget = QWidget()
+    api_key_widget.setLayout(api_key_row)
+    form.addRow("OpenAI API key:", api_key_widget)
+    form.addRow("", _desc(
+        "Your OpenAI API key — required for speech recognition (Whisper) and translation (GPT-4.1-mini). "
+        "Starts with sk-. Get one free at platform.openai.com/api-keys. "
+        "Saved to credentials.env in the installation folder."
+    ))
+
     # ── Wake keyword ──────────────────────────────────────────────────
     builtin_keywords = sorted(pvporcupine.KEYWORDS) if PORCUPINE_AVAILABLE else []
     if PORCUPINE_AVAILABLE:
@@ -2551,6 +2574,25 @@ def open_settings_dialog(parent_app: "App") -> None:
         except ValueError:
             new_settings["wake_command_seconds"] = 6.0
         new_settings["custom_languages"] = custom_langs
+
+        # Save OpenAI API key to credentials.env and update globals
+        new_key = api_key_edit.text().strip()
+        if new_key and new_key != OPENAI_API_KEY:
+            global OPENAI_API_KEY, client
+            OPENAI_API_KEY = new_key
+            client = OpenAI(api_key=new_key)
+            env_file = os.path.join(BASE_PATH, "credentials.env")
+            try:
+                lines = []
+                if os.path.exists(env_file):
+                    with open(env_file, "r", encoding="utf-8") as f:
+                        lines = [ln.rstrip() for ln in f if not ln.startswith("OPENAI_API_KEY")]
+                lines.insert(0, f"OPENAI_API_KEY={new_key}")
+                with open(env_file, "w", encoding="utf-8") as f:
+                    f.write("\n".join(lines) + "\n")
+                parent_app.append_status("OpenAI API key updated.")
+            except Exception as e:
+                parent_app.append_status(f"Warning: could not save key to file: {e}")
 
         parent_app.settings.update(new_settings)
         save_settings(parent_app.settings)
