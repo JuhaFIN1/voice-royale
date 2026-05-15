@@ -48,6 +48,7 @@ import threading
 import time
 import traceback
 import wave
+import webbrowser
 
 import edge_tts
 import keyboard
@@ -63,8 +64,10 @@ from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialog,
     QFrame,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QProgressBar,
@@ -72,6 +75,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSplashScreen,
+    QStackedWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -146,12 +150,9 @@ ELEVEN_API_KEY = os.getenv("ELEVEN_API_KEY", "")
 VOICE_ID = os.getenv("VOICE_ID", "")
 HISTORY_FILE = os.path.join(BASE_PATH, "speech_history.json")
 
-if not OPENAI_API_KEY:
-    raise RuntimeError("Missing OPENAI_API_KEY in .env / credentials.env")
-
 DEFAULT_TTS_BACKEND = "Edge TTS (free)"
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+client: OpenAI | None = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 LANGS = {
     "Auto": "auto",
@@ -2521,8 +2522,323 @@ def open_settings_dialog(parent_app: "App") -> None:
         parent_app.append_status("Settings saved.")
 
 
+# =========================
+# FIRST-RUN SETUP WIZARD
+# =========================
+class SetupWizard(QDialog):
+    """Shown on first launch when no OPENAI_API_KEY is configured."""
+
+    _STYLE = """
+        QDialog { background: #0d1117; color: #e6edf3; font-family: "Segoe UI", sans-serif; }
+        QLabel  { color: #e6edf3; }
+        QPushButton {
+            background: #1f6feb; color: #ffffff; border: none;
+            border-radius: 6px; padding: 8px 20px;
+            font-size: 13px; font-weight: bold;
+        }
+        QPushButton:hover    { background: #388bfd; }
+        QPushButton:disabled { background: #21262d; color: #8b949e; }
+        QLineEdit {
+            background: #161b22; border: 1px solid #30363d;
+            border-radius: 6px; color: #e6edf3;
+            padding: 8px; font-size: 13px;
+        }
+        QLineEdit:focus { border: 1px solid #1f6feb; }
+        QCheckBox { color: #8b949e; background: transparent; }
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("AI Voice Router — Alkuasennus")
+        self.setFixedSize(620, 500)
+        self.setStyleSheet(self._STYLE)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
+        self._api_key = ""
+        self._build_ui()
+        self._stack.setCurrentIndex(0)
+
+    # ---- helpers ----
+
+    def _header(self, title: str, subtitle: str = "") -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: #161b22; border-bottom: 1px solid #30363d;")
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(32, 22, 32, 18)
+        lbl = QLabel(title)
+        lbl.setStyleSheet("font-size: 20px; font-weight: bold; color: #e6edf3; background: transparent;")
+        lay.addWidget(lbl)
+        if subtitle:
+            sub = QLabel(subtitle)
+            sub.setStyleSheet("font-size: 12px; color: #8b949e; background: transparent;")
+            sub.setWordWrap(True)
+            lay.addWidget(sub)
+        return w
+
+    def _back_btn(self, target: int) -> QPushButton:
+        btn = QPushButton("← Takaisin")
+        btn.setFixedHeight(36)
+        btn.setStyleSheet(
+            "QPushButton { background: #21262d; color: #c9d1d9; border: 1px solid #30363d;"
+            " border-radius: 6px; padding: 6px 16px; font-size: 13px; font-weight: normal; }"
+            "QPushButton:hover { background: #30363d; }"
+        )
+        btn.clicked.connect(lambda: self._stack.setCurrentIndex(target))
+        return btn
+
+    # ---- pages ----
+
+    def _page_welcome(self) -> QWidget:
+        page = QWidget()
+        page.setStyleSheet("background: #0d1117;")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._header(
+            "Tervetuloa AI Voice Router",
+            "Alkuasennus — kestää noin 2 minuuttia."
+        ))
+
+        body = QWidget()
+        body.setStyleSheet("background: #0d1117;")
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(32, 22, 32, 24)
+        bl.setSpacing(16)
+
+        info = QLabel(
+            "Tämä sovellus:\n\n"
+            "  •  Kuuntelee puhettasi mikrofonista\n"
+            "  •  Tunnistaa puheen tekstiksi  (OpenAI Whisper)\n"
+            "  •  Kääntää valitsemallesi kielelle  (GPT-4.1-mini)\n"
+            "  •  Toistaa käännöksen ääneen  (Edge TTS — täysin ilmainen)\n\n"
+            "Tarvitset OpenAI API-avaimen. Se on ainoa pakollinen asia."
+        )
+        info.setStyleSheet("color: #c9d1d9; font-size: 13px; background: transparent; line-height: 1.7;")
+        info.setWordWrap(True)
+        bl.addWidget(info)
+
+        cost = QWidget()
+        cost.setStyleSheet("background: #161b22; border: 1px solid #30363d; border-radius: 8px;")
+        cl = QVBoxLayout(cost)
+        cl.setContentsMargins(16, 12, 16, 12)
+        lbl = QLabel(
+            "💡  Hinta-arvio:  ~0,001 $ per puheenvuoro  —  1 000 puheenvuoroa ≈ 1 $\n"
+            "     Uudet OpenAI-tilit saavat ilmaisia krediittejä aloitukseen."
+        )
+        lbl.setStyleSheet("color: #8b949e; font-size: 12px; background: transparent;")
+        lbl.setWordWrap(True)
+        cl.addWidget(lbl)
+        bl.addWidget(cost)
+        bl.addStretch()
+
+        row = QHBoxLayout()
+        row.addStretch()
+        btn = QPushButton("Aloita  →")
+        btn.setFixedHeight(42)
+        btn.setMinimumWidth(140)
+        btn.clicked.connect(lambda: self._stack.setCurrentIndex(1))
+        row.addWidget(btn)
+        bl.addLayout(row)
+
+        lay.addWidget(body)
+        return page
+
+    def _page_get_key(self) -> QWidget:
+        page = QWidget()
+        page.setStyleSheet("background: #0d1117;")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._header(
+            "Hanki OpenAI API-avain",
+            "Vaihe 1/2  —  Luo avain OpenAI:n sivuilla. Ilmainen tili riittää aloitukseen."
+        ))
+
+        body = QWidget()
+        body.setStyleSheet("background: #0d1117;")
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(32, 20, 32, 24)
+        bl.setSpacing(16)
+
+        steps = QLabel(
+            "Noudata näitä ohjeita:\n\n"
+            "  1.  Klikkaa alla olevaa painiketta  →  sivu avautuu selaimeen\n"
+            "  2.  Kirjaudu sisään tai luo ilmainen tili  (Sign up)\n"
+            "  3.  Klikkaa  \"Create new secret key\"\n"
+            "  4.  Anna avaimelle nimi, esim.  AI Voice Router\n"
+            "  5.  Kopioi avain  —  se näytetään vain kerran!\n\n"
+            "Jos sinulla on jo OpenAI-tili, kirjaudu vain sisään ja luo uusi avain."
+        )
+        steps.setStyleSheet("color: #c9d1d9; font-size: 13px; background: transparent; line-height: 1.7;")
+        steps.setWordWrap(True)
+        bl.addWidget(steps)
+
+        open_btn = QPushButton("🌐   Avaa  platform.openai.com/api-keys")
+        open_btn.setFixedHeight(40)
+        open_btn.setStyleSheet(
+            "QPushButton { background: #21262d; color: #58a6ff; border: 1px solid #30363d;"
+            " border-radius: 6px; padding: 6px 18px; font-size: 13px; font-weight: normal; }"
+            "QPushButton:hover { background: #30363d; }"
+        )
+        open_btn.clicked.connect(lambda: webbrowser.open("https://platform.openai.com/api-keys"))
+        bl.addWidget(open_btn)
+        bl.addStretch()
+
+        row = QHBoxLayout()
+        row.addWidget(self._back_btn(0))
+        row.addStretch()
+        nxt = QPushButton("Minulla on avain  →")
+        nxt.setFixedHeight(42)
+        nxt.setMinimumWidth(180)
+        nxt.clicked.connect(lambda: self._stack.setCurrentIndex(2))
+        row.addWidget(nxt)
+        bl.addLayout(row)
+
+        lay.addWidget(body)
+        return page
+
+    def _page_enter_key(self) -> QWidget:
+        page = QWidget()
+        page.setStyleSheet("background: #0d1117;")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._header(
+            "Syötä API-avain",
+            "Vaihe 2/2  —  Liitä kopioimasi avain alle ja testaa yhteys."
+        ))
+
+        body = QWidget()
+        body.setStyleSheet("background: #0d1117;")
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(32, 24, 32, 24)
+        bl.setSpacing(12)
+
+        hint = QLabel("API-avain alkaa  sk-  ja on noin 50+ merkkiä pitkä.")
+        hint.setStyleSheet("color: #8b949e; font-size: 12px; background: transparent;")
+        bl.addWidget(hint)
+
+        self._key_input = QLineEdit()
+        self._key_input.setPlaceholderText("sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...")
+        self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self._key_input.setFixedHeight(42)
+        self._key_input.textChanged.connect(self._on_key_changed)
+        bl.addWidget(self._key_input)
+
+        show_row = QHBoxLayout()
+        show_cb = QCheckBox("Näytä avain")
+        show_cb.toggled.connect(
+            lambda on: self._key_input.setEchoMode(
+                QLineEdit.EchoMode.Normal if on else QLineEdit.EchoMode.Password
+            )
+        )
+        show_row.addWidget(show_cb)
+        show_row.addStretch()
+        bl.addLayout(show_row)
+
+        bl.addSpacing(8)
+
+        test_row = QHBoxLayout()
+        self._test_btn = QPushButton("Testaa yhteys")
+        self._test_btn.setFixedHeight(36)
+        self._test_btn.setEnabled(False)
+        self._test_btn.setStyleSheet(
+            "QPushButton { background: #21262d; color: #c9d1d9; border: 1px solid #30363d;"
+            " border-radius: 6px; padding: 6px 16px; font-size: 13px; font-weight: normal; }"
+            "QPushButton:hover:enabled { background: #30363d; }"
+            "QPushButton:disabled { color: #484f58; }"
+        )
+        self._test_btn.clicked.connect(self._test_key)
+        test_row.addWidget(self._test_btn)
+        self._status_lbl = QLabel("")
+        self._status_lbl.setStyleSheet("font-size: 12px; padding-left: 10px; background: transparent;")
+        test_row.addWidget(self._status_lbl)
+        test_row.addStretch()
+        bl.addLayout(test_row)
+
+        bl.addStretch()
+
+        row = QHBoxLayout()
+        row.addWidget(self._back_btn(1))
+        row.addStretch()
+        self._save_btn = QPushButton("Tallenna ja aloita  ✓")
+        self._save_btn.setFixedHeight(42)
+        self._save_btn.setMinimumWidth(200)
+        self._save_btn.setEnabled(False)
+        self._save_btn.clicked.connect(self._save_and_accept)
+        row.addWidget(self._save_btn)
+        bl.addLayout(row)
+
+        lay.addWidget(body)
+        return page
+
+    def _build_ui(self):
+        self._stack = QStackedWidget(self)
+        main = QVBoxLayout(self)
+        main.setContentsMargins(0, 0, 0, 0)
+        main.addWidget(self._stack)
+        self._stack.addWidget(self._page_welcome())
+        self._stack.addWidget(self._page_get_key())
+        self._stack.addWidget(self._page_enter_key())
+
+    # ---- logic ----
+
+    def _on_key_changed(self, text: str):
+        valid = text.strip().startswith("sk-") and len(text.strip()) > 20
+        self._test_btn.setEnabled(valid)
+        self._save_btn.setEnabled(valid)
+        self._status_lbl.setText("")
+
+    def _test_key(self):
+        key = self._key_input.text().strip()
+        self._test_btn.setEnabled(False)
+        self._status_lbl.setText("Testataan yhteyttä...")
+        self._status_lbl.setStyleSheet("color: #8b949e; font-size: 12px; padding-left: 10px; background: transparent;")
+        QApplication.processEvents()
+        try:
+            OpenAI(api_key=key).models.list()
+            self._status_lbl.setText("✓  Avain toimii!")
+            self._status_lbl.setStyleSheet("color: #3fb950; font-size: 12px; padding-left: 10px; background: transparent;")
+        except Exception as e:
+            msg = str(e)
+            if "401" in msg or "Incorrect API key" in msg or "invalid_api_key" in msg:
+                txt = "✗  Väärä avain — tarkista kirjoitusvirheet"
+            elif "429" in msg:
+                txt = "✗  Käyttöraja täynnä, mutta tili ok"
+            else:
+                txt = f"✗  Virhe: {msg[:70]}"
+            self._status_lbl.setText(txt)
+            self._status_lbl.setStyleSheet("color: #f85149; font-size: 12px; padding-left: 10px; background: transparent;")
+        self._test_btn.setEnabled(True)
+
+    def _save_and_accept(self):
+        self._api_key = self._key_input.text().strip()
+        env_file = os.path.join(BASE_PATH, "credentials.env")
+        try:
+            lines = []
+            if os.path.exists(env_file):
+                with open(env_file, "r", encoding="utf-8") as f:
+                    lines = [ln.rstrip() for ln in f if not ln.startswith("OPENAI_API_KEY")]
+            lines.insert(0, f"OPENAI_API_KEY={self._api_key}")
+            with open(env_file, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        except Exception:
+            pass
+        self.accept()
+
+    def get_api_key(self) -> str:
+        return self._api_key
+
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    # First-run setup wizard — shown when no API key is saved
+    if not OPENAI_API_KEY:
+        wizard = SetupWizard()
+        if wizard.exec() != QDialog.DialogCode.Accepted:
+            sys.exit(0)
+        OPENAI_API_KEY = wizard.get_api_key()
+        client = OpenAI(api_key=OPENAI_API_KEY)
 
     # Match App.__init__ geometry exactly so splash and main window occupy the same spot
     _WIN_X, _WIN_Y, _WIN_W, _WIN_H = 200, 200, 1100, 720
