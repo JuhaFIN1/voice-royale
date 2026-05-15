@@ -2344,34 +2344,52 @@ def open_settings_dialog(parent_app: "App") -> None:
     ))
 
     # ── Wake keyword ──────────────────────────────────────────────────
-    builtin_keywords = sorted(pvporcupine.KEYWORDS) if PORCUPINE_AVAILABLE else []
+    # Common built-in Porcupine words — also work as Whisper wake words
+    _BUILTIN_KEYWORDS = [
+        "jarvis", "alexa", "computer", "hey google", "hey siri",
+        "ok google", "terminator", "picovoice", "porcupine",
+        "americano", "blueberry", "bumblebee", "grapefruit", "grasshopper",
+    ]
     if PORCUPINE_AVAILABLE:
-        keyword_combo = _QComboBox()
-        for kw in builtin_keywords:
-            keyword_combo.addItem(kw)
-        if settings.get("wake_keyword") in builtin_keywords:
-            keyword_combo.setCurrentText(settings["wake_keyword"])
-        keyword_widget = keyword_combo
-        def _get_keyword():
-            return keyword_combo.currentText()
-        form.addRow("Wake keyword (built-in):", keyword_widget)
+        _BUILTIN_KEYWORDS = sorted(set(_BUILTIN_KEYWORDS) | set(pvporcupine.KEYWORDS))
+
+    keyword_combo = _QComboBox()
+    keyword_combo.setEditable(True)
+    keyword_combo.setInsertPolicy(_QComboBox.InsertPolicy.NoInsert)
+    for kw in _BUILTIN_KEYWORDS:
+        keyword_combo.addItem(kw)
+    saved_kw = settings.get("wake_keyword", "jarvis")
+    idx = keyword_combo.findText(saved_kw)
+    if idx >= 0:
+        keyword_combo.setCurrentIndex(idx)
     else:
-        keyword_edit = QLineEdit(settings.get("wake_keyword", "jarvis"))
-        keyword_edit.setPlaceholderText("e.g. jarvis")
-        keyword_widget = keyword_edit
-        def _get_keyword():
-            return keyword_edit.text().strip().lower() or "jarvis"
-        form.addRow("Wake keyword (Whisper):", keyword_widget)
+        keyword_combo.setCurrentText(saved_kw)
+
+    def _get_keyword():
+        return keyword_combo.currentText().strip().lower() or "jarvis"
+
+    form.addRow("Wake keyword:", keyword_combo)
     form.addRow("", _desc(
-        "The word you say to activate hands-free recording. "
-        "After the app hears this word it starts recording your command automatically. "
-        "Porcupine mode: choose from the list. Whisper mode: type any word — even Finnish words work."
+        "The word or phrase you say to activate hands-free recording.\n"
+        "Choose from the list or type any word — Finnish words work too (e.g. 'hei tietokone').\n"
+        "Without a Picovoice key the app uses Whisper to detect the word (slight delay, works offline).\n"
+        "With a Picovoice key (free) Porcupine detects it instantly and uses no CPU."
+    ))
+
+    # ── Picovoice access key ──────────────────────────────────────────
+    access_key_edit = QLineEdit(settings.get("picovoice_access_key", ""))
+    access_key_edit.setPlaceholderText("Paste your free key from console.picovoice.ai")
+    form.addRow("Picovoice AccessKey:", access_key_edit)
+    form.addRow("", _desc(
+        "Free personal-use key from console.picovoice.ai (no credit card needed).\n"
+        "Enables Porcupine offline wake-word detection — instant response, no internet required.\n"
+        "Leave empty to use Whisper-based detection instead."
     ))
 
     # ── Custom .ppn wake-word file ────────────────────────────────────
     custom_row = _QHBoxLayout()
     custom_path_edit = QLineEdit(settings.get("wake_custom_ppn_path", ""))
-    custom_path_edit.setPlaceholderText("Optional path to a .ppn file")
+    custom_path_edit.setPlaceholderText("Optional — path to your .ppn file")
     browse_btn = _QPushButton("Browse...")
     def _browse():
         path, _ = QFileDialog.getOpenFileName(dlg, "Select .ppn wake-word file", "", "Porcupine PPN (*.ppn)")
@@ -2384,18 +2402,15 @@ def open_settings_dialog(parent_app: "App") -> None:
     custom_widget.setLayout(custom_row)
     form.addRow("Custom wake .ppn:", custom_widget)
     form.addRow("", _desc(
-        "Use a custom wake-word model (.ppn file) you trained at console.picovoice.ai. "
-        "This overrides the built-in keyword above. Leave empty if you use a built-in keyword or Whisper mode."
-    ))
-
-    # ── Picovoice access key ──────────────────────────────────────────
-    access_key_edit = QLineEdit(settings.get("picovoice_access_key", ""))
-    access_key_edit.setPlaceholderText("Paste your free key from console.picovoice.ai")
-    form.addRow("Picovoice AccessKey:", access_key_edit)
-    form.addRow("", _desc(
-        "Required only for Porcupine wake-word detection (faster, offline). "
-        "Get a free key at console.picovoice.ai — no payment needed. "
-        "Leave empty to use Whisper-based detection instead (works without a key, slightly slower)."
+        "HOW TO MAKE YOUR OWN WAKE WORD (.ppn):\n"
+        "1. Go to console.picovoice.ai and create a free account\n"
+        "2. Click 'Porcupine' → 'Train a custom model'\n"
+        "3. Type your wake phrase (e.g. 'hey router', 'käynnistä', anything you like)\n"
+        "4. Select platform: Windows\n"
+        "5. Click Train — download the .ppn file when ready\n"
+        "6. Come back here: paste your Picovoice AccessKey above, browse to the .ppn file\n"
+        "7. Save Settings and press Start Listening\n"
+        "Requires a Picovoice AccessKey (free). Without it, the .ppn file is ignored."
     ))
 
     # ── Global hotkey ─────────────────────────────────────────────────
