@@ -1,7 +1,7 @@
 [Setup]
 AppId={{F3A7C2E1-9B4D-4F8A-BC23-1E5D7A9F0C42}
 AppName=AI Voice Router
-AppVersion=1.0.3
+AppVersion=1.0.4
 AppPublisher=Juha Lempiäinen
 AppPublisherURL=https://github.com/JuhaFIN1/ai-voice-router
 AppSupportURL=https://github.com/JuhaFIN1/ai-voice-router/issues
@@ -9,7 +9,7 @@ DefaultDirName={autopf}\AI Voice Router
 DefaultGroupName=AI Voice Router
 AllowNoIcons=yes
 OutputDir=installer_output
-OutputBaseFilename=AI_Voice_Router_Setup_1.0.3
+OutputBaseFilename=AI_Voice_Router_Setup_1.0.4
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -35,12 +35,14 @@ Source: "credentials.env.example"; DestDir: "{app}"; Flags: ignoreversion
 Source: "iconimage.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\AI Voice Router"; Filename: "{app}\AI Voice Router.exe"
+Name: "{group}\AI Voice Router"; Filename: "{app}\AI Voice Router.exe"; IconFilename: "{app}\iconimage.ico"
 Name: "{group}\Edit credentials (API keys)"; Filename: "notepad.exe"; Parameters: "{app}\credentials.env.example"
 Name: "{group}\Uninstall AI Voice Router"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\AI Voice Router"; Filename: "{app}\AI Voice Router.exe"; Tasks: desktopicon
+Name: "{commondesktop}\AI Voice Router"; Filename: "{app}\AI Voice Router.exe"; IconFilename: "{app}\iconimage.ico"; Tasks: desktopicon
 
 [Run]
+; Rebuild Windows icon cache so the new shortcut icon appears immediately
+Filename: "{cmd}"; Parameters: "/c ie4uinit.exe -show"; Flags: runhidden waituntilidle
 Filename: "{app}\AI Voice Router.exe"; Description: "Launch AI Voice Router"; Flags: nowait postinstall skipifsilent
 
 [Messages]
