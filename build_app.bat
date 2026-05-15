@@ -8,7 +8,7 @@ REM ============================================================
 set NAME=AI Voice Router
 set SCRIPT=ai_voice_app.py
 set VENV_PYTHON=.venv\Scripts\python.exe
-set VERSION=1.0.1
+set VERSION=1.0.3
 set ISCC="C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 set INNO_INSTALLER_URL=https://files.jrsoftware.org/is/6/innosetup-6.3.3.exe
 set INNO_TEMP=%TEMP%\innosetup_installer.exe
@@ -31,7 +31,9 @@ echo.
     --noconsole ^
     --onedir ^
     --name "%NAME%" ^
+    --icon "iconimage.ico" ^
     --add-data "juhalempiainensoftware.png;." ^
+    --add-data "iconimage.ico;." ^
     --hidden-import scipy.signal ^
     --hidden-import pyttsx3.drivers ^
     --hidden-import pyttsx3.drivers.sapi5 ^
