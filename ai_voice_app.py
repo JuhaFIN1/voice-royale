@@ -2302,6 +2302,7 @@ class App(QWidget):
 # =========================
 def open_settings_dialog(parent_app: "App") -> None:
     """Open the settings dialog and apply changes if the user clicks Save."""
+    global OPENAI_API_KEY, client
     from PyQt6.QtWidgets import (
         QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QFileDialog, QScrollArea,
         QComboBox as _QComboBox, QPushButton as _QPushButton, QHBoxLayout as _QHBoxLayout,
@@ -2578,7 +2579,6 @@ def open_settings_dialog(parent_app: "App") -> None:
         # Save OpenAI API key to credentials.env and update globals
         new_key = api_key_edit.text().strip()
         if new_key and new_key != OPENAI_API_KEY:
-            global OPENAI_API_KEY, client
             OPENAI_API_KEY = new_key
             client = OpenAI(api_key=new_key)
             env_file = os.path.join(BASE_PATH, "credentials.env")
