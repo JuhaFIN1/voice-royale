@@ -11,6 +11,9 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 
 Run `AI_Voice_Router_Setup_1.0.0.exe` — no Python needed. The first-run wizard guides you through setup.
 
+> **Windows SmartScreen warning?** Click **"More info"** → **"Run anyway"**.
+> This appears because the installer is not commercially code-signed. The app is safe.
+
 ## Features
 
 - **First-run wizard** — guided setup: OpenAI API key + mic and speaker selection with live audio test
