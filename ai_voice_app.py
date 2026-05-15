@@ -26,6 +26,8 @@ REQUIRED = {
 
 
 def install_deps():
+    if getattr(sys, "frozen", False):
+        return  # All deps are bundled in the EXE — pip install not available
     for module_name, package_name in REQUIRED.items():
         try:
             importlib.import_module(module_name)
@@ -121,10 +123,18 @@ LIST_STYLE = """
 # =========================
 def get_base_path():
     if getattr(sys, "frozen", False):
+        # EXE directory — user places credentials.env here; settings/history stay here between runs
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+def get_assets_path():
+    # Bundled read-only assets (splash image etc.) — inside _MEIPASS for frozen, else same as BASE_PATH
+    if getattr(sys, "frozen", False):
         return sys._MEIPASS
     return os.path.dirname(os.path.abspath(__file__))
 
 BASE_PATH = get_base_path()
+ASSETS_PATH = get_assets_path()
 ENV_PATH = os.path.join(BASE_PATH, ".env")
 if not os.path.exists(ENV_PATH):
     ENV_PATH = os.path.join(BASE_PATH, "credentials.env")
@@ -2517,7 +2527,7 @@ if __name__ == "__main__":
     # Match App.__init__ geometry exactly so splash and main window occupy the same spot
     _WIN_X, _WIN_Y, _WIN_W, _WIN_H = 200, 200, 1100, 720
 
-    splash_path = os.path.join(BASE_PATH, "juhalempiainensoftware.png")
+    splash_path = os.path.join(ASSETS_PATH, "juhalempiainensoftware.png")
     splash = None
     if os.path.exists(splash_path):
         logo = QPixmap(splash_path)
