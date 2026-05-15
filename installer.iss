@@ -16,6 +16,10 @@ WizardStyle=modern
 PrivilegesRequired=admin
 UninstallDisplayIcon={app}\AI Voice Router.exe
 DisableProgramGroupPage=no
+; Close a running instance automatically before overwriting files
+CloseApplications=yes
+CloseApplicationsFilter=AI Voice Router.exe
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -37,5 +41,5 @@ Name: "{commondesktop}\AI Voice Router"; Filename: "{app}\AI Voice Router.exe"; 
 Filename: "{app}\AI Voice Router.exe"; Description: "Launch AI Voice Router"; Flags: nowait postinstall skipifsilent
 
 [Messages]
-WelcomeLabel2=This will install AI Voice Router on your computer.%n%nIMPORTANT: You will need an OpenAI API key to use this app.%nAfter installation, edit credentials.env in the installation folder and add your key.%n%nClick Next to continue.
-FinishedLabel=Setup has finished installing AI Voice Router.%n%nBefore launching, open credentials.env in the installation folder and add your OPENAI_API_KEY.
+WelcomeLabel2=This will install AI Voice Router on your computer.%n%nThe app includes a first-run setup wizard that guides you through%nconfiguring your OpenAI API key and audio devices.%n%nClick Next to continue.
+FinishedLabel=AI Voice Router has been installed successfully.%n%nClick Finish to launch the app. The setup wizard will guide you through the initial configuration.
