@@ -1086,6 +1086,9 @@ class App(QWidget):
         super().__init__()
         self.setWindowTitle("AI Voice Router")
         self.setGeometry(200, 200, 1100, 720)
+        icon_path = os.path.join(ASSETS_PATH, "iconimage.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         self.setStyleSheet(
             "QWidget { background: #1a1f2b; color: #f5f5f5; }"
             "QLabel { font-size: 13px; }"
@@ -3134,6 +3137,9 @@ class SetupWizard(QDialog):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    _app_icon_path = os.path.join(ASSETS_PATH, "iconimage.ico")
+    if os.path.exists(_app_icon_path):
+        app.setWindowIcon(QIcon(_app_icon_path))
 
     # First-run setup wizard — shown when no API key is saved
     if not OPENAI_API_KEY:
