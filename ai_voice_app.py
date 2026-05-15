@@ -38,6 +38,7 @@ install_deps()
 # =========================
 # IMPORTS (AFTER INSTALL)
 # =========================
+import hashlib
 import io
 import json
 import math
@@ -54,8 +55,8 @@ import requests
 import sounddevice as sd
 from dotenv import load_dotenv
 from openai import OpenAI
-from PyQt6.QtCore import QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon, QPainter, QPixmap
+from PyQt6.QtCore import QEvent, QObject, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -68,6 +69,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSplashScreen,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -163,6 +165,7 @@ LANGS = {
     "Catalan": "Catalan",
     "Belarusian": "Belarusian",
     "Spanish": "Spanish",
+    "French": "French",
 }
 
 LANG_FLAG_CODES = {
@@ -186,6 +189,7 @@ LANG_FLAG_CODES = {
     "Catalan": "ca",
     "Belarusian": "by",
     "Spanish": "es",
+    "French": "fr",
 }
 
 # Edge TTS voices mapping
@@ -210,6 +214,7 @@ EDGE_VOICES = {
     "Catalan": "ca-ES-JoanaNeural",
     "Belarusian": "ru-RU-SvetlanaNeural",
     "Spanish": "es-ES-ElviraNeural",
+    "French": "fr-FR-DeniseNeural",
 }
 
 # =========================
@@ -225,6 +230,7 @@ DEFAULT_SETTINGS = {
     "default_target_lang": "Auto",
     "default_tts_backend": DEFAULT_TTS_BACKEND,
     "wake_command_seconds": 6.0,
+    "custom_languages": [],
 }
 
 
@@ -246,6 +252,105 @@ def save_settings(settings: dict) -> None:
             json.dump(settings, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"[DEBUG] Failed to save settings: {e}")
+
+
+_CUSTOM_LANG_NAMES: set = set()
+
+
+def _apply_custom_languages_to_globals(custom_langs: list) -> None:
+    global _CUSTOM_LANG_NAMES
+    for name in _CUSTOM_LANG_NAMES:
+        LANGS.pop(name, None)
+        LANG_FLAG_CODES.pop(name, None)
+        EDGE_VOICES.pop(name, None)
+    _CUSTOM_LANG_NAMES = set()
+    for entry in custom_langs:
+        name = entry.get("name", "").strip()
+        code = entry.get("country_code", "").strip().lower()
+        voice = entry.get("edge_voice", "").strip()
+        if not name:
+            continue
+        LANGS[name] = name
+        if code:
+            LANG_FLAG_CODES[name] = code
+        if voice:
+            EDGE_VOICES[name] = voice
+        _CUSTOM_LANG_NAMES.add(name)
+
+
+# =========================
+# VIRTUAL AUDIO (VB-Cable)
+# =========================
+
+def _is_vbcable_installed() -> bool:
+    try:
+        return any("cable" in d["name"].lower() for d in sd.query_devices())
+    except Exception:
+        return False
+
+
+def _get_vbcable_download_url() -> str:
+    import urllib.request, re
+    try:
+        with urllib.request.urlopen("https://vb-audio.com/Cable/index.htm", timeout=8) as r:
+            html = r.read().decode("utf-8", errors="ignore")
+        m = re.search(r'(https?://[^"\']*VBCABLE_Driver_Pack[\w]+\.zip)', html)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack43.zip"
+
+
+def _install_vbcable(status_cb) -> None:
+    """Download, extract and install VB-Cable. Runs in a background thread."""
+    import platform
+    import subprocess
+    import tempfile
+    import urllib.request
+    import zipfile
+
+    try:
+        status_cb("Looking up download link...")
+        url = _get_vbcable_download_url()
+
+        status_cb("Downloading VB-Cable (~1 MB)...")
+        tmp_dir = tempfile.mkdtemp(prefix="vbcable_")
+        zip_path = os.path.join(tmp_dir, "vbcable.zip")
+        urllib.request.urlretrieve(url, zip_path)
+
+        status_cb("Extracting...")
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(tmp_dir)
+
+        setup_name = "VBCABLE_Setup_x64.exe" if platform.machine().endswith("64") else "VBCABLE_Setup.exe"
+        setup_path = None
+        for root, _, files in os.walk(tmp_dir):
+            for f in files:
+                if f.lower() == setup_name.lower():
+                    setup_path = os.path.join(root, f)
+                    break
+
+        if not setup_path:
+            status_cb(f"Error: {setup_name} not found in the package.")
+            return
+
+        status_cb("Installing — approve the UAC admin prompt that appears...")
+        subprocess.run(
+            ["powershell", "-Command",
+             f"Start-Process -FilePath '{setup_path}' -Verb RunAs -Wait"],
+            capture_output=True, timeout=180,
+        )
+
+        if _is_vbcable_installed():
+            status_cb("✅ VB-Cable installed! CABLE Input now visible in output device list.")
+        else:
+            status_cb("Install ran — if CABLE doesn't appear, restart the app once.")
+
+    except urllib.error.URLError as exc:
+        status_cb(f"Download failed: {exc}\nManual download: vb-audio.com/Cable")
+    except Exception as exc:
+        status_cb(f"Error: {exc}")
 
 
 # =========================
@@ -801,12 +906,25 @@ class WakeListener:
 
 
 # =========================
+class _TextboxRecordBtnFilter(QObject):
+    """Repositions the overlay record button whenever the textbox is resized."""
+    def __init__(self, btn: QPushButton):
+        super().__init__()
+        self._btn = btn
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Resize:
+            self._btn.move(obj.width() - self._btn.width() - 6, obj.height() - self._btn.height() - 6)
+        return False
+
+
 # APPLICATION
 # =========================
 class App(QWidget):
     sig_mic_level = pyqtSignal(int)
     sig_out_level = pyqtSignal(int)
     sig_status = pyqtSignal(str)
+    sig_set_textbox = pyqtSignal(str)
 
     def create_flag_icon(self, country_code: str):
         pixmap = QPixmap(20, 14)
@@ -897,6 +1015,10 @@ class App(QWidget):
             painter.fillRect(0, 0, 20, 4, Qt.GlobalColor.red)
             painter.fillRect(0, 4, 20, 6, Qt.GlobalColor.yellow)
             painter.fillRect(0, 10, 20, 4, Qt.GlobalColor.red)
+        elif country_code == "fr":
+            painter.fillRect(0, 0, 7, 14, Qt.GlobalColor.blue)
+            painter.fillRect(7, 0, 6, 14, Qt.GlobalColor.white)
+            painter.fillRect(13, 0, 7, 14, Qt.GlobalColor.red)
         else:
             painter.fillRect(0, 0, 20, 14, Qt.GlobalColor.lightGray)
 
@@ -908,6 +1030,19 @@ class App(QWidget):
         for lang, country_code in LANG_FLAG_CODES.items():
             icons[lang] = self.create_flag_icon(country_code)
         return icons
+
+    def rebuild_langbox(self):
+        self.lang_icons = self.build_language_icons()
+        current = self.langbox.currentText()
+        self.langbox.clear()
+        for lang in LANGS.keys():
+            icon = self.lang_icons.get(lang)
+            if icon:
+                self.langbox.addItem(icon, lang)
+            else:
+                self.langbox.addItem(lang)
+        if self.langbox.findText(current) >= 0:
+            self.langbox.setCurrentText(current)
 
     def __init__(self):
         super().__init__()
@@ -927,11 +1062,12 @@ class App(QWidget):
             "QCheckBox::indicator:checked { background: #50a050; border: 1px solid #6bbf6b; border-radius: 3px; }"
         )
 
+        # Load app settings first so custom languages are available for icon building
+        self.settings = load_settings()
+        _apply_custom_languages_to_globals(self.settings.get("custom_languages", []))
+
         # Build language icons (used by langbox AND history list)
         self.lang_icons = self.build_language_icons()
-
-        # Load app settings (wake-word, hotkey, defaults...)
-        self.settings = load_settings()
 
         # Per-device row widgets — keyed by device index
         # Each entry: {"checkbox", "name_label", "meter", "db_label", "container", "full_name"}
@@ -963,6 +1099,7 @@ class App(QWidget):
         self.sig_mic_level.connect(self._update_mic_meter)
         self.sig_out_level.connect(self._update_output_meters)
         self.sig_status.connect(self._on_status)
+        self.sig_set_textbox.connect(self.textbox.setPlainText)
 
         # Load data + populate devices
         self.history_data = load_history_data()
@@ -1051,15 +1188,26 @@ class App(QWidget):
         self.textbox.setMinimumHeight(140)
         layout.addWidget(self.textbox, 1)
 
+        self.record_button = QPushButton("🎤", self.textbox)
+        self.record_button.setFixedSize(36, 36)
+        self.record_button.setToolTip("Record")
+        self.record_button.clicked.connect(self.on_record_toggle)
+        self.record_button.setStyleSheet(
+            "QPushButton { background: rgba(40,52,80,200); border: 1px solid #4f5f7f;"
+            " border-radius: 8px; font-size: 18px; padding: 0; }"
+            "QPushButton:hover { background: rgba(80,100,150,220); }"
+            "QPushButton:disabled { opacity: 0.4; }"
+        )
+        self.record_button.move(self.textbox.width() - 42, self.textbox.height() - 42)
+        self._rec_filter = _TextboxRecordBtnFilter(self.record_button)
+        self.textbox.installEventFilter(self._rec_filter)
+        self.record_button.raise_()
+
         # Buttons
         button_row = QHBoxLayout()
         self.speak_button = QPushButton("🔊 Speak")
         self.speak_button.clicked.connect(self.on_speak)
         button_row.addWidget(self.speak_button)
-
-        self.record_button = QPushButton("🎤 Record")
-        self.record_button.clicked.connect(self.on_record_toggle)
-        button_row.addWidget(self.record_button)
 
         self.test_audio_button = QPushButton("🧪 Test")
         self.test_audio_button.clicked.connect(self.on_test_audio)
@@ -1361,43 +1509,97 @@ class App(QWidget):
             self.append_status("Cannot favorite empty text.")
             return
 
-        # Get current language
         current_lang = self.langbox.currentText()
         lang_code = LANGS.get(current_lang, "auto")
 
-        # Create favorite entry with text and language
-        favorite_entry = {
-            "text": text,
-            "language": lang_code,
-            "display_lang": current_lang
-        }
-
-        # Check if already favorited (by text)
         existing_fav = next((f for f in self.favorites if isinstance(f, dict) and f.get("text") == text), None)
         if existing_fav:
+            audio_file = existing_fav.get("audio_file", "")
+            if audio_file and os.path.exists(audio_file):
+                try:
+                    os.remove(audio_file)
+                except Exception:
+                    pass
             self.favorites.remove(existing_fav)
             self.append_status("Removed from favorites.")
         else:
+            favorite_entry = {
+                "text": text,
+                "language": lang_code,
+                "display_lang": current_lang,
+                "audio_file": "",
+                "translated_text": "",
+            }
             self.favorites.insert(0, favorite_entry)
-            self.append_status("Added to favorites.")
+            self.append_status("Added to favorites. Caching audio...")
+            threading.Thread(target=self._generate_favorite_audio, args=(favorite_entry,), daemon=True).start()
 
         self.history_data["favorites"] = self.favorites
         save_history_data(self.history_data)
         self.refresh_history_views()
 
+    def _generate_favorite_audio(self, entry: dict):
+        text = entry.get("text", "")
+        lang_code = entry.get("language", "auto")
+        display_lang = entry.get("display_lang", "Auto")
+        try:
+            translated = translate_text(text, lang_code)
+            if not translated:
+                return
+            tts_backend = self.backend_combo.currentText()
+            if tts_backend == "ElevenLabs" and ELEVEN_API_KEY and VOICE_ID:
+                wav_bytes = request_tts_wav(translated)
+            elif tts_backend.startswith("Edge TTS"):
+                import asyncio
+                wav_bytes = asyncio.run(request_edge_tts_wav(translated, lang_code))
+            else:
+                wav_bytes = request_local_tts_wav(translated)
+            audio_dir = os.path.join(BASE_PATH, "favorites_audio")
+            os.makedirs(audio_dir, exist_ok=True)
+            audio_hash = hashlib.md5(f"{text}|{lang_code}".encode()).hexdigest()[:16]
+            audio_path = os.path.join(audio_dir, f"{audio_hash}.wav")
+            with open(audio_path, "wb") as f:
+                f.write(wav_bytes)
+            entry["audio_file"] = audio_path
+            entry["translated_text"] = translated
+            self.history_data["favorites"] = self.favorites
+            save_history_data(self.history_data)
+            self.append_status(f"Audio cached for favorite ({display_lang}).")
+        except Exception as e:
+            self.append_status(f"Failed to cache favorite audio: {e}")
+
+    def _play_favorite_audio(self, audio_file: str):
+        try:
+            with open(audio_file, "rb") as f:
+                wav_bytes = f.read()
+            play_wav_bytes(
+                wav_bytes,
+                device_indices=self.get_selected_devices(),
+                level_callback=self.update_output_level,
+            )
+            self.update_output_level(0.0)
+        except Exception as e:
+            self.append_status(f"Failed to play cached audio: {e}")
+
     def on_history_item_selected(self, item):
         item_data = item.data(Qt.ItemDataRole.UserRole)
 
         if isinstance(item_data, dict):
-            # New format with language info
             text = item_data.get("text", "")
             display_lang = item_data.get("display_lang", "Auto")
+            audio_file = item_data.get("audio_file", "")
+            translated_text = item_data.get("translated_text", "")
 
             self.textbox.setPlainText(text)
-            # Set the language dropdown to match
             lang_index = self.langbox.findText(display_lang)
             if lang_index >= 0:
                 self.langbox.setCurrentIndex(lang_index)
+
+            if audio_file and os.path.exists(audio_file):
+                if translated_text:
+                    self.update_translated(translated_text)
+                self.append_status(f"Playing cached audio ({display_lang})...")
+                threading.Thread(target=self._play_favorite_audio, args=(audio_file,), daemon=True).start()
         else:
             # Backward compatibility for old string entries
             item_text = item.text()
@@ -1543,7 +1745,8 @@ class App(QWidget):
 
     def apply_settings_changes(self):
         """Re-apply settings after the dialog saves them."""
-        # Defaults for langbox / backend (only if user hasn't changed since launch — apply anyway)
+        _apply_custom_languages_to_globals(self.settings.get("custom_languages", []))
+        self.rebuild_langbox()
         new_lang = self.settings.get("default_target_lang", "Auto")
         if self.langbox.findText(new_lang) >= 0:
             self.langbox.setCurrentText(new_lang)
@@ -1728,15 +1931,21 @@ class App(QWidget):
         )
         self.recording_thread.start()
 
-        self.record_button.setText("⏹️ Stop Recording")
-        self.record_button.setStyleSheet("QPushButton { background: #cc3333; color: white; }")
+        self.record_button.setText("🔴")
+        self.record_button.setStyleSheet(
+            "QPushButton { background: rgba(160,40,40,220); border: 1px solid #cc4444;"
+            " border-radius: 8px; font-size: 18px; padding: 0; }"
+        )
         self.append_status(f"🎤 Recording from: {input_device_name}")
 
     def _stop_recording(self):
         self.is_recording = False
         self.record_button.setEnabled(False)
-        self.record_button.setText("⏳ Processing...")
-        self.record_button.setStyleSheet("QPushButton { background: #555; color: #aaa; }")
+        self.record_button.setText("⏳")
+        self.record_button.setStyleSheet(
+            "QPushButton { background: rgba(60,60,60,200); border: 1px solid #555;"
+            " border-radius: 8px; font-size: 18px; padding: 0; }"
+        )
 
     def do_recording(self, input_device_index: int, input_device_name: str):
         try:
@@ -1830,10 +2039,7 @@ class App(QWidget):
                 self.append_status("Whisper returned empty — try speaking louder or check the audio file: debug_last_recording.wav")
                 return
 
-            # Add to textbox
-            current_text = self.textbox.toPlainText().strip()
-            new_text = (current_text + " " + transcribed).strip() if current_text else transcribed
-            QTimer.singleShot(0, lambda t=new_text: self.textbox.setPlainText(t))
+            self.sig_set_textbox.emit(transcribed)
             self.append_status(f"Transcribed: {transcribed}")
 
             # Auto-translate+play if target language is set (no confirmation dialog)
@@ -1855,8 +2061,13 @@ class App(QWidget):
         self._mic_timer.stop()
         self.mic_level_bar.setValue(0)
         self.record_button.setEnabled(True)
-        self.record_button.setStyleSheet("")
-        self.record_button.setText("🎤 Record")
+        self.record_button.setText("🎤")
+        self.record_button.setStyleSheet(
+            "QPushButton { background: rgba(40,52,80,200); border: 1px solid #4f5f7f;"
+            " border-radius: 8px; font-size: 18px; padding: 0; }"
+            "QPushButton:hover { background: rgba(80,100,150,220); }"
+            "QPushButton:disabled { opacity: 0.4; }"
+        )
 
     def _tick_mic_meter(self):
         val = int(min(self._mic_peak_ref[0] * 1000, 1000))
@@ -2045,19 +2256,31 @@ class App(QWidget):
 def open_settings_dialog(parent_app: "App") -> None:
     """Open the settings dialog and apply changes if the user clicks Save."""
     from PyQt6.QtWidgets import (
-        QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QFileDialog,
+        QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QFileDialog, QScrollArea,
         QComboBox as _QComboBox, QPushButton as _QPushButton, QHBoxLayout as _QHBoxLayout,
+        QListWidget as _QListWidget,
     )
 
     dlg = QDialog(parent_app)
     dlg.setWindowTitle("Settings")
-    dlg.setMinimumWidth(520)
+    dlg.setMinimumWidth(600)
+    dlg.setMinimumHeight(500)
     dlg.setStyleSheet(parent_app.styleSheet())
 
     settings = dict(parent_app.settings)
     form = QFormLayout()
+    form.setVerticalSpacing(2)
+    form.setContentsMargins(8, 8, 8, 8)
 
-    # Wake keyword (built-in Porcupine list) + custom .ppn path
+    DESC = "color: #7a8fbb; font-size: 11px; padding-bottom: 6px;"
+
+    def _desc(text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setStyleSheet(DESC)
+        lbl.setWordWrap(True)
+        return lbl
+
+    # ── Wake keyword ──────────────────────────────────────────────────
     builtin_keywords = sorted(pvporcupine.KEYWORDS) if PORCUPINE_AVAILABLE else []
     if PORCUPINE_AVAILABLE:
         keyword_combo = _QComboBox()
@@ -2071,15 +2294,21 @@ def open_settings_dialog(parent_app: "App") -> None:
         form.addRow("Wake keyword (built-in):", keyword_widget)
     else:
         keyword_edit = QLineEdit(settings.get("wake_keyword", "jarvis"))
-        keyword_edit.setPlaceholderText("e.g. jarvis  (Whisper mode — any word works)")
+        keyword_edit.setPlaceholderText("e.g. jarvis")
         keyword_widget = keyword_edit
         def _get_keyword():
             return keyword_edit.text().strip().lower() or "jarvis"
         form.addRow("Wake keyword (Whisper):", keyword_widget)
+    form.addRow("", _desc(
+        "The word you say to activate hands-free recording. "
+        "After the app hears this word it starts recording your command automatically. "
+        "Porcupine mode: choose from the list. Whisper mode: type any word — even Finnish words work."
+    ))
 
+    # ── Custom .ppn wake-word file ────────────────────────────────────
     custom_row = _QHBoxLayout()
     custom_path_edit = QLineEdit(settings.get("wake_custom_ppn_path", ""))
-    custom_path_edit.setPlaceholderText("Optional: path to a custom .ppn file (overrides built-in)")
+    custom_path_edit.setPlaceholderText("Optional path to a .ppn file")
     browse_btn = _QPushButton("Browse...")
     def _browse():
         path, _ = QFileDialog.getOpenFileName(dlg, "Select .ppn wake-word file", "", "Porcupine PPN (*.ppn)")
@@ -2091,43 +2320,173 @@ def open_settings_dialog(parent_app: "App") -> None:
     custom_widget = QWidget()
     custom_widget.setLayout(custom_row)
     form.addRow("Custom wake .ppn:", custom_widget)
+    form.addRow("", _desc(
+        "Use a custom wake-word model (.ppn file) you trained at console.picovoice.ai. "
+        "This overrides the built-in keyword above. Leave empty if you use a built-in keyword or Whisper mode."
+    ))
 
-    # Picovoice access key
+    # ── Picovoice access key ──────────────────────────────────────────
     access_key_edit = QLineEdit(settings.get("picovoice_access_key", ""))
-    access_key_edit.setPlaceholderText("Get a free key at console.picovoice.ai")
+    access_key_edit.setPlaceholderText("Paste your free key from console.picovoice.ai")
     form.addRow("Picovoice AccessKey:", access_key_edit)
+    form.addRow("", _desc(
+        "Required only for Porcupine wake-word detection (faster, offline). "
+        "Get a free key at console.picovoice.ai — no payment needed. "
+        "Leave empty to use Whisper-based detection instead (works without a key, slightly slower)."
+    ))
 
-    # Hotkey
+    # ── Global hotkey ─────────────────────────────────────────────────
     hotkey_edit = QLineEdit(settings.get("hotkey", "ctrl+alt+space"))
     hotkey_edit.setPlaceholderText("e.g. ctrl+alt+space")
     form.addRow("Global hotkey:", hotkey_edit)
+    form.addRow("", _desc(
+        "Keyboard shortcut to speak the text currently in the text box — works even when the app is in the background. "
+        "Use key names like ctrl, alt, shift, space, f1–f12. Combine with + (e.g. ctrl+alt+space). "
+        "Avoid shortcuts already used by your OS or game."
+    ))
 
-    # Default target language
+    # ── Default target language ───────────────────────────────────────
     lang_combo = _QComboBox()
     for lang in LANGS.keys():
         lang_combo.addItem(lang)
     lang_combo.setCurrentText(settings.get("default_target_lang", "Auto"))
     form.addRow("Default target language:", lang_combo)
+    form.addRow("", _desc(
+        "The language your text or speech is translated into when you press Speak or record. "
+        "'Auto' detects the spoken language and translates to English. "
+        "You can override this per-session from the main window's Target dropdown."
+    ))
 
-    # Default TTS backend
+    # ── Default TTS backend ───────────────────────────────────────────
     backend_combo = _QComboBox()
     for b in ("ElevenLabs", "Edge TTS (free)"):
         backend_combo.addItem(b)
     backend_combo.setCurrentText(settings.get("default_tts_backend", DEFAULT_TTS_BACKEND))
     form.addRow("Default TTS backend:", backend_combo)
+    form.addRow("", _desc(
+        "Edge TTS (free): Microsoft neural voices, no account needed, good quality. "
+        "ElevenLabs: very realistic AI voices, requires a paid account and API key in credentials.env. "
+        "You can switch between them per-session in the main window."
+    ))
 
-    # Wake command capture seconds
+    # ── Wake command capture seconds ──────────────────────────────────
     seconds_edit = QLineEdit(str(settings.get("wake_command_seconds", 6.0)))
-    seconds_edit.setPlaceholderText("Seconds to record after wake-word")
+    seconds_edit.setPlaceholderText("e.g. 6.0")
     form.addRow("Command capture (s):", seconds_edit)
+    form.addRow("", _desc(
+        "How many seconds the app records after it hears the wake word. "
+        "Increase (e.g. 10) if your sentences are long or you speak slowly. "
+        "Decrease (e.g. 3) for faster single-word commands. Default: 6 seconds."
+    ))
 
-    # Buttons
+    # ── Custom languages ──────────────────────────────────────────────
+    custom_langs = [dict(e) for e in settings.get("custom_languages", [])]
+    custom_list = _QListWidget()
+    custom_list.setMaximumHeight(100)
+    for entry in custom_langs:
+        n, c, v = entry.get("name", ""), entry.get("country_code", ""), entry.get("edge_voice", "")
+        custom_list.addItem(f"{n}  |  {c}  |  {v}" if v else f"{n}  |  {c}")
+    form.addRow("Custom languages:", custom_list)
+    form.addRow("", _desc(
+        "Add languages not in the built-in list. Select an entry and click Remove to delete it. "
+        "Name: display name shown in the Target dropdown (e.g. Portuguese). "
+        "Code: 2-letter country code for the flag (e.g. pt, br, ar). "
+        "Edge TTS voice: exact voice ID from learn.microsoft.com/azure/ai-services/speech-service/language-support "
+        "(e.g. pt-PT-RaquelNeural). Leave voice empty to fall back to English voice."
+    ))
+
+    add_row = _QHBoxLayout()
+    new_name_edit = QLineEdit()
+    new_name_edit.setPlaceholderText("Name (e.g. Portuguese)")
+    new_code_edit = QLineEdit()
+    new_code_edit.setPlaceholderText("Code (pt)")
+    new_code_edit.setMaximumWidth(60)
+    new_voice_edit = QLineEdit()
+    new_voice_edit.setPlaceholderText("Edge TTS voice (e.g. pt-PT-RaquelNeural)")
+    add_btn = _QPushButton("Add")
+    remove_btn = _QPushButton("Remove")
+
+    def _add_custom_lang():
+        name = new_name_edit.text().strip()
+        code = new_code_edit.text().strip().lower()
+        voice = new_voice_edit.text().strip()
+        if not name:
+            return
+        entry = {"name": name, "country_code": code, "edge_voice": voice}
+        custom_langs.append(entry)
+        custom_list.addItem(f"{name}  |  {code}  |  {voice}" if voice else f"{name}  |  {code}")
+        new_name_edit.clear()
+        new_code_edit.clear()
+        new_voice_edit.clear()
+
+    def _remove_custom_lang():
+        row = custom_list.currentRow()
+        if row >= 0:
+            custom_list.takeItem(row)
+            custom_langs.pop(row)
+
+    add_btn.clicked.connect(_add_custom_lang)
+    remove_btn.clicked.connect(_remove_custom_lang)
+    add_row.addWidget(new_name_edit, 3)
+    add_row.addWidget(new_code_edit, 1)
+    add_row.addWidget(new_voice_edit, 3)
+    add_row.addWidget(add_btn)
+    add_row.addWidget(remove_btn)
+    add_widget = QWidget()
+    add_widget.setLayout(add_row)
+    form.addRow("", add_widget)
+
+    # ── VB-Cable virtual audio device ─────────────────────────────────
+    _vbc_installed = _is_vbcable_installed()
+    vbc_status_lbl = QLabel("VB-Cable: ✅ Installed" if _vbc_installed else "VB-Cable: ❌ Not installed")
+    vbc_status_lbl.setStyleSheet("color: #7fc97f;" if _vbc_installed else "color: #ff8888;")
+    form.addRow("Virtual mic:", vbc_status_lbl)
+    form.addRow("", _desc(
+        "Installs VB-Audio Virtual Cable — a free virtual audio device that lets this app's translated speech "
+        "appear as a microphone in games and voice chat (Discord, TeamSpeak, in-game VOIP). "
+        "After install: set output device to 'CABLE Input' in this app, "
+        "and set microphone to 'CABLE Output' in your game or Discord."
+    ))
+
+    vbc_install_btn = _QPushButton("Install VB-Cable (Virtual Mic)" if not _vbc_installed else "VB-Cable already installed")
+    vbc_install_btn.setEnabled(not _vbc_installed)
+
+    def _do_vbc_install():
+        vbc_install_btn.setEnabled(False)
+        vbc_install_btn.setText("Working...")
+
+        def _status(msg):
+            def _apply():
+                vbc_status_lbl.setText(msg)
+                vbc_status_lbl.setStyleSheet("color: #7fc97f;" if "✅" in msg else "color: #ff8888;")
+                if "✅" in msg:
+                    vbc_install_btn.setText("VB-Cable already installed")
+                    QTimer.singleShot(800, parent_app.populate_output_devices)
+                else:
+                    vbc_install_btn.setEnabled(True)
+                    vbc_install_btn.setText("Retry Install")
+            QTimer.singleShot(0, _apply)
+
+        threading.Thread(target=_install_vbcable, args=(_status,), daemon=True).start()
+
+    vbc_install_btn.clicked.connect(_do_vbc_install)
+    form.addRow("", vbc_install_btn)
+
+    # ── Buttons ───────────────────────────────────────────────────────
     btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
     btns.accepted.connect(dlg.accept)
     btns.rejected.connect(dlg.reject)
 
+    # Wrap form in a scroll area so the dialog stays manageable
+    scroll_content = QWidget()
+    scroll_content.setLayout(form)
+    scroll = QScrollArea()
+    scroll.setWidget(scroll_content)
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+
     root = QVBoxLayout()
-    root.addLayout(form)
+    root.addWidget(scroll, 1)
     root.addWidget(btns)
     dlg.setLayout(root)
 
@@ -2144,6 +2503,7 @@ def open_settings_dialog(parent_app: "App") -> None:
             new_settings["wake_command_seconds"] = float(seconds_edit.text())
         except ValueError:
             new_settings["wake_command_seconds"] = 6.0
+        new_settings["custom_languages"] = custom_langs
 
         parent_app.settings.update(new_settings)
         save_settings(parent_app.settings)
@@ -2153,6 +2513,37 @@ def open_settings_dialog(parent_app: "App") -> None:
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    # Match App.__init__ geometry exactly so splash and main window occupy the same spot
+    _WIN_X, _WIN_Y, _WIN_W, _WIN_H = 200, 200, 1100, 720
+
+    splash_path = os.path.join(BASE_PATH, "juhalempiainensoftware.png")
+    splash = None
+    if os.path.exists(splash_path):
+        logo = QPixmap(splash_path)
+        logo = logo.scaled(
+            _WIN_W - 120, _WIN_H - 120,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        canvas = QPixmap(_WIN_W, _WIN_H)
+        canvas.fill(QColor("#0d1117"))
+        p = QPainter(canvas)
+        p.drawPixmap((_WIN_W - logo.width()) // 2, (_WIN_H - logo.height()) // 2, logo)
+        p.end()
+        splash = QSplashScreen(canvas, Qt.WindowType.WindowStaysOnTopHint)
+        splash.move(_WIN_X, _WIN_Y)
+        splash.show()
+        app.processEvents()
+
+    _t0 = time.time()
     window = App()
-    window.show()
+    _elapsed_ms = int((time.time() - _t0) * 1000)
+
+    if splash:
+        _remaining = max(0, 4000 - _elapsed_ms)
+        QTimer.singleShot(_remaining, lambda: (splash.finish(window), window.show()))
+    else:
+        window.show()
+
     sys.exit(app.exec())
