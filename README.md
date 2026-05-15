@@ -5,8 +5,15 @@ Use permitted. Modification and redistribution of source code prohibited — see
 
 Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speech, translates it with GPT-4.1-mini, and speaks the result via TTS — all routed to any audio output device you choose, including virtual audio cables for game voice chat.
 
+## Download
+
+**[→ Download installer (Windows)](https://github.com/JuhaFIN1/ai-voice-router/releases/latest)**
+
+Run `AI_Voice_Router_Setup_1.0.0.exe` — no Python needed. The first-run wizard guides you through setup.
+
 ## Features
 
+- **First-run wizard** — guided setup: OpenAI API key + mic and speaker selection with live audio test
 - **Wake-word detection** — say "Jarvis, in German: hello team" to trigger automatically
   - Picovoice Porcupine (offline, accurate) if you have an AccessKey
   - Whisper VAD fallback (works without any key)
@@ -18,39 +25,30 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 - **Global hotkey** — push-to-talk from any app (default: `Ctrl+Alt+Space`)
 - **History & favorites** — favorites auto-cache translated audio so replaying needs no API call
 - **Virtual mic (VB-Cable)** — one-click install from Settings so TTS audio goes into game voice chat
-- **Dark-themed UI** — mic/output level meters, record button embedded in the type box
-- **Splash screen** — branded startup screen (replace `juhalempiainensoftware.png`)
+- **Live audio meters** — mic level shown during recording AND while Start Listening is active
+- **Dark-themed UI** — record button embedded in the type box, splash screen on startup
 
-## Requirements
+## Installation (EXE — recommended)
 
-- Windows 10/11
-- Python 3.10+
-- OpenAI API key (Whisper + GPT-4.1-mini)
-- Optional: ElevenLabs API key, Picovoice AccessKey
+1. Download `AI_Voice_Router_Setup_1.0.0.exe` from [Releases](https://github.com/JuhaFIN1/ai-voice-router/releases/latest)
+2. Run the installer — it creates Start Menu shortcuts and an optional desktop icon
+3. On first launch the **Setup Wizard** opens automatically:
+   - **Step 1** — get an OpenAI API key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) (free tier available)
+   - **Step 2** — paste and test the key
+   - **Step 3** — select your microphone and speakers, play a test beep
+4. Done — the app opens and is ready to use
 
-```
-pip install -r requirements.txt
-```
+Upgrading: just run the new installer over the old one. Your API key, settings, and history are preserved.
 
-## Setup
+## API Keys
 
-1. Copy your API keys to `credentials.env`:
-   ```
-   OPENAI_API_KEY=sk-...
-   ELEVEN_API_KEY=...        # optional
-   VOICE_ID=...              # optional ElevenLabs voice ID
-   ```
+| Key | Required | Where to get |
+|---|---|---|
+| `OPENAI_API_KEY` | **Yes** | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) — free credits for new accounts |
+| `ELEVEN_API_KEY` + `VOICE_ID` | No | [elevenlabs.io](https://elevenlabs.io) — realistic TTS voices |
+| `PICOVOICE_ACCESS_KEY` | No | [console.picovoice.ai](https://console.picovoice.ai) — offline wake-word, free personal use |
 
-2. Run:
-   ```
-   python ai_voice_app.py
-   ```
-
-3. For wake-word with Porcupine (recommended):
-   - Register free at [console.picovoice.ai](https://console.picovoice.ai)
-   - Paste your AccessKey in ⚙️ Settings → Picovoice AccessKey
-   - Choose a wake-word (jarvis, computer, alexa, terminator…)
-   - Press **👂 Start Listening**
+Cost estimate: ~$0.001 per voice interaction — 1 000 interactions ≈ $1.
 
 ## Usage
 
@@ -89,23 +87,32 @@ Next time you click that favorite, it plays instantly with no API call.
 | Custom languages | Add any language with name, country code, Edge TTS voice |
 | Virtual mic | Install VB-Cable for game voice chat routing |
 
-## Building EXE
+## Running from source
+
+```
+pip install -r requirements.txt
+python ai_voice_app.py
+```
+
+## Building EXE + installer
 
 ```
 build_app.bat
 ```
 
-Requires PyInstaller. Output in `dist/`.
+Requires Python + PyInstaller. Inno Setup is downloaded automatically if not installed.
+Output: `installer_output\AI_Voice_Router_Setup_1.0.0.exe`
 
 ## File Structure
 
 | File / Folder | Description |
 |---|---|
-| `ai_voice_app.py` | Entire app (~2600 lines) |
+| `ai_voice_app.py` | Entire app (~2900 lines) |
 | `credentials.env` | API keys (not committed) |
 | `app_settings.json` | User settings |
 | `speech_history.json` | Translation history + favorites |
 | `favorites_audio/` | Cached TTS WAV files for favorites |
 | `juhalempiainensoftware.png` | Splash screen image |
 | `requirements.txt` | Python dependencies |
-| `build_app.bat` | PyInstaller build script |
+| `build_app.bat` | PyInstaller + installer build script |
+| `installer.iss` | Inno Setup installer script |
