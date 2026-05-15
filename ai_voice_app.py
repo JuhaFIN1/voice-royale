@@ -789,13 +789,15 @@ class WakeListener:
         self._device_index = None
         self._mode = None
         self._keyword = "jarvis"
+        self._level_callback = None
 
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self, access_key: str, keyword: str, custom_ppn_path: str, device_index):
+    def start(self, access_key: str, keyword: str, custom_ppn_path: str, device_index, level_callback=None):
         self._keyword = keyword.lower()
         self._device_index = device_index
+        self._level_callback = level_callback
 
         # Try Picovoice Porcupine first
         if PORCUPINE_AVAILABLE and access_key:
@@ -859,6 +861,9 @@ class WakeListener:
                 while not self._stop_flag.is_set():
                     data, _overflow = stream.read(frame_length)
                     pcm = data[:, 0] if data.ndim > 1 else data
+                    if self._level_callback is not None:
+                        peak = float(np.max(np.abs(pcm))) / 32768.0
+                        self._level_callback(peak)
                     result = self._porcupine.process(pcm.tolist())
                     if result >= 0:
                         self.on_status("✨ Wake-word detected!")
@@ -868,29 +873,48 @@ class WakeListener:
             self.on_status(f"Wake listener stopped: {e}")
 
     def _run_whisper(self):
-        """Records 2.5s chunks, transcribes with Whisper, checks for wake keyword."""
+        """Streams mic continuously in 2.5s chunks, transcribes, checks for wake keyword."""
         sample_rate = 16000
         chunk_duration = 2.5
-        silence_threshold = 0.008  # RMS below this = silence, skip
+        silence_threshold = 0.008
 
         self.on_status(f"👂 Whisper mode listening for: '{self._keyword}'")
 
         while not self._stop_flag.is_set():
             try:
-                frames = int(chunk_duration * sample_rate)
-                recording = sd.rec(
-                    frames, samplerate=sample_rate, channels=1,
-                    dtype="float32", device=self._device_index
-                )
-                sd.wait()
+                frames = []
+                peak_ref = [0.0]
+
+                def _cb(indata, _fc, _ti, _st):
+                    peak = float(np.max(np.abs(indata)))
+                    if peak > peak_ref[0]:
+                        peak_ref[0] = peak
+                    if self._level_callback is not None:
+                        self._level_callback(peak)
+                    frames.append(indata.copy())
+
+                with sd.InputStream(
+                    device=self._device_index,
+                    channels=1,
+                    samplerate=sample_rate,
+                    blocksize=1024,
+                    dtype="float32",
+                    callback=_cb,
+                ):
+                    start = time.time()
+                    while time.time() - start < chunk_duration and not self._stop_flag.is_set():
+                        time.sleep(0.05)
 
                 if self._stop_flag.is_set():
                     break
 
-                audio = recording.flatten()
+                if not frames:
+                    continue
+
+                audio = np.concatenate(frames, axis=0).flatten()
                 rms = float(np.sqrt(np.mean(audio ** 2)))
                 if rms < silence_threshold:
-                    continue  # Silent chunk — skip transcription to save API cost
+                    continue
 
                 audio_int16 = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
                 wav_buf = io.BytesIO()
@@ -899,10 +923,9 @@ class WakeListener:
                     wf.setsampwidth(2)
                     wf.setframerate(sample_rate)
                     wf.writeframes(audio_int16.tobytes())
-                wav_bytes = wav_buf.getvalue()
 
                 try:
-                    transcript = transcribe_audio_wav(wav_bytes)
+                    transcript = transcribe_audio_wav(wav_buf.getvalue())
                     if transcript and self._keyword in transcript.lower():
                         self.on_status(f"✨ Wake-word '{self._keyword}' detected!")
                         self.on_wake()
@@ -1782,6 +1805,9 @@ class App(QWidget):
             self.listen_button.setText("👂 Start Listening")
             self.listen_button.setChecked(False)
             self.wake_status_label.setText("Wake-word listener: off")
+            self._mic_timer.stop()
+            self.mic_level_bar.setValue(0)
+            self.mic_db_label.setText("-∞ dB")
         else:
             ok = self._start_wake_listener()
             if ok:
@@ -1791,8 +1817,14 @@ class App(QWidget):
                 custom = self.settings.get("wake_custom_ppn_path", "")
                 kw_display = os.path.basename(custom) if custom else kw
                 self.wake_status_label.setText(f"Listening for: {kw_display}")
+                self._mic_peak_ref[0] = 0.0
+                self._mic_timer.start()
             else:
                 self.listen_button.setChecked(False)
+
+    def _on_wake_level(self, peak: float):
+        if peak > self._mic_peak_ref[0]:
+            self._mic_peak_ref[0] = peak
 
     def _start_wake_listener(self) -> bool:
         return self.wake_listener.start(
@@ -1800,6 +1832,7 @@ class App(QWidget):
             keyword=self.settings.get("wake_keyword", "jarvis"),
             custom_ppn_path=self.settings.get("wake_custom_ppn_path", ""),
             device_index=self.get_selected_input_device(),
+            level_callback=self._on_wake_level,
         )
 
     def _on_wake_detected(self):
@@ -2069,8 +2102,10 @@ class App(QWidget):
             QTimer.singleShot(0, self.reset_recording_ui)
 
     def reset_recording_ui(self):
-        self._mic_timer.stop()
-        self.mic_level_bar.setValue(0)
+        if not self.wake_listener.is_running():
+            self._mic_timer.stop()
+            self.mic_level_bar.setValue(0)
+            self.mic_db_label.setText("-∞ dB")
         self.record_button.setEnabled(True)
         self.record_button.setText("🎤")
         self.record_button.setStyleSheet(
@@ -2083,6 +2118,7 @@ class App(QWidget):
     def _tick_mic_meter(self):
         val = int(min(self._mic_peak_ref[0] * 1000, 1000))
         self.mic_level_bar.setValue(val)
+        self.mic_db_label.setText(self._level_to_db(val))
         self._mic_peak_ref[0] *= 0.75  # decay between ticks
 
     def update_mic_level(self, peak: float):
@@ -2550,11 +2586,18 @@ class SetupWizard(QDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AI Voice Router — Alkuasennus")
-        self.setFixedSize(620, 500)
+        self.setFixedSize(620, 540)
         self.setStyleSheet(self._STYLE)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
         self._api_key = ""
+        # Init mic preview state before _build_ui so closeEvent is always safe
+        self._wiz_peak_ref = [0.0]
+        self._wiz_stop_flag = threading.Event()
+        self._wiz_mic_thread = None
+        self._wiz_timer = QTimer(self)
+        self._wiz_timer.setInterval(40)
         self._build_ui()
+        self._wiz_timer.timeout.connect(self._tick_wiz_mic)
         self._stack.setCurrentIndex(0)
 
     # ---- helpers ----
@@ -2771,6 +2814,208 @@ class SetupWizard(QDialog):
         lay.addWidget(body)
         return page
 
+    def _page_devices(self) -> QWidget:
+        page = QWidget()
+        page.setStyleSheet("background: #0d1117;")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._header(
+            "Äänilaitteet",
+            "Vaihe 3/3  —  Valitse mikrofoni ja kaiuttimet. Testaa ääni ennen jatkamista."
+        ))
+
+        body = QWidget()
+        body.setStyleSheet("background: #0d1117;")
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(32, 20, 32, 24)
+        bl.setSpacing(14)
+
+        # --- Mic section ---
+        mic_title = QLabel("Mikrofoni (äänitulon lähde)")
+        mic_title.setStyleSheet("color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;")
+        bl.addWidget(mic_title)
+
+        self._wiz_mic_combo = QComboBox()
+        self._wiz_mic_combo.setFixedHeight(36)
+        self._wiz_mic_combo.setStyleSheet(
+            "QComboBox { background: #161b22; border: 1px solid #30363d; border-radius: 6px;"
+            " color: #e6edf3; padding: 4px 10px; font-size: 13px; }"
+            "QComboBox::drop-down { border: none; }"
+            "QComboBox QAbstractItemView { background: #161b22; color: #e6edf3; }"
+        )
+        input_devices = list_input_devices()
+        self._wiz_input_indices = []
+        for idx, name in input_devices:
+            n = name.lower()
+            if name.startswith("{") or any(k in n for k in ["microsoft sound mapper", "primary sound capture", "bthhfenum"]):
+                continue
+            prefix = "🎤" if not any(k in n for k in ["virtual", "vb-audio", "voicemeeter"]) else "🔌"
+            self._wiz_mic_combo.addItem(f"{prefix} {name}", idx)
+            self._wiz_input_indices.append(idx)
+        bl.addWidget(self._wiz_mic_combo)
+
+        # Live mic meter
+        mic_meter_row = QHBoxLayout()
+        mic_m_lbl = QLabel("MIC")
+        mic_m_lbl.setStyleSheet("color: #8b949e; font-size: 11px; font-weight: bold; background: transparent; min-width: 32px;")
+        self._wiz_mic_bar = QProgressBar()
+        self._wiz_mic_bar.setRange(0, 1000)
+        self._wiz_mic_bar.setValue(0)
+        self._wiz_mic_bar.setTextVisible(False)
+        self._wiz_mic_bar.setFixedHeight(10)
+        self._wiz_mic_bar.setStyleSheet(METER_STYLE_MIC)
+        mic_meter_row.addWidget(mic_m_lbl)
+        mic_meter_row.addWidget(self._wiz_mic_bar, 1)
+        bl.addLayout(mic_meter_row)
+
+        mic_hint = QLabel("Puhu mikrofoniin — palkki liikkuu kun ääni kuuluu")
+        mic_hint.setStyleSheet("color: #484f58; font-size: 11px; background: transparent;")
+        bl.addWidget(mic_hint)
+
+        bl.addSpacing(4)
+
+        # --- Output section ---
+        out_title = QLabel("Kaiuttimet / lähtölaitteet (valitse kaikki joihin haluat äänen)")
+        out_title.setStyleSheet("color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;")
+        bl.addWidget(out_title)
+
+        out_scroll = QScrollArea()
+        out_scroll.setWidgetResizable(True)
+        out_scroll.setFixedHeight(140)
+        out_scroll.setStyleSheet(
+            "QScrollArea { background: #161b22; border: 1px solid #30363d; border-radius: 6px; }"
+        )
+        out_container = QWidget()
+        out_container.setStyleSheet("background: #161b22;")
+        self._wiz_out_layout = QVBoxLayout(out_container)
+        self._wiz_out_layout.setContentsMargins(8, 6, 8, 6)
+        self._wiz_out_layout.setSpacing(4)
+
+        self._wiz_out_checkboxes = {}  # device_index -> QCheckBox
+        output_devices = list_output_devices()
+        for idx, name in output_devices:
+            n = name.lower()
+            if name.startswith("{") or "primary sound" in n or "microsoft sound" in n:
+                continue
+            cb = QCheckBox(name)
+            cb.setStyleSheet("QCheckBox { color: #c9d1d9; font-size: 12px; background: transparent; padding: 2px; }")
+            self._wiz_out_checkboxes[idx] = cb
+            self._wiz_out_layout.addWidget(cb)
+
+        if not self._wiz_out_checkboxes:
+            no_dev = QLabel("Ei löytynyt äänilähtölaitteita")
+            no_dev.setStyleSheet("color: #484f58; font-size: 12px; background: transparent;")
+            self._wiz_out_layout.addWidget(no_dev)
+
+        self._wiz_out_layout.addStretch()
+        out_scroll.setWidget(out_container)
+        bl.addWidget(out_scroll)
+
+        bl.addStretch()
+
+        # Buttons
+        row = QHBoxLayout()
+        back_btn = self._back_btn(2)
+        row.addWidget(back_btn)
+        row.addStretch()
+        test_btn = QPushButton("▶  Testaa ääni")
+        test_btn.setFixedHeight(36)
+        test_btn.setStyleSheet(
+            "QPushButton { background: #21262d; color: #c9d1d9; border: 1px solid #30363d;"
+            " border-radius: 6px; padding: 6px 16px; font-size: 13px; font-weight: normal; }"
+            "QPushButton:hover { background: #30363d; }"
+        )
+        test_btn.clicked.connect(self._test_audio)
+        row.addWidget(test_btn)
+        row.addSpacing(8)
+        finish_btn = QPushButton("Valmis  ✓")
+        finish_btn.setFixedHeight(42)
+        finish_btn.setMinimumWidth(140)
+        finish_btn.clicked.connect(self._finish_setup)
+        row.addWidget(finish_btn)
+        bl.addLayout(row)
+
+        lay.addWidget(body)
+
+        self._wiz_mic_combo.currentIndexChanged.connect(self._on_wiz_mic_changed)
+
+        return page
+
+    def _start_wiz_mic_preview(self):
+        self._stop_wiz_mic_preview()
+        idx = self._wiz_mic_combo.currentData()
+        if idx is None:
+            return
+        self._wiz_stop_flag.clear()
+        self._wiz_peak_ref[0] = 0.0
+
+        def _listen():
+            try:
+                with sd.InputStream(
+                    device=idx,
+                    channels=1,
+                    samplerate=16000,
+                    blocksize=512,
+                    dtype="float32",
+                    callback=lambda d, *_: self._wiz_peak_ref.__setitem__(
+                        0, max(self._wiz_peak_ref[0], float(np.max(np.abs(d))))
+                    ),
+                ):
+                    while not self._wiz_stop_flag.is_set():
+                        time.sleep(0.05)
+            except Exception:
+                pass
+
+        self._wiz_mic_thread = threading.Thread(target=_listen, daemon=True)
+        self._wiz_mic_thread.start()
+        self._wiz_timer.start()
+
+    def _stop_wiz_mic_preview(self):
+        self._wiz_stop_flag.set()
+        self._wiz_timer.stop()
+        if self._wiz_mic_thread is not None:
+            self._wiz_mic_thread.join(timeout=1.5)
+            self._wiz_mic_thread = None
+        self._wiz_mic_bar.setValue(0)
+
+    def _tick_wiz_mic(self):
+        val = int(min(self._wiz_peak_ref[0] * 1000, 1000))
+        self._wiz_mic_bar.setValue(val)
+        self._wiz_peak_ref[0] *= 0.75
+
+    def _on_wiz_mic_changed(self, _idx):
+        self._start_wiz_mic_preview()
+
+    def _test_audio(self):
+        selected_out = [idx for idx, cb in self._wiz_out_checkboxes.items() if cb.isChecked()]
+        wav = self._make_beep_wav()
+        threading.Thread(target=play_wav_bytes, kwargs={
+            "wav_bytes": wav,
+            "device_indices": selected_out if selected_out else None,
+        }, daemon=True).start()
+
+    @staticmethod
+    def _make_beep_wav(freq: int = 880, duration: float = 0.4, sr: int = 44100) -> bytes:
+        import math, struct
+        n = int(sr * duration)
+        fade = int(sr * 0.04)
+        samples = []
+        for i in range(n):
+            s = math.sin(2 * math.pi * freq * i / sr)
+            if i < fade:
+                s *= i / fade
+            elif i > n - fade:
+                s *= (n - i) / fade
+            samples.append(int(s * 28000))
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sr)
+            wf.writeframes(struct.pack(f"{n}h", *samples))
+        return buf.getvalue()
+
     def _build_ui(self):
         self._stack = QStackedWidget(self)
         main = QVBoxLayout(self)
@@ -2779,6 +3024,7 @@ class SetupWizard(QDialog):
         self._stack.addWidget(self._page_welcome())
         self._stack.addWidget(self._page_get_key())
         self._stack.addWidget(self._page_enter_key())
+        self._stack.addWidget(self._page_devices())
 
     # ---- logic ----
 
@@ -2823,7 +3069,33 @@ class SetupWizard(QDialog):
                 f.write("\n".join(lines) + "\n")
         except Exception:
             pass
+        # Go to device setup page
+        self._stack.setCurrentIndex(3)
+        self._start_wiz_mic_preview()
+
+    def _finish_setup(self):
+        self._stop_wiz_mic_preview()
+        # Save device selections to speech_history.json
+        selected_in = self._wiz_mic_combo.currentData()
+        selected_out = [idx for idx, cb in self._wiz_out_checkboxes.items() if cb.isChecked()]
+        try:
+            history_data = {}
+            if os.path.exists(HISTORY_FILE):
+                with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                    history_data = json.load(f)
+            if selected_in is not None:
+                history_data["selected_input_device"] = selected_in
+            if selected_out:
+                history_data["selected_output_devices"] = selected_out
+            with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+                json.dump(history_data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
         self.accept()
+
+    def closeEvent(self, event):
+        self._stop_wiz_mic_preview()
+        super().closeEvent(event)
 
     def get_api_key(self) -> str:
         return self._api_key
