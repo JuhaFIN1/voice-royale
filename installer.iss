@@ -1,7 +1,7 @@
 [Setup]
 AppId={{F3A7C2E1-9B4D-4F8A-BC23-1E5D7A9F0C42}
 AppName=AI Voice Router
-AppVersion=1.0.5
+AppVersion=1.1.0
 AppPublisher=Juha Lempiäinen
 AppPublisherURL=https://github.com/JuhaFIN1/ai-voice-router
 AppSupportURL=https://github.com/JuhaFIN1/ai-voice-router/issues
@@ -9,7 +9,7 @@ DefaultDirName={autopf}\AI Voice Router
 DefaultGroupName=AI Voice Router
 AllowNoIcons=yes
 OutputDir=installer_output
-OutputBaseFilename=AI_Voice_Router_Setup_1.0.5
+OutputBaseFilename=AI_Voice_Router_Setup_1.1.0
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

@@ -7,9 +7,11 @@
 # =========================
 import importlib
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 
 REQUIRED = {
     "PyQt6": "PyQt6",
@@ -58,25 +60,31 @@ import requests
 import sounddevice as sd
 from dotenv import load_dotenv
 from openai import OpenAI
-from PyQt6.QtCore import QEvent, QObject, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QSize, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFrame,
+    QGridLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QSplashScreen,
     QStackedWidget,
+    QTabWidget,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
     QHBoxLayout,
@@ -85,40 +93,41 @@ from PyQt6.QtWidgets import (
 # =========================
 # UI STYLE CONSTANTS
 # =========================
-METER_LABEL_STYLE = "color: #aab; font-size: 11px; font-weight: bold;"
+METER_LABEL_STYLE = "color: #58a6ff; font-size: 11px; font-weight: 700; letter-spacing: 0.5px;"
 METER_STYLE_MIC = (
-    "QProgressBar { background: #111620; border: 1px solid #3b4a6b; border-radius: 3px; }"
+    "QProgressBar { background: #0d1117; border: 1px solid #21262d; border-radius: 4px; }"
     "QProgressBar::chunk { background: qlineargradient(x1:0, x2:1,"
-    " stop:0 #22cc44, stop:0.55 #cccc22, stop:1 #cc2222); border-radius: 2px; }"
+    " stop:0 #22c55e, stop:0.6 #eab308, stop:1 #ef4444); border-radius: 3px; }"
 )
 METER_STYLE_OUT = (
-    "QProgressBar { background: #111620; border: 1px solid #3b4a6b; border-radius: 3px; }"
+    "QProgressBar { background: #0d1117; border: 1px solid #21262d; border-radius: 4px; }"
     "QProgressBar::chunk { background: qlineargradient(x1:0, x2:1,"
-    " stop:0 #2266ff, stop:0.55 #aa44cc, stop:1 #cc2222); border-radius: 2px; }"
+    " stop:0 #3b82f6, stop:0.6 #8b5cf6, stop:1 #ef4444); border-radius: 3px; }"
 )
 LIST_STYLE = """
     QListWidget {
-        background: #171c2d;
-        border: 1px solid #3b4a6b;
-        border-radius: 6px;
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
         font-family: "Segoe UI", sans-serif;
-        font-weight: bold;
+        font-size: 13px;
     }
     QListWidget::item {
-        background: #2a3441;
-        border: 1px solid #3b4a6b;
-        border-radius: 4px;
-        margin: 2px;
-        padding: 4px;
-        color: #ffffff;
+        background: #21262d;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        margin: 2px 4px;
+        padding: 5px 8px;
+        color: #e6edf3;
     }
     QListWidget::item:hover {
-        background: #3b4a6b;
-        border: 1px solid #4f5f7f;
+        background: #30363d;
+        border-color: #58a6ff;
     }
     QListWidget::item:selected {
-        background: #50648f;
-        border: 1px solid #6b7fa0;
+        background: #1f6feb;
+        border-color: #388bfd;
+        color: #ffffff;
     }
 """
 
@@ -246,6 +255,11 @@ DEFAULT_SETTINGS = {
     "default_tts_backend": DEFAULT_TTS_BACKEND,
     "wake_command_seconds": 6.0,
     "custom_languages": [],
+    "soundboard_pages": [
+        {"name": "Peli aloitus", "slots": [{"name": f"Slot {i+1}", "file": "", "image": ""} for i in range(56)]}
+    ],
+    "stream_deck_enabled": True,
+    "voice_fx_output_device": None,
 }
 
 
@@ -377,6 +391,551 @@ try:
 except Exception:
     pvporcupine = None
     PORCUPINE_AVAILABLE = False
+
+
+# =========================
+# OPTIONAL: Stream Deck
+# =========================
+try:
+    from StreamDeck.DeviceManager import DeviceManager as _SDDeviceManager  # type: ignore
+    STREAMDECK_AVAILABLE = True
+except Exception:
+    _SDDeviceManager = None
+    STREAMDECK_AVAILABLE = False
+
+
+# =========================
+# VOICE EFFECT PROCESSOR
+# =========================
+class VoiceEffectProcessor:
+    """Real-time mic → DSP effects → virtual output (e.g. VB-Cable).
+
+    Uses a producer-consumer pattern: the InputStream callback just buffers audio,
+    and a processing thread applies effects and writes to the OutputStream.
+    This keeps the audio callback lightweight and avoids glitches.
+    """
+
+    PRESETS = {
+        "Normal":    {"pitch": 0,   "robot": False},
+        "Pitch +4":  {"pitch": 4,   "robot": False},
+        "Pitch +8":  {"pitch": 8,   "robot": False},
+        "Pitch -4":  {"pitch": -4,  "robot": False},
+        "Pitch -8":  {"pitch": -8,  "robot": False},
+        "Robot":     {"pitch": 0,   "robot": True},
+        "Deep":      {"pitch": -6,  "robot": False},
+        "Helium":    {"pitch": 10,  "robot": False},
+    }
+
+    _SAMPLE_RATE = 44100
+    _BLOCKSIZE = 2048
+
+    def __init__(self, status_cb):
+        self._status = status_cb
+        self._active = False
+        self._pitch = 0
+        self._robot = False
+        self._robot_phase = 0
+        self._current_preset = "Normal"
+        self._lock = threading.Lock()
+        import collections
+        self._buf = collections.deque(maxlen=12)
+        self._stream_in = None
+        self._stream_out = None
+        self._stop_evt = threading.Event()
+        self._proc_thread = None
+
+    @property
+    def is_active(self) -> bool:
+        return self._active
+
+    @property
+    def current_preset(self) -> str:
+        return self._current_preset
+
+    def set_preset(self, name: str):
+        p = self.PRESETS.get(name, self.PRESETS["Normal"])
+        with self._lock:
+            self._pitch = p["pitch"]
+            self._robot = p["robot"]
+            self._current_preset = name
+
+    def start(self, input_device, output_device):
+        if self._active:
+            self.stop()
+        self._stop_evt.clear()
+        try:
+            self._stream_out = sd.OutputStream(
+                device=output_device,
+                samplerate=self._SAMPLE_RATE,
+                channels=1,
+                dtype="float32",
+                blocksize=self._BLOCKSIZE,
+                latency="low",
+            )
+            self._stream_out.start()
+            self._stream_in = sd.InputStream(
+                device=input_device,
+                samplerate=self._SAMPLE_RATE,
+                channels=1,
+                dtype="float32",
+                blocksize=self._BLOCKSIZE,
+                callback=self._capture_cb,
+                latency="low",
+            )
+            self._stream_in.start()
+            self._active = True
+            self._proc_thread = threading.Thread(target=self._proc_loop, daemon=True)
+            self._proc_thread.start()
+            self._status(f"Voice FX: on [{self._current_preset}]")
+        except Exception as e:
+            self._active = False
+            self._cleanup()
+            self._status(f"Voice FX error: {e}")
+
+    def stop(self):
+        self._active = False
+        self._stop_evt.set()
+        self._cleanup()
+        if self._proc_thread:
+            self._proc_thread.join(timeout=2.0)
+            self._proc_thread = None
+        self._status("Voice FX: off")
+
+    def _cleanup(self):
+        for s in (self._stream_in, self._stream_out):
+            if s:
+                try:
+                    s.stop(); s.close()
+                except Exception:
+                    pass
+        self._stream_in = None
+        self._stream_out = None
+
+    def _capture_cb(self, indata, frames, time_info, status):
+        self._buf.append(indata[:, 0].copy())
+
+    def _proc_loop(self):
+        while not self._stop_evt.is_set():
+            if not self._buf:
+                time.sleep(0.005)
+                continue
+            try:
+                chunk = self._buf.popleft()
+            except IndexError:
+                continue
+            chunk = self._apply(chunk)
+            if self._stream_out and self._active:
+                try:
+                    self._stream_out.write(chunk.reshape(-1, 1))
+                except Exception:
+                    pass
+
+    def _apply(self, chunk: np.ndarray) -> np.ndarray:
+        with self._lock:
+            pitch = self._pitch
+            robot = self._robot
+        if robot:
+            n = len(chunk)
+            t = np.arange(self._robot_phase, self._robot_phase + n) / self._SAMPLE_RATE
+            self._robot_phase = (self._robot_phase + n) % (self._SAMPLE_RATE * 100)
+            chunk = chunk * np.sin(2 * np.pi * 40 * t).astype(np.float32)
+        if pitch != 0:
+            chunk = self._pitch_shift(chunk, pitch)
+        return chunk
+
+    def _pitch_shift(self, chunk: np.ndarray, semitones: int) -> np.ndarray:
+        try:
+            import pyrubberband as rb  # type: ignore
+            return rb.pitch_shift(chunk, self._SAMPLE_RATE, semitones).astype(np.float32)
+        except Exception:
+            pass
+        # Fallback: resampling trick (fast, acceptable quality for voice)
+        from scipy.signal import resample
+        factor = 2.0 ** (semitones / 12.0)
+        n_new = max(1, int(len(chunk) / factor))
+        pitched = resample(chunk, n_new)
+        return resample(pitched, len(chunk)).astype(np.float32)
+
+
+# =========================
+# STREAM DECK CONTROLLER
+# =========================
+class StreamDeckController:
+    """Elgato Stream Deck integration. Connects in background; fails gracefully if not found."""
+
+    DEFAULT_MAPPING = {
+        0: "record_toggle",
+        1: "wake_listen_toggle",
+        2: "speak",
+        3: "stop_recording",
+        4: "lang_English",
+        5: "lang_Finnish",
+        6: "lang_Swedish",
+        7: "lang_German",
+        8: "lang_Russian",
+        9: "lang_Japanese",
+        10: "lang_French",
+        11: "lang_Spanish",
+        12: "soundboard_0",
+        13: "soundboard_1",
+        14: "soundboard_2",
+        15: "soundboard_3",
+        16: "soundboard_4",
+        17: "soundboard_5",
+        18: "soundboard_6",
+        19: "soundboard_7",
+        20: "soundboard_8",
+        21: "soundboard_9",
+        22: "soundboard_10",
+        23: "soundboard_11",
+        24: "fx_Normal",
+        25: "fx_Pitch +4",
+        26: "fx_Pitch -4",
+        27: "fx_Robot",
+        28: "fx_Deep",
+        29: "fx_Helium",
+        30: "tts_toggle",
+        31: "settings",
+    }
+
+    def __init__(self, status_cb):
+        self._status = status_cb
+        self._deck = None
+        self._app = None
+        self._mapping = dict(self.DEFAULT_MAPPING)
+
+    def connect(self, app_ref):
+        self._app = app_ref
+        threading.Thread(target=self._try_connect, daemon=True).start()
+
+    def disconnect(self):
+        if self._deck:
+            try:
+                self._deck.reset()
+                self._deck.close()
+            except Exception:
+                pass
+            self._deck = None
+
+    def refresh_all(self):
+        if not self._deck or not self._app:
+            return
+        for key_idx, action in self._mapping.items():
+            try:
+                label, active = self._app._get_sd_button_state(action)
+                self._set_key(key_idx, label, active)
+            except Exception:
+                pass
+
+    def refresh_one(self, action: str):
+        if not self._deck or not self._app:
+            return
+        for key_idx, act in self._mapping.items():
+            if act == action:
+                try:
+                    label, active = self._app._get_sd_button_state(action)
+                    self._set_key(key_idx, label, active)
+                except Exception:
+                    pass
+
+    def _try_connect(self):
+        if not STREAMDECK_AVAILABLE:
+            return  # paketti puuttuu — ei häiritä käyttäjää jos laitetta ei ole
+        try:
+            devices = _SDDeviceManager().enumerate()
+            if not devices:
+                self._status("Stream Deck: not detected (check USB cable)")
+                return
+            self._deck = devices[0]
+            self._deck.open()
+            self._deck.set_brightness(70)
+            self._deck.set_key_callback(self._on_key)
+            self._status(f"Stream Deck: connected — {self._deck.KEY_COUNT} keys")
+            self.refresh_all()
+        except Exception as e:
+            self._status(f"Stream Deck: {e}")
+
+    def _on_key(self, deck, key_index, state):
+        if state and self._app:
+            action = self._mapping.get(key_index)
+            if action:
+                QTimer.singleShot(0, lambda a=action: self._app._handle_sd_action(a))
+
+    def _set_key(self, key_index: int, label: str, active: bool):
+        if not self._deck:
+            return
+        try:
+            from PIL import Image, ImageDraw, ImageFont  # type: ignore
+            from StreamDeck.ImageHelpers import PILHelper  # type: ignore
+            img = PILHelper.create_key_image(self._deck, background=(50, 80, 50) if active else (30, 40, 70))
+            draw = ImageDraw.Draw(img)
+            try:
+                font = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 13)
+            except Exception:
+                font = ImageFont.load_default()
+            kw, kh = img.size
+            # Word-wrap
+            words = label.split()
+            lines, cur = [], ""
+            for w in words:
+                test = (cur + " " + w).strip()
+                bbox = draw.textbbox((0, 0), test, font=font)
+                if bbox[2] - bbox[0] > kw - 8 and cur:
+                    lines.append(cur); cur = w
+                else:
+                    cur = test
+            if cur:
+                lines.append(cur)
+            text = "\n".join(lines)
+            bbox = draw.textbbox((0, 0), text, font=font)
+            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            draw.text(((kw - tw) // 2, (kh - th) // 2), text, fill=(255, 255, 255), font=font)
+            native = PILHelper.to_native_key_format(self._deck, img)
+            self._deck.set_key_image(key_index, native)
+        except Exception:
+            pass
+
+
+# =========================
+# SOUNDBOARD IMPORT HELPERS
+# =========================
+
+def _sb_import_audio(src_path: str, page_index: int, slot_index: int) -> tuple[str, int, int]:
+    """Convert and copy audio into soundboard data dir. Returns (dest_path, orig_bytes, new_bytes)."""
+    out_dir = os.path.join(BASE_PATH, "soundboard", "audio")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"p{page_index}_slot_{slot_index}.wav")
+    orig_size = os.path.getsize(src_path)
+
+    ext = os.path.splitext(src_path)[1].lower()
+    target_sr = 22050
+
+    if ext == ".wav":
+        with wave.open(src_path, "rb") as wf:
+            ch, sw, sr = wf.getnchannels(), wf.getsampwidth(), wf.getframerate()
+            raw = wf.readframes(wf.getnframes())
+        if sw == 1:
+            data = (np.frombuffer(raw, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+        elif sw == 2:
+            data = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+        elif sw == 4:
+            data = np.frombuffer(raw, dtype=np.int32).astype(np.float32) / 2147483648.0
+        else:
+            data = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+        if ch > 1:
+            data = data.reshape(-1, ch).mean(axis=1)
+        if sr != target_sr:
+            from scipy.signal import resample as _resamp
+            data = _resamp(data, int(len(data) * target_sr / sr))
+    else:
+        # Use ffmpeg (already required by Edge TTS) to convert any audio format
+        tmp_wav = out_path + ".tmp.wav"
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-i", src_path,
+                 "-ac", "1", "-ar", str(target_sr), "-sample_fmt", "s16",
+                 "-f", "wav", tmp_wav],
+                capture_output=True, timeout=60,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.decode(errors="ignore").strip()[-300:])
+            with wave.open(tmp_wav, "rb") as wf:
+                raw = wf.readframes(wf.getnframes())
+            data = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+        except FileNotFoundError:
+            raise RuntimeError(
+                "ffmpeg ei löydy — asenna ffmpeg ja lisää se PATH:iin\n"
+                "(sama kuin Edge TTS tarvitsee)"
+            )
+        finally:
+            try:
+                os.remove(tmp_wav)
+            except OSError:
+                pass
+
+    out_int16 = (np.clip(data, -1.0, 1.0) * 32767).astype(np.int16)
+    with wave.open(out_path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(target_sr)
+        wf.writeframes(out_int16.tobytes())
+
+    return out_path, orig_size, os.path.getsize(out_path)
+
+
+def _sb_import_image(src_path: str, page_index: int, slot_index: int) -> tuple[str, int, int]:
+    """Scale and JPEG-compress image into soundboard data dir. Returns (dest_path, orig_bytes, new_bytes)."""
+    out_dir = os.path.join(BASE_PATH, "soundboard", "images")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"p{page_index}_slot_{slot_index}.jpg")
+    orig_size = os.path.getsize(src_path)
+
+    px = QPixmap(src_path)
+    if px.isNull():
+        raise RuntimeError(f"Kuvaa ei voi avata: {src_path}")
+    px = px.scaled(256, 256, Qt.AspectRatioMode.KeepAspectRatio,
+                   Qt.TransformationMode.SmoothTransformation)
+    if not px.save(out_path, "JPEG", 55):
+        raise RuntimeError(f"Kuvan tallennus epäonnistui: {out_path}")
+
+    return out_path, orig_size, os.path.getsize(out_path)
+
+
+# SOUNDBOARD BUTTON WIDGET
+# =========================
+class SoundboardButton(QWidget):
+    """One soundboard slot — big icon centered, name below, right-click to assign."""
+
+    clicked_play = pyqtSignal(int)
+    data_changed = pyqtSignal(int)
+
+    _STYLE_IDLE = (
+        "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+        " stop:0 #1c2535, stop:1 #141a28);"
+        " border: 1px solid #2d3a55; border-radius: 8px;"
+        " color: #a8c0e8; font-size: 9px; font-weight: 700;"
+        " padding-bottom: 3px; }"
+        "QToolButton:hover { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+        " stop:0 #253560, stop:1 #1a2840);"
+        " border-color: #58a6ff; color: #d0e8ff; }"
+        "QToolButton:pressed { background: #0f1a2e; border-color: #1f6feb; }"
+    )
+    _STYLE_PLAY = (
+        "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+        " stop:0 #0f3d20, stop:1 #0a2a15);"
+        " border: 2px solid #22c55e; border-radius: 8px;"
+        " color: #4ade80; font-size: 9px; font-weight: 700; padding-bottom: 3px; }"
+    )
+
+    def __init__(self, page_index: int, slot_index: int, parent=None):
+        super().__init__(parent)
+        self.page_index = page_index
+        self.slot_index = slot_index
+        self._data = {"name": f"Slot {slot_index + 1}", "file": "", "image": ""}
+        self.setFixedSize(66, 62)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+
+        self._btn = QToolButton()
+        self._btn.setFixedSize(66, 62)
+        self._btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        self._btn.setIconSize(QSize(34, 34))
+        self._btn.setStyleSheet(self._STYLE_IDLE)
+        self._btn.clicked.connect(lambda: self.clicked_play.emit(self.slot_index))
+        self._btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._btn.customContextMenuRequested.connect(self._ctx_menu)
+        lay.addWidget(self._btn)
+
+        self._refresh()
+
+    def set_data(self, d: dict):
+        self._data = dict(d)
+        self._refresh()
+
+    def get_data(self) -> dict:
+        return dict(self._data)
+
+    def set_playing(self, playing: bool):
+        self._btn.setStyleSheet(self._STYLE_PLAY if playing else self._STYLE_IDLE)
+
+    def _refresh(self):
+        name = self._data.get("name") or f"Slot {self.slot_index + 1}"
+        img_path = self._data.get("image", "")
+        if img_path and os.path.exists(img_path):
+            px = QPixmap(img_path).scaled(34, 34, Qt.AspectRatioMode.KeepAspectRatio,
+                                          Qt.TransformationMode.SmoothTransformation)
+        else:
+            px = QPixmap(34, 34)
+            px.fill(QColor("#1c2535"))
+            p = QPainter(px)
+            p.setPen(QColor("#3d5af1"))
+            p.setFont(QFont("Segoe UI", 14))
+            p.drawText(px.rect(), Qt.AlignmentFlag.AlignCenter, "♪")
+            p.end()
+        self._btn.setIcon(QIcon(px))
+        display = name if len(name) <= 9 else name[:8] + "…"
+        self._btn.setText(display)
+        self._btn.setToolTip(name + ("\n" + self._data["file"] if self._data.get("file") else ""))
+
+    def _ctx_menu(self, pos):
+        menu = QMenu(self)
+        menu.addAction("Assign Sound…", self._assign_sound)
+        menu.addAction("Assign Image…", self._assign_image)
+        menu.addAction("Rename…", self._rename)
+        if self._data.get("file"):
+            menu.addSeparator()
+            menu.addAction("Clear", self._clear)
+        menu.exec(self.mapToGlobal(pos))
+
+    def _assign_sound(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Assign Sound", "",
+            "Audio files (*.wav *.mp3 *.ogg *.flac *.aiff)"
+        )
+        if not path:
+            return
+        try:
+            dest, orig, new = _sb_import_audio(path, self.page_index, self.slot_index)
+            self._data["file"] = dest
+            ratio = (1 - new / orig) * 100 if orig > 0 else 0
+            self._notify_status(
+                f"Soundboard {self.slot_index+1}: ääni tuotu "
+                f"({orig//1024} KB → {new//1024} KB, -{ratio:.0f}%)"
+            )
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Tuontivirhe", str(e))
+            self._data["file"] = path  # fallback: alkuperäinen polku
+        if not self._data.get("name") or self._data["name"].startswith("Slot "):
+            self._data["name"] = os.path.splitext(os.path.basename(path))[0]
+        self._refresh()
+        self.data_changed.emit(self.slot_index)
+
+    def _assign_image(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Assign Image", "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
+        )
+        if not path:
+            return
+        try:
+            dest, orig, new = _sb_import_image(path, self.page_index, self.slot_index)
+            self._data["image"] = dest
+            ratio = (1 - new / orig) * 100 if orig > 0 else 0
+            self._notify_status(
+                f"Soundboard {self.slot_index+1}: kuva tuotu "
+                f"({orig//1024} KB → {new//1024} KB, -{ratio:.0f}%)"
+            )
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Tuontivirhe", str(e))
+            self._data["image"] = path
+        self._refresh()
+        self.data_changed.emit(self.slot_index)
+
+    def _notify_status(self, msg: str):
+        p = self.parent()
+        while p is not None:
+            if isinstance(p, QWidget) and hasattr(p, "append_status"):
+                p.append_status(msg)
+                return
+            p = p.parent() if hasattr(p, "parent") else None
+
+    def _rename(self):
+        text, ok = QInputDialog.getText(
+            self, "Rename Slot", "Button name:",
+            text=self._data.get("name", f"Slot {self.slot_index + 1}")
+        )
+        if ok and text.strip():
+            self._data["name"] = text.strip()
+            self._refresh()
+            self.data_changed.emit(self.slot_index)
+
+    def _clear(self):
+        self._data = {"name": f"Slot {self.slot_index + 1}", "file": "", "image": ""}
+        self._refresh()
+        self.data_changed.emit(self.slot_index)
 
 
 # =========================
@@ -1085,23 +1644,92 @@ class App(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AI Voice Router")
-        self.setGeometry(200, 200, 1100, 720)
+        self.setGeometry(100, 100, 1320, 637)
         icon_path = os.path.join(ASSETS_PATH, "iconimage.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
-        self.setStyleSheet(
-            "QWidget { background: #1a1f2b; color: #f5f5f5; }"
-            "QLabel { font-size: 13px; }"
-            "QPushButton { background: #3b4a6b; border: 1px solid #4f5f7f; padding: 8px 12px; border-radius: 6px; }"
-            "QPushButton:hover { background: #50648f; }"
-            "QPushButton:disabled { background: #2d3346; color: #777777; }"
-            "QComboBox, QTextEdit { background: #252c40; border: 1px solid #3b4a6b; color: #f5f5f5; padding: 4px; border-radius: 4px; }"
-            "QListWidget { background: #171c2d; border: 1px solid #3b4a6b; }"
-            "QCheckBox { color: #ddd; }"
-            "QCheckBox::indicator { width: 16px; height: 16px; }"
-            "QCheckBox::indicator:unchecked { background: #252c40; border: 1px solid #3b4a6b; border-radius: 3px; }"
-            "QCheckBox::indicator:checked { background: #50a050; border: 1px solid #6bbf6b; border-radius: 3px; }"
-        )
+        self.setStyleSheet("""
+            QWidget { background: #0d1117; color: #e6edf3;
+                      font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; }
+            QFrame  { background: #161b22; border: 1px solid #30363d; border-radius: 12px; }
+            QLabel  { background: transparent; border: none; color: #e6edf3; }
+
+            QPushButton {
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #2a3340,stop:1 #1e2530);
+                border: 1px solid #3d4f6e; border-radius: 8px;
+                color: #c9d8f0; padding: 8px 16px; font-size: 13px; font-weight: 600;
+                min-height: 30px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #354060,stop:1 #26334d);
+                border-color: #58a6ff; color: #e6edf3;
+            }
+            QPushButton:pressed { background: #161b22; border-color: #1f6feb; }
+            QPushButton:checked {
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #1a5ccc,stop:1 #1040a0);
+                border-color: #388bfd; color: #ffffff;
+            }
+            QPushButton:disabled { background: #161b22; color: #484f58; border-color: #21262d; }
+
+            QToolButton {
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #1c2535,stop:1 #141a28);
+                border: 1px solid #2d3a55; border-radius: 10px;
+                color: #a8c0e8; font-size: 11px; font-weight: 700;
+            }
+            QToolButton:hover { background: #253560; border-color: #58a6ff; color: #d0e8ff; }
+            QToolButton:pressed { background: #0f1a2e; }
+
+            QComboBox {
+                background: #21262d; border: 1px solid #30363d; border-radius: 8px;
+                color: #e6edf3; padding: 5px 10px; min-height: 30px;
+            }
+            QComboBox:hover { border-color: #58a6ff; }
+            QComboBox::drop-down { border: none; width: 22px; }
+            QComboBox QAbstractItemView {
+                background: #161b22; border: 1px solid #30363d;
+                selection-background-color: #1f6feb; color: #e6edf3;
+            }
+
+            QTextEdit {
+                background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+                color: #e6edf3; padding: 6px; selection-background-color: #1f6feb;
+            }
+            QTextEdit:focus { border-color: #58a6ff; }
+            QLineEdit {
+                background: #21262d; border: 1px solid #30363d; border-radius: 8px;
+                color: #e6edf3; padding: 5px 10px; min-height: 30px;
+            }
+            QLineEdit:focus { border-color: #58a6ff; }
+
+            QCheckBox { color: #e6edf3; background: transparent; spacing: 8px; }
+            QCheckBox::indicator { width: 17px; height: 17px; border-radius: 5px;
+                                   border: 1px solid #30363d; background: #21262d; }
+            QCheckBox::indicator:hover  { border-color: #58a6ff; }
+            QCheckBox::indicator:checked { background: #1f6feb; border-color: #388bfd; }
+
+            QScrollBar:vertical { background: #0d1117; width: 8px; border-radius: 4px; margin: 0; }
+            QScrollBar::handle:vertical { background: #30363d; border-radius: 4px; min-height: 24px; }
+            QScrollBar::handle:vertical:hover { background: #484f58; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+
+            QTabWidget::pane { border: 1px solid #30363d; border-radius: 10px;
+                               background: #161b22; }
+            QTabBar::tab { background: #21262d; color: #8b949e; padding: 9px 20px;
+                           font-weight: 700; border: 1px solid #30363d;
+                           border-bottom: none; border-radius: 8px 8px 0 0; margin-right: 3px; }
+            QTabBar::tab:selected  { background: #161b22; color: #58a6ff; }
+            QTabBar::tab:hover:!selected { background: #30363d; color: #c9d1d9; }
+
+            QListWidget { background: #161b22; border: 1px solid #30363d; border-radius: 8px; }
+            QListWidget::item { background: #21262d; border: 1px solid #30363d;
+                                border-radius: 6px; margin: 2px 4px; padding: 5px 8px; color: #e6edf3; }
+            QListWidget::item:hover    { background: #30363d; border-color: #58a6ff; }
+            QListWidget::item:selected { background: #1f6feb; border-color: #388bfd; color: #fff; }
+
+            QScrollArea { background: #161b22; border: 1px solid #30363d; border-radius: 8px; }
+            QProgressBar { background: #0d1117; border: 1px solid #21262d; border-radius: 4px; }
+            QProgressBar::chunk { background: #1f6feb; border-radius: 3px; }
+        """)
 
         # Load app settings first so custom languages are available for icon building
         self.settings = load_settings()
@@ -1121,19 +1749,34 @@ class App(QWidget):
             on_status_callback=self.append_status,
         )
 
+        # Voice FX + soundboard state
+        self._voice_fx = VoiceEffectProcessor(self.append_status)
+        self._current_fx_preset = "Normal"
+        self._soundboard_buttons: list[list[SoundboardButton]] = []
+        self._fx_preset_buttons: dict[str, QPushButton] = {}
+        self._mb_bars: dict[int, tuple] = {}  # device_index -> (bar, db_lbl)
+
+        # Stream Deck
+        self._stream_deck = StreamDeckController(self.append_status)
+
         # ============ Top row: Speech card (left) + History card (right) ============
         top_row = QHBoxLayout()
         top_row.addWidget(self._build_speech_card(), 2)
         top_row.addWidget(self._build_history_card(), 1)
 
-        # ============ Bottom: Outputs & Levels card ============
-        outputs_card = self._build_outputs_card()
+        # ============ Bottom tab widget: Outputs / Soundboard / Voice FX ============
+        self._bottom_tabs = QTabWidget()
+        self._bottom_tabs.addTab(self._build_soundboard_card(), "  Soundboard  ")
+        self._bottom_tabs.addTab(self._build_voice_fx_card(), "  Voice FX  ")
+        self._bottom_tabs.addTab(self._build_outputs_card(), "  Output Devices  ")
 
         # ============ Root layout ============
         root = QVBoxLayout()
         root.setContentsMargins(8, 8, 8, 8)
-        root.addLayout(top_row, 1)
-        root.addWidget(outputs_card)
+        root.setSpacing(6)
+        root.addLayout(top_row, 2)
+        root.addWidget(self._bottom_tabs, 1)
+        root.addWidget(self._build_meters_bar())
         self.setLayout(root)
 
         # Wire signals — safe cross-thread UI updates
@@ -1162,19 +1805,27 @@ class App(QWidget):
         self._mic_timer.setInterval(40)
         self._mic_timer.timeout.connect(self._tick_mic_meter)
 
+        # Connect Stream Deck after UI is ready
+        if self.settings.get("stream_deck_enabled", True):
+            self._stream_deck.connect(self)
+
     # ============ Card builders ============
 
     def _make_card(self, title: str) -> tuple[QFrame, QVBoxLayout]:
         frame = QFrame()
         frame.setFrameShape(QFrame.Shape.StyledPanel)
         frame.setStyleSheet(
-            "QFrame { background: #1a1f2b; border: 1px solid #2f3c5a; border-radius: 8px; }"
+            "QFrame { background: #161b22; border: 1px solid #30363d; border-radius: 12px; }"
         )
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setContentsMargins(12, 10, 12, 12)
+        layout.setSpacing(8)
         if title:
             title_lbl = QLabel(title)
-            title_lbl.setStyleSheet("font-weight: bold; font-size: 14px; color: #cce; border: none;")
+            title_lbl.setStyleSheet(
+                "font-weight: 700; font-size: 14px; color: #58a6ff; border: none;"
+                " letter-spacing: 0.3px; padding-bottom: 2px;"
+            )
             layout.addWidget(title_lbl)
         return frame, layout
 
@@ -1187,14 +1838,17 @@ class App(QWidget):
         self.status_text.setMinimumHeight(60)
         self.status_text.setMaximumHeight(90)
         self.status_text.setStyleSheet(
-            "font-weight: bold; color: #dcdcdc; background: #151a28;"
-            "border: 1px solid #2f3c5a; border-radius: 4px; padding: 4px;"
+            "QTextEdit { background: #0d1117; border: 1px solid #21262d; border-radius: 8px;"
+            " color: #8b949e; font-size: 12px; padding: 6px; }"
         )
         layout.addWidget(self.status_text)
 
         # Target lang + TTS backend
         options_row = QHBoxLayout()
-        options_row.addWidget(QLabel("Target:"))
+        options_row.setSpacing(8)
+        lbl_target = QLabel("Target:")
+        lbl_target.setStyleSheet("color: #8b949e; font-size: 12px;")
+        options_row.addWidget(lbl_target)
         self.langbox = QComboBox()
         for lang in LANGS.keys():
             icon = self.lang_icons.get(lang)
@@ -1206,8 +1860,10 @@ class App(QWidget):
         if self.langbox.findText(default_lang) >= 0:
             self.langbox.setCurrentText(default_lang)
         options_row.addWidget(self.langbox, 1)
-        options_row.addSpacing(12)
-        options_row.addWidget(QLabel("TTS:"))
+        options_row.addSpacing(8)
+        lbl_tts = QLabel("TTS:")
+        lbl_tts.setStyleSheet("color: #8b949e; font-size: 12px;")
+        options_row.addWidget(lbl_tts)
         self.backend_combo = QComboBox()
         for backend in ("ElevenLabs", "Edge TTS (free)"):
             self.backend_combo.addItem(backend)
@@ -1217,60 +1873,88 @@ class App(QWidget):
 
         self.translated_label = QLabel("Translated text will appear here.")
         self.translated_label.setWordWrap(True)
-        self.translated_label.setMinimumHeight(40)
+        self.translated_label.setMinimumHeight(38)
         self.translated_label.setStyleSheet(
-            "color: #9ec0ff; padding: 8px; background: #151a28;"
-            "border: 1px solid #2f3c5a; border-radius: 4px;"
+            "color: #58a6ff; padding: 8px 10px; background: #0d1117;"
+            "border: 1px solid #21262d; border-radius: 8px; font-size: 13px;"
         )
         layout.addWidget(self.translated_label)
 
         self.textbox = QTextEdit()
-        self.textbox.setPlaceholderText("Type the phrase to speak...\nOr press Record to use voice input.")
-        self.textbox.setMinimumHeight(140)
+        self.textbox.setPlaceholderText("Type the phrase to speak…\nOr press Record to use voice input.")
+        self.textbox.setMinimumHeight(90)
         layout.addWidget(self.textbox, 1)
 
         self.record_button = QPushButton("🎤", self.textbox)
-        self.record_button.setFixedSize(36, 36)
+        self.record_button.setFixedSize(38, 38)
         self.record_button.setToolTip("Record")
         self.record_button.clicked.connect(self.on_record_toggle)
         self.record_button.setStyleSheet(
-            "QPushButton { background: rgba(40,52,80,200); border: 1px solid #4f5f7f;"
-            " border-radius: 8px; font-size: 18px; padding: 0; }"
-            "QPushButton:hover { background: rgba(80,100,150,220); }"
-            "QPushButton:disabled { opacity: 0.4; }"
+            "QPushButton { background: rgba(20,30,50,210); border: 1px solid #30363d;"
+            " border-radius: 10px; font-size: 18px; padding: 0; }"
+            "QPushButton:hover { background: rgba(31,111,235,200); border-color: #388bfd; }"
+            "QPushButton:disabled { opacity: 0.3; }"
         )
-        self.record_button.move(self.textbox.width() - 42, self.textbox.height() - 42)
+        self.record_button.move(self.textbox.width() - 44, self.textbox.height() - 44)
         self._rec_filter = _TextboxRecordBtnFilter(self.record_button)
         self.textbox.installEventFilter(self._rec_filter)
         self.record_button.raise_()
 
-        # Buttons
+        # Primary action buttons
         button_row = QHBoxLayout()
-        self.speak_button = QPushButton("🔊 Speak")
+        button_row.setSpacing(8)
+
+        self.speak_button = QPushButton("🔊  Speak")
         self.speak_button.clicked.connect(self.on_speak)
-        button_row.addWidget(self.speak_button)
+        self.speak_button.setStyleSheet(
+            "QPushButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            " stop:0 #1a5ccc, stop:1 #1040a0);"
+            " border: 1px solid #388bfd; border-radius: 8px; color: #fff;"
+            " font-size: 14px; font-weight: 700; padding: 9px 20px; }"
+            "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            " stop:0 #2a6cdc, stop:1 #1a50b0); border-color: #58a6ff; }"
+            "QPushButton:pressed { background: #0f3080; }"
+            "QPushButton:disabled { background: #161b22; color: #484f58; border-color: #21262d; }"
+        )
+        button_row.addWidget(self.speak_button, 2)
 
-        self.test_audio_button = QPushButton("🧪 Test")
+        self.test_audio_button = QPushButton("🧪  Test")
         self.test_audio_button.clicked.connect(self.on_test_audio)
-        button_row.addWidget(self.test_audio_button)
+        button_row.addWidget(self.test_audio_button, 1)
 
-        self.favorite_button = QPushButton("⭐ Favorite")
+        self.favorite_button = QPushButton("⭐  Favorite")
         self.favorite_button.clicked.connect(self.toggle_favorite)
-        button_row.addWidget(self.favorite_button)
+        self.favorite_button.setStyleSheet(
+            "QPushButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            " stop:0 #3a2800, stop:1 #251a00);"
+            " border: 1px solid #6a4f00; border-radius: 8px; color: #d4a017; font-weight: 600; }"
+            "QPushButton:hover { border-color: #eab308; color: #fbbf24; }"
+        )
+        button_row.addWidget(self.favorite_button, 1)
         layout.addLayout(button_row)
 
         # Wake-word + settings row
         ws_row = QHBoxLayout()
-        self.listen_button = QPushButton("👂 Start Listening")
+        ws_row.setSpacing(8)
+        self.listen_button = QPushButton("👂  Start Listening")
         self.listen_button.setCheckable(True)
         self.listen_button.clicked.connect(self.toggle_wake_listener)
+        self.listen_button.setStyleSheet(
+            "QPushButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            " stop:0 #1a2a1a, stop:1 #101a10);"
+            " border: 1px solid #2d4a2d; border-radius: 8px; color: #6aaa6a; font-weight: 600; }"
+            "QPushButton:hover { border-color: #3fb950; color: #4ade80; }"
+            "QPushButton:checked { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            " stop:0 #0f3d1a, stop:1 #0a2810);"
+            " border: 2px solid #22c55e; color: #4ade80; }"
+        )
         ws_row.addWidget(self.listen_button)
 
-        self.wake_status_label = QLabel("Wake-word listener: off")
-        self.wake_status_label.setStyleSheet("color: #99a6c8; font-size: 11px; border: none;")
+        self.wake_status_label = QLabel("Wake-word: off")
+        self.wake_status_label.setStyleSheet("color: #484f58; font-size: 11px; border: none;")
         ws_row.addWidget(self.wake_status_label, 1)
 
-        self.settings_button = QPushButton("⚙️ Settings")
+        self.settings_button = QPushButton("⚙️  Settings")
         self.settings_button.clicked.connect(lambda: open_settings_dialog(self))
         ws_row.addWidget(self.settings_button)
         layout.addLayout(ws_row)
@@ -1307,7 +1991,7 @@ class App(QWidget):
 
         self.history_list = QListWidget()
         self.history_list.itemClicked.connect(self.on_history_item_selected)
-        self.history_list.setMinimumHeight(180)
+        self.history_list.setMinimumHeight(100)
         self.history_list.setStyleSheet(LIST_STYLE)
         layout.addWidget(self.history_list, 1)
 
@@ -1317,11 +2001,226 @@ class App(QWidget):
 
         self.favorites_list = QListWidget()
         self.favorites_list.itemClicked.connect(self.on_history_item_selected)
-        self.favorites_list.setMinimumHeight(180)
+        self.favorites_list.setMinimumHeight(100)
         self.favorites_list.setStyleSheet(LIST_STYLE)
         layout.addWidget(self.favorites_list, 1)
 
         return frame
+
+    def _build_soundboard_card(self) -> QWidget:
+        frame = QWidget()
+        frame.setObjectName("card")
+        outer = QVBoxLayout(frame)
+        outer.setContentsMargins(4, 4, 4, 4)
+        outer.setSpacing(0)
+
+        self._sb_tabs = QTabWidget()
+        self._sb_tabs.setTabsClosable(False)
+        self._sb_tabs.setStyleSheet(
+            "QTabWidget::pane { border: 1px solid #21262d; border-radius: 4px; background: #0d1117; }"
+            "QTabBar { margin-right: 36px; }"
+            "QTabBar::tab { background: #161b22; color: #8b949e; padding: 5px 14px;"
+            " border: 1px solid #21262d; border-bottom: none; border-radius: 4px 4px 0 0; margin-right: 2px; }"
+            "QTabBar::tab:selected { background: #1f6feb; color: #fff; border-color: #388bfd; }"
+            "QTabBar::tab:hover:!selected { background: #21262d; color: #cdd; }"
+        )
+
+        # Right-click context menu on tab bar
+        self._sb_tabs.tabBar().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._sb_tabs.tabBar().customContextMenuRequested.connect(self._sb_tab_ctx_menu)
+
+        # "+" corner button — wrapped with left margin so it sits flush inside the bar
+        _corner_wrap = QWidget()
+        _corner_lay = QHBoxLayout(_corner_wrap)
+        _corner_lay.setContentsMargins(2, 2, 2, 2)
+        add_page_btn = QPushButton("+")
+        add_page_btn.setFixedSize(26, 22)
+        add_page_btn.setToolTip("Lisää sivu (max 10)")
+        add_page_btn.setStyleSheet(
+            "QPushButton { background: #1f6feb; color: #fff; border: none;"
+            " border-radius: 4px; font-size: 15px; font-weight: bold; padding: 0; }"
+            "QPushButton:hover { background: #388bfd; }"
+            "QPushButton:pressed { background: #1040a0; }"
+        )
+        add_page_btn.clicked.connect(self._sb_add_page)
+        _corner_lay.addWidget(add_page_btn)
+        self._sb_tabs.setCornerWidget(_corner_wrap, Qt.Corner.TopRightCorner)
+
+        # Migrate old flat soundboard_slots to pages format
+        pages = self.settings.get("soundboard_pages")
+        if not pages:
+            old_slots = self.settings.get("soundboard_slots", [])
+            pages = [{"name": "Peli aloitus", "slots": old_slots}]
+
+        for page_data in pages:
+            self._sb_add_page_widget(page_data)
+
+        outer.addWidget(self._sb_tabs)
+        return frame
+
+    def _sb_add_page_widget(self, page_data: dict):
+        pi = len(self._soundboard_buttons)
+        name = page_data.get("name", f"Sivu {pi + 1}")
+        slots = list(page_data.get("slots", []))
+        while len(slots) < 56:
+            slots.append({"name": f"Slot {len(slots)+1}", "file": "", "image": ""})
+
+        page_btns: list[SoundboardButton] = []
+        container = QWidget()
+        grid = QGridLayout(container)
+        grid.setSpacing(6)
+        grid.setContentsMargins(6, 6, 6, 6)
+
+        for i in range(56):
+            btn = SoundboardButton(pi, i)
+            if slots[i]:
+                btn.set_data(slots[i])
+            btn.clicked_play.connect(self._sb_play_handler)
+            btn.data_changed.connect(self._sb_data_handler)
+            page_btns.append(btn)
+            row, col = divmod(i, 14)
+            grid.addWidget(btn, row, col)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(container)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        self._soundboard_buttons.append(page_btns)
+        self._sb_tabs.addTab(scroll, name)
+
+    def _sb_add_page(self):
+        if self._sb_tabs.count() >= 10:
+            return
+        new_data = {"name": f"Sivu {self._sb_tabs.count() + 1}", "slots": []}
+        self._sb_add_page_widget(new_data)
+        self._save_soundboard()
+        self._sb_tabs.setCurrentIndex(self._sb_tabs.count() - 1)
+
+    def _sb_remove_page(self, index: int):
+        if self._sb_tabs.count() <= 1:
+            return
+        self._sb_tabs.removeTab(index)
+        self._soundboard_buttons.pop(index)
+        # Update page_index on buttons of remaining pages
+        for pi, page_btns in enumerate(self._soundboard_buttons):
+            for btn in page_btns:
+                btn.page_index = pi
+        self._save_soundboard()
+
+    def _sb_tab_ctx_menu(self, pos):
+        index = self._sb_tabs.tabBar().tabAt(pos)
+        if index < 0:
+            return
+        menu = QMenu(self)
+        rename_act = menu.addAction("Nimeä uudelleen…")
+        menu.addSeparator()
+        delete_act = menu.addAction("Poista sivu")
+        delete_act.setEnabled(self._sb_tabs.count() > 1)
+        act = menu.exec(self._sb_tabs.tabBar().mapToGlobal(pos))
+        if act == rename_act:
+            current = self._sb_tabs.tabText(index)
+            text, ok = QInputDialog.getText(self, "Nimeä sivu", "Sivun nimi:", text=current)
+            if ok and text.strip():
+                self._sb_tabs.setTabText(index, text.strip())
+                self._save_soundboard()
+        elif act == delete_act:
+            self._sb_remove_page(index)
+
+    def _sb_play_handler(self, slot_index: int):
+        sender_btn = self.sender()
+        for pi, page_btns in enumerate(self._soundboard_buttons):
+            if sender_btn in page_btns:
+                self._play_soundboard_slot(pi, slot_index)
+                return
+
+    def _sb_data_handler(self, slot_index: int):
+        sender_btn = self.sender()
+        for pi, page_btns in enumerate(self._soundboard_buttons):
+            if sender_btn in page_btns:
+                self._save_soundboard()
+                self._stream_deck.refresh_one(f"soundboard_{slot_index}")
+                return
+
+    def _build_voice_fx_card(self) -> QWidget:
+        frame, layout = self._make_card("Voice FX — real-time voice morphing via virtual output")
+
+        # Enable toggle
+        self._fx_toggle = QPushButton("Enable Voice FX")
+        self._fx_toggle.setCheckable(True)
+        self._fx_toggle.setStyleSheet(
+            "QPushButton { background: #2a3a5a; }"
+            "QPushButton:checked { background: #1a6a3a; border: 1px solid #2a9a5a; }"
+        )
+        self._fx_toggle.clicked.connect(self._toggle_voice_fx)
+        layout.addWidget(self._fx_toggle)
+
+        # FX output device selector
+        out_row = QHBoxLayout()
+        out_lbl = QLabel("FX Output:")
+        out_lbl.setStyleSheet("border: none; font-size: 12px;")
+        out_row.addWidget(out_lbl)
+        self._fx_output_combo = QComboBox()
+        self._populate_fx_output_combo()
+        out_row.addWidget(self._fx_output_combo, 1)
+        layout.addLayout(out_row)
+
+        # Preset buttons
+        presets_lbl = QLabel("Preset:")
+        presets_lbl.setStyleSheet("font-size: 12px; font-weight: bold; border: none; margin-top: 6px;")
+        layout.addWidget(presets_lbl)
+
+        preset_grid = QGridLayout()
+        preset_grid.setSpacing(6)
+        preset_items = list(VoiceEffectProcessor.PRESETS.keys())
+        for i, preset in enumerate(preset_items):
+            btn = QPushButton(preset)
+            btn.setCheckable(True)
+            btn.setChecked(preset == "Normal")
+            btn.setStyleSheet(
+                "QPushButton { background: #1c2535; border: 1px solid #2d3a55;"
+                " border-radius: 8px; color: #a8c0e8; font-weight: 600; padding: 7px 10px; }"
+                "QPushButton:hover { background: #253560; border-color: #58a6ff; color: #d0e8ff; }"
+                "QPushButton:checked { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+                " stop:0 #1a5ccc, stop:1 #1040a0); border: 2px solid #388bfd; color: #fff; }"
+            )
+            btn.clicked.connect(lambda checked, p=preset: self._select_fx_preset(p))
+            preset_grid.addWidget(btn, i // 2, i % 2)
+            self._fx_preset_buttons[preset] = btn
+        layout.addLayout(preset_grid)
+
+        layout.addStretch()
+
+        hint = QLabel("Tip: select VB-Cable or Voicemod as FX Output\nso the morphed audio reaches your games/apps.")
+        hint.setStyleSheet("color: #778899; font-size: 11px; border: none; margin-top: 4px;")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        return frame
+
+    def _populate_fx_output_combo(self):
+        self._fx_output_combo.clear()
+        saved = self.settings.get("voice_fx_output_device")
+        virtual_kw = ("cable", "voicemeeter", "voicemod", "virtual")
+        virtual, other = [], []
+        try:
+            for i, dev in enumerate(sd.query_devices()):
+                if dev["max_output_channels"] > 0:
+                    n = dev["name"]
+                    if any(k in n.lower() for k in virtual_kw):
+                        virtual.append((i, n))
+                    elif not n.startswith("{"):
+                        other.append((i, n))
+        except Exception:
+            pass
+        for i, n in virtual:
+            self._fx_output_combo.addItem(f"🔌 {n}", i)
+        for i, n in other[:8]:
+            self._fx_output_combo.addItem(f"🔊 {n}", i)
+        if saved is not None:
+            for idx in range(self._fx_output_combo.count()):
+                if self._fx_output_combo.itemData(idx) == saved:
+                    self._fx_output_combo.setCurrentIndex(idx)
+                    break
 
     def _build_outputs_card(self) -> QWidget:
         frame, layout = self._make_card("")
@@ -1343,8 +2242,8 @@ class App(QWidget):
         # Scrollable container for per-device rows
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setMinimumHeight(140)
-        scroll.setMaximumHeight(220)
+        scroll.setMinimumHeight(80)
+        scroll.setMaximumHeight(160)
         scroll.setStyleSheet(
             "QScrollArea { border: 1px solid #2f3c5a; border-radius: 4px; background: #151a28; }"
         )
@@ -1368,6 +2267,98 @@ class App(QWidget):
         layout.addLayout(input_row)
 
         return frame
+
+    def _build_meters_bar(self) -> QWidget:
+        """Always-visible compact output meters strip at the bottom of the window."""
+        frame = QFrame()
+        frame.setFixedHeight(36)
+        frame.setStyleSheet(
+            "QFrame { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; }"
+        )
+        outer = QHBoxLayout(frame)
+        outer.setContentsMargins(10, 4, 10, 4)
+        outer.setSpacing(0)
+
+        lbl = QLabel("OUT")
+        lbl.setStyleSheet("color: #3b82f6; font-size: 10px; font-weight: 700; border: none; min-width: 28px;")
+        outer.addWidget(lbl)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setFixedWidth(1)
+        sep.setStyleSheet("background: #21262d; border: none;")
+        outer.addWidget(sep)
+        outer.addSpacing(8)
+
+        # Inner container rebuilt by _refresh_bottom_meters
+        self._mb_inner = QWidget()
+        self._mb_inner.setStyleSheet("background: transparent;")
+        self._mb_inner_lay = QHBoxLayout(self._mb_inner)
+        self._mb_inner_lay.setContentsMargins(0, 0, 0, 0)
+        self._mb_inner_lay.setSpacing(14)
+        self._mb_placeholder = QLabel("No output devices selected")
+        self._mb_placeholder.setStyleSheet("color: #30363d; font-size: 11px; border: none;")
+        self._mb_inner_lay.addWidget(self._mb_placeholder)
+        self._mb_inner_lay.addStretch()
+        outer.addWidget(self._mb_inner, 1)
+
+        return frame
+
+    def _refresh_bottom_meters(self):
+        """Rebuild the always-visible meters to match currently selected devices."""
+        # Clear existing device widgets
+        for bar, db_lbl, container in self._mb_bars.values():
+            container.setParent(None)
+            container.deleteLater()
+        self._mb_bars.clear()
+
+        selected = [(idx, w) for idx, w in self._device_widgets.items()
+                    if w["checkbox"].isChecked()]
+        self._mb_placeholder.setVisible(len(selected) == 0)
+
+        for idx, w in selected:
+            name = w["full_name"]
+            short = (name[:15] + "…") if len(name) > 15 else name
+
+            name_lbl = QLabel(short)
+            name_lbl.setStyleSheet("color: #8b949e; font-size: 9px; border: none;")
+
+            bar = QProgressBar()
+            bar.setRange(0, 1000)
+            bar.setValue(0)
+            bar.setTextVisible(False)
+            bar.setFixedHeight(6)
+            bar.setMinimumWidth(70)
+            bar.setStyleSheet(METER_STYLE_OUT)
+
+            db_lbl = QLabel("-∞")
+            db_lbl.setStyleSheet(
+                "color: #484f58; font-size: 9px; font-family: Consolas; border: none;"
+            )
+            db_lbl.setFixedWidth(34)
+            db_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+            col = QVBoxLayout()
+            col.setContentsMargins(0, 0, 0, 0)
+            col.setSpacing(1)
+            col.addWidget(name_lbl)
+            col.addWidget(bar)
+
+            row_lay = QHBoxLayout()
+            row_lay.setContentsMargins(0, 0, 0, 0)
+            row_lay.setSpacing(4)
+            row_lay.addLayout(col, 1)
+            row_lay.addWidget(db_lbl)
+
+            container = QWidget()
+            container.setStyleSheet("background: transparent;")
+            container.setLayout(row_lay)
+            container.setMinimumWidth(110)
+
+            # Insert before the stretch (last item)
+            insert_pos = self._mb_inner_lay.count() - 1
+            self._mb_inner_lay.insertWidget(insert_pos, container, 1)
+            self._mb_bars[idx] = (bar, db_lbl, container)
 
     # ============ Per-device row helpers ============
 
@@ -1447,13 +2438,18 @@ class App(QWidget):
     def _update_output_meters(self, value: int):
         """Broadcast the output level to every checked device's meter."""
         db_text = self._level_to_db(value)
-        for w in self._device_widgets.values():
+        db_short = db_text.replace(" dB", "")
+        for idx, w in self._device_widgets.items():
             if w["checkbox"].isChecked():
                 w["meter"].setValue(value)
                 w["db_label"].setText(db_text)
             else:
                 w["meter"].setValue(0)
                 w["db_label"].setText("-∞ dB")
+        # Update always-visible bottom meters
+        for idx, (bar, db_lbl, _) in self._mb_bars.items():
+            bar.setValue(value)
+            db_lbl.setText(db_short)
 
     def append_status(self, message: str):
         self.sig_status.emit(message)
@@ -1682,6 +2678,7 @@ class App(QWidget):
 
         device_count = len(routing_devices) + min(len(other_devices), 8)
         self.append_status(f"Found {device_count} output devices ({len(routing_devices)} routing-capable)")
+        self._refresh_bottom_meters()
 
     def refresh_all_devices(self):
         self.populate_output_devices()
@@ -1757,11 +2754,11 @@ class App(QWidget):
         selected_devices = self.get_selected_devices()
         self.history_data["selected_output_devices"] = selected_devices or []
         save_history_data(self.history_data)
-        # Reset meters for unchecked devices immediately
         for w in self._device_widgets.values():
             if not w["checkbox"].isChecked():
                 w["meter"].setValue(0)
                 w["db_label"].setText("-∞ dB")
+        self._refresh_bottom_meters()
 
     def on_input_device_changed(self):
         selected_device = self.get_selected_input_device()
@@ -2121,10 +3118,167 @@ class App(QWidget):
     def update_output_level(self, peak: float):
         self.sig_out_level.emit(int(min(peak * 1000, 1000)))
 
+    # ============ Soundboard ============
+
+    def _play_soundboard_slot(self, page_index: int, slot_index: int):
+        if page_index >= len(self._soundboard_buttons):
+            return
+        page_btns = self._soundboard_buttons[page_index]
+        if slot_index >= len(page_btns):
+            return
+        btn = page_btns[slot_index]
+        data = btn.get_data()
+        path = data.get("file", "")
+        if not path or not os.path.exists(path):
+            self.append_status(f"Soundboard p{page_index+1} slot {slot_index+1}: ei ääntä (oikeaklikkaa)")
+            return
+
+        def _play():
+            try:
+                QTimer.singleShot(0, lambda: btn.set_playing(True))
+                wav = self._load_audio_as_wav(path)
+                play_wav_bytes(wav, device_indices=self.get_selected_devices(),
+                               level_callback=self.update_output_level)
+                self.update_output_level(0.0)
+            except Exception as e:
+                self.append_status(f"Soundboard error: {e}")
+            finally:
+                QTimer.singleShot(0, lambda: btn.set_playing(False))
+                self._stream_deck.refresh_one(f"soundboard_{slot_index}")
+
+        threading.Thread(target=_play, daemon=True).start()
+
+    def _load_audio_as_wav(self, path: str) -> bytes:
+        if path.lower().endswith(".wav"):
+            with open(path, "rb") as f:
+                return f.read()
+        try:
+            from pydub import AudioSegment  # type: ignore
+            seg = AudioSegment.from_file(path)
+            buf = io.BytesIO()
+            seg.export(buf, format="wav")
+            return buf.getvalue()
+        except ImportError:
+            raise RuntimeError(
+                f"Only WAV files are supported without pydub. "
+                f"Install pydub (pip install pydub) for MP3/OGG support. File: {os.path.basename(path)}"
+            )
+
+    def _save_soundboard(self):
+        pages = []
+        for pi, page_btns in enumerate(self._soundboard_buttons):
+            name = self._sb_tabs.tabText(pi)
+            pages.append({"name": name, "slots": [b.get_data() for b in page_btns]})
+        self.settings["soundboard_pages"] = pages
+        save_settings(self.settings)
+
+    # ============ Voice FX ============
+
+    def _toggle_voice_fx(self):
+        if self._fx_toggle.isChecked():
+            in_dev = self.get_selected_input_device()
+            out_dev = self._fx_output_combo.currentData()
+            if in_dev is None:
+                self.append_status("Voice FX: select a microphone first")
+                self._fx_toggle.setChecked(False)
+                return
+            if out_dev is None:
+                self.append_status("Voice FX: select an output device first")
+                self._fx_toggle.setChecked(False)
+                return
+            self.settings["voice_fx_output_device"] = out_dev
+            save_settings(self.settings)
+            self._voice_fx.set_preset(self._current_fx_preset)
+            self._voice_fx.start(in_dev, out_dev)
+            self._fx_toggle.setText("Voice FX: ON")
+        else:
+            self._voice_fx.stop()
+            self._fx_toggle.setText("Enable Voice FX")
+        self._stream_deck.refresh_all()
+
+    def _select_fx_preset(self, preset: str):
+        self._current_fx_preset = preset
+        for p, btn in self._fx_preset_buttons.items():
+            btn.setChecked(p == preset)
+        self._voice_fx.set_preset(preset)
+        if self._voice_fx.is_active:
+            self.append_status(f"Voice FX: preset → {preset}")
+        self._stream_deck.refresh_all()
+
+    # ============ Stream Deck ============
+
+    def _handle_sd_action(self, action: str):
+        if action == "record_toggle":
+            self.on_record_toggle()
+        elif action == "wake_listen_toggle":
+            self.toggle_wake_listener()
+        elif action == "speak":
+            self.on_speak()
+        elif action == "stop_recording":
+            if self.is_recording:
+                self._stop_recording()
+        elif action == "tts_toggle":
+            # Cycle between ElevenLabs and Edge TTS
+            current = self.backend_combo.currentText()
+            nxt = "Edge TTS (free)" if current == "ElevenLabs" else "ElevenLabs"
+            self.backend_combo.setCurrentText(nxt)
+        elif action == "settings":
+            open_settings_dialog(self)
+        elif action.startswith("lang_"):
+            lang = action[5:]
+            idx = self.langbox.findText(lang)
+            if idx >= 0:
+                self.langbox.setCurrentIndex(idx)
+        elif action.startswith("soundboard_"):
+            self._play_soundboard_slot(0, int(action[11:]))
+        elif action.startswith("fx_"):
+            self._select_fx_preset(action[3:])
+        self._stream_deck.refresh_all()
+
+    def _get_sd_button_state(self, action: str) -> tuple[str, bool]:
+        """Return (label, is_active) for rendering a Stream Deck button."""
+        if action == "record_toggle":
+            return ("RECORD", self.is_recording)
+        if action == "wake_listen_toggle":
+            return ("LISTEN", self.wake_listener.is_running())
+        if action == "speak":
+            return ("SPEAK", False)
+        if action == "stop_recording":
+            return ("STOP", self.is_recording)
+        if action == "tts_toggle":
+            return (self.backend_combo.currentText()[:8], False)
+        if action == "settings":
+            return ("SETTINGS", False)
+        if action.startswith("lang_"):
+            lang = action[5:]
+            return (lang[:8], self.langbox.currentText() == lang)
+        if action.startswith("soundboard_"):
+            slot = int(action[11:])
+            if self._soundboard_buttons and slot < len(self._soundboard_buttons[0]):
+                name = self._soundboard_buttons[0][slot].get_data().get("name", f"SB{slot+1}")
+                return (name[:10], False)
+            return (f"SB{slot+1}", False)
+        if action.startswith("fx_"):
+            preset = action[3:]
+            active = self._current_fx_preset == preset and self._voice_fx.is_active
+            return (preset[:10], active)
+        return (action[:10], False)
+
+    # ============ App close ============
+
     def closeEvent(self, event):
         try:
             if self.wake_listener.is_running():
                 self.wake_listener.stop()
+        except Exception:
+            pass
+        try:
+            if self._voice_fx.is_active:
+                self._voice_fx.stop()
+        except Exception:
+            pass
+        try:
+            self._stream_deck.disconnect()
         except Exception:
             pass
         super().closeEvent(event)
@@ -2549,6 +3703,83 @@ def open_settings_dialog(parent_app: "App") -> None:
 
     vbc_install_btn.clicked.connect(_do_vbc_install)
     form.addRow("", vbc_install_btn)
+
+    # ── Data Import / Export ──────────────────────────────────────────
+    _DATA_FILES = ["app_settings.json", "speech_history.json", "credentials.env"]
+    _DATA_DIRS  = ["soundboard", "favorites_audio"]
+
+    def _export_data():
+        path, _ = QFileDialog.getSaveFileName(
+            dlg, "Vie data", "ai_voice_router_backup.zip", "ZIP-arkisto (*.zip)"
+        )
+        if not path:
+            return
+        try:
+            with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for fname in _DATA_FILES:
+                    fp = os.path.join(BASE_PATH, fname)
+                    if os.path.exists(fp):
+                        zf.write(fp, fname)
+                for dname in _DATA_DIRS:
+                    dp = os.path.join(BASE_PATH, dname)
+                    if os.path.isdir(dp):
+                        for root_dir, _, files in os.walk(dp):
+                            for f in files:
+                                full = os.path.join(root_dir, f)
+                                arcname = os.path.relpath(full, BASE_PATH)
+                                zf.write(full, arcname)
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(dlg, "Valmis", f"Data viety:\n{path}")
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(dlg, "Virhe", str(e))
+
+    def _import_data():
+        path, _ = QFileDialog.getOpenFileName(
+            dlg, "Tuo data", "", "ZIP-arkisto (*.zip)"
+        )
+        if not path:
+            return
+        from PyQt6.QtWidgets import QMessageBox
+        ans = QMessageBox.question(
+            dlg, "Korvaa data?",
+            "Tämä korvaa nykyiset asetukset, historian ja soundboard-tiedostot.\nJatketaanko?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            with zipfile.ZipFile(path, "r") as zf:
+                for member in zf.namelist():
+                    dest = os.path.join(BASE_PATH, member)
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with zf.open(member) as src, open(dest, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+            QMessageBox.information(
+                dlg, "Tuotu",
+                "Data tuotu. Käynnistä sovellus uudelleen jotta muutokset astuvat voimaan."
+            )
+        except Exception as e:
+            QMessageBox.critical(dlg, "Virhe", str(e))
+
+    _io_row = _QHBoxLayout()
+    export_btn = _QPushButton("Vie data…")
+    export_btn.setToolTip("Tallentaa kaikki asetukset, historian ja soundboard-tiedostot ZIP-arkistoon")
+    export_btn.clicked.connect(_export_data)
+    import_btn = _QPushButton("Tuo data…")
+    import_btn.setToolTip("Palauttaa aiemmin viedyn ZIP-varmuuskopion")
+    import_btn.clicked.connect(_import_data)
+    _io_row.addWidget(export_btn)
+    _io_row.addWidget(import_btn)
+    _io_row.addStretch()
+    _io_widget = QWidget()
+    _io_widget.setLayout(_io_row)
+    form.addRow("Data backup:", _io_widget)
+    form.addRow("", _desc(
+        "Vie data — pakkaa kaikki omat tiedot (asetukset, historia, soundboard-äänet ja -kuvat, "
+        "suosikit, API-avaimet) yhteen ZIP-tiedostoon. "
+        "Tuo data — palauttaa ZIP-varmuuskopiosta. Vaatii sovelluksen uudelleenkäynnistyksen."
+    ))
 
     # ── Buttons ───────────────────────────────────────────────────────
     btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
@@ -3165,7 +4396,7 @@ if __name__ == "__main__":
         client = OpenAI(api_key=OPENAI_API_KEY)
 
     # Match App.__init__ geometry exactly so splash and main window occupy the same spot
-    _WIN_X, _WIN_Y, _WIN_W, _WIN_H = 200, 200, 1100, 720
+    _WIN_X, _WIN_Y, _WIN_W, _WIN_H = 100, 100, 1320, 637
 
     splash_path = os.path.join(ASSETS_PATH, "juhalempiainensoftware.png")
     splash = None
