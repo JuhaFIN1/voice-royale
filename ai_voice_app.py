@@ -76,6 +76,7 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QMenuBar,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -1842,6 +1843,26 @@ class App(QWidget):
         # Stream Deck
         self._stream_deck = StreamDeckController(self.append_status)
 
+        # ============ Menu bar ============
+        menu_bar = QMenuBar()
+        menu_bar.setStyleSheet(
+            "QMenuBar { background: #0e0e0e; color: #C0C0C0; border-bottom: 1px solid #2a2a2a;"
+            " font-size: 12px; padding: 2px 4px; }"
+            "QMenuBar::item { padding: 4px 12px; border-radius: 4px; }"
+            "QMenuBar::item:selected { background: #1E1E1E; color: #E0E0E0; }"
+            "QMenuBar::item:pressed { background: #3A7BFF; color: #fff; }"
+            "QMenu { background: #1A1A1A; border: 1px solid #2a2a2a; color: #E0E0E0; }"
+            "QMenu::item { padding: 7px 20px; }"
+            "QMenu::item:selected { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF); color: #fff; }"
+            "QMenu::separator { height: 1px; background: #2a2a2a; margin: 4px 0; }"
+        )
+        file_menu = menu_bar.addMenu("File")
+        file_menu.addAction("⚙  Settings", lambda: open_settings_dialog(self))
+        file_menu.addSeparator()
+        file_menu.addAction("ℹ  About Voice Royale", self._show_app_info)
+        file_menu.addSeparator()
+        file_menu.addAction("✕  Exit", QApplication.instance().quit)
+
         # ============ Top row: Speech card (left) + History card (right) ============
         top_row = QHBoxLayout()
         top_row.addWidget(self._build_speech_card(), 2)
@@ -1855,8 +1876,9 @@ class App(QWidget):
 
         # ============ Root layout ============
         root = QVBoxLayout()
-        root.setContentsMargins(8, 8, 8, 8)
+        root.setContentsMargins(8, 4, 8, 8)
         root.setSpacing(6)
+        root.setMenuBar(menu_bar)
         root.addLayout(top_row, 2)
         root.addWidget(self._bottom_tabs, 1)
         root.addWidget(self._build_meters_bar())
@@ -1868,6 +1890,16 @@ class App(QWidget):
         self.sig_status.connect(self._on_status)
         self.sig_set_textbox.connect(self.textbox.setPlainText)
 
+        # Recording state + mic monitor (must be set before populate_input_devices)
+        self.is_recording = False
+        self.recording_thread = None
+        self._mic_peak_ref = [0.0]
+        self._mic_monitor_stream = None
+        self._mic_timer = QTimer(self)
+        self._mic_timer.setInterval(40)
+        self._mic_timer.timeout.connect(self._tick_mic_meter)
+        self._mic_timer.start()
+
         # Load data + populate devices
         self.history_data = load_history_data()
         self.history = self.history_data.get("history", [])
@@ -1878,19 +1910,7 @@ class App(QWidget):
         self.populate_input_devices()
         self.register_hotkey()
 
-        # Recording state
-        self.is_recording = False
-        self.recording_thread = None
-
-        # Mic level meter — always running
-        self._mic_peak_ref = [0.0]
-        self._mic_monitor_stream = None
-        self._mic_timer = QTimer(self)
-        self._mic_timer.setInterval(40)
-        self._mic_timer.timeout.connect(self._tick_mic_meter)
-        self._mic_timer.start()
-
-        # Start always-on mic monitor (idle level display)
+        # Start always-on mic monitor after devices are populated
         self._start_mic_monitor()
 
         # Connect Stream Deck after UI is ready
@@ -1929,26 +1949,12 @@ class App(QWidget):
         layout.setContentsMargins(12, 8, 12, 10)
         layout.setSpacing(6)
 
-        # Header: "SPEECH" title + hamburger menu
-        header_row = QHBoxLayout()
-        header_row.setSpacing(4)
+        # Card title
         title_lbl = QLabel("SPEECH")
         title_lbl.setStyleSheet(
             "font-weight: 700; font-size: 12px; color: #3A7BFF; border: none; letter-spacing: 0.5px;"
         )
-        header_row.addWidget(title_lbl)
-        header_row.addStretch()
-        self._hamburger_btn = QPushButton("≡")
-        self._hamburger_btn.setFixedSize(28, 22)
-        self._hamburger_btn.setToolTip("Menu")
-        self._hamburger_btn.setStyleSheet(
-            "QPushButton { background: #1E1E1E; border: 1px solid #333; border-radius: 6px;"
-            " color: #777; font-size: 15px; font-weight: bold; padding: 0; }"
-            "QPushButton:hover { border-color: #3A7BFF; color: #E0E0E0; }"
-        )
-        self._hamburger_btn.clicked.connect(self._show_main_menu)
-        header_row.addWidget(self._hamburger_btn)
-        layout.addLayout(header_row)
+        layout.addWidget(title_lbl)
 
         # Status log — 5 rows
         self.status_text = QTextEdit()
