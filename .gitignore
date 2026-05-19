@@ -25,3 +25,18 @@ build/
 # OS
 Thumbs.db
 desktop.ini
+
+# Claude Code internal files
+.claude/
+
+# GitHub Copilot instructions (internal dev tooling)
+.github/
+copilot-instructions.md
+
+# Runtime data (user-specific)
+app_settings.json
+speech_history.json
+ruvector.db
+soundboard/
+installer_output/
+*.swarm/

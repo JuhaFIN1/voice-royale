@@ -1,4 +1,4 @@
-# AI Voice Router — Claude Code context
+# Voice Royale — Claude Code context
 
 ## Projekti lyhyesti
 

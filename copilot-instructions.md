@@ -1,4 +1,4 @@
-# Copilot Instructions for AI Voice Router
+# Copilot Instructions for Voice Royale
 
 Windows desktop Python app for AI-powered voice translation, built with PyQt6.
 

@@ -93,40 +93,41 @@ from PyQt6.QtWidgets import (
 # =========================
 # UI STYLE CONSTANTS
 # =========================
-METER_LABEL_STYLE = "color: #58a6ff; font-size: 11px; font-weight: 700; letter-spacing: 0.5px;"
+METER_LABEL_STYLE = "color: #3A7BFF; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;"
 METER_STYLE_MIC = (
-    "QProgressBar { background: #0d1117; border: 1px solid #21262d; border-radius: 4px; }"
+    "QProgressBar { background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 4px; }"
     "QProgressBar::chunk { background: qlineargradient(x1:0, x2:1,"
-    " stop:0 #22c55e, stop:0.6 #eab308, stop:1 #ef4444); border-radius: 3px; }"
+    " stop:0 #00FF6A, stop:0.6 #FFD700, stop:1 #FF3A3A); border-radius: 3px; }"
 )
 METER_STYLE_OUT = (
-    "QProgressBar { background: #0d1117; border: 1px solid #21262d; border-radius: 4px; }"
+    "QProgressBar { background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 4px; }"
     "QProgressBar::chunk { background: qlineargradient(x1:0, x2:1,"
-    " stop:0 #3b82f6, stop:0.6 #8b5cf6, stop:1 #ef4444); border-radius: 3px; }"
+    " stop:0 #00FF6A, stop:0.6 #FFD700, stop:1 #FF3A3A); border-radius: 3px; }"
 )
 LIST_STYLE = """
     QListWidget {
-        background: #161b22;
-        border: 1px solid #30363d;
+        background: #1A1A1A;
+        border: 1px solid #2a2a2a;
         border-radius: 8px;
-        font-family: "Segoe UI", sans-serif;
-        font-size: 13px;
+        font-family: "Inter", "Segoe UI", sans-serif;
+        font-size: 12px;
     }
     QListWidget::item {
-        background: #21262d;
-        border: 1px solid #30363d;
+        background: #1E1E1E;
+        border: 1px solid #2a2a2a;
         border-radius: 6px;
         margin: 2px 4px;
-        padding: 5px 8px;
-        color: #e6edf3;
+        padding: 4px 7px;
+        color: #C8C8C8;
     }
     QListWidget::item:hover {
-        background: #30363d;
-        border-color: #58a6ff;
+        background: #252525;
+        border-color: #9A4DFF;
+        color: #ffffff;
     }
     QListWidget::item:selected {
-        background: #1f6feb;
-        border-color: #388bfd;
+        background: qlineargradient(x1:0, x2:1, stop:0 #3A7BFF, stop:1 #9A4DFF);
+        border-color: #3A7BFF;
         color: #ffffff;
     }
 """
@@ -136,10 +137,10 @@ LIST_STYLE = """
 # =========================
 def get_base_path():
     if getattr(sys, "frozen", False):
-        # Store user data in %APPDATA%\AI Voice Router — writable without admin rights,
+        # Store user data in %APPDATA%\Voice Royale — writable without admin rights,
         # survives reinstalls/upgrades since the installer never touches AppData.
         appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
-        user_dir = os.path.join(appdata, "AI Voice Router")
+        user_dir = os.path.join(appdata, "Voice Royale")
         os.makedirs(user_dir, exist_ok=True)
         return user_dir
     return os.path.dirname(os.path.abspath(__file__))
@@ -791,20 +792,20 @@ class SoundboardButton(QWidget):
 
     _STYLE_IDLE = (
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-        " stop:0 #1c2535, stop:1 #141a28);"
-        " border: 1px solid #2d3a55; border-radius: 8px;"
-        " color: #a8c0e8; font-size: 9px; font-weight: 700;"
+        " stop:0 #1E1E1E, stop:1 #161616);"
+        " border: 1px solid #2a2a2a; border-radius: 8px;"
+        " color: #888888; font-size: 9px; font-weight: 700;"
         " padding-bottom: 3px; }"
         "QToolButton:hover { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-        " stop:0 #253560, stop:1 #1a2840);"
-        " border-color: #58a6ff; color: #d0e8ff; }"
-        "QToolButton:pressed { background: #0f1a2e; border-color: #1f6feb; }"
+        " stop:0 #252525, stop:1 #1E1E1E);"
+        " border-color: #9A4DFF; color: #E0E0E0; }"
+        "QToolButton:pressed { background: #0e0e0e; border-color: #3A7BFF; }"
     )
     _STYLE_PLAY = (
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-        " stop:0 #0f3d20, stop:1 #0a2a15);"
-        " border: 2px solid #22c55e; border-radius: 8px;"
-        " color: #4ade80; font-size: 9px; font-weight: 700; padding-bottom: 3px; }"
+        " stop:0 #0a2010, stop:1 #061508);"
+        " border: 2px solid #00FF6A; border-radius: 8px;"
+        " color: #00FF6A; font-size: 9px; font-weight: 700; padding-bottom: 3px; }"
     )
 
     def __init__(self, page_index: int, slot_index: int, parent=None):
@@ -847,9 +848,9 @@ class SoundboardButton(QWidget):
                                           Qt.TransformationMode.SmoothTransformation)
         else:
             px = QPixmap(34, 34)
-            px.fill(QColor("#1c2535"))
+            px.fill(QColor("#1A1A1A"))
             p = QPainter(px)
-            p.setPen(QColor("#3d5af1"))
+            p.setPen(QColor("#3A7BFF"))
             p.setFont(QFont("Segoe UI", 14))
             p.drawText(px.rect(), Qt.AlignmentFlag.AlignCenter, "♪")
             p.end()
@@ -1643,92 +1644,174 @@ class App(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("AI Voice Router")
+        self.setWindowTitle("Voice Royale")
         self.setGeometry(100, 100, 1320, 637)
         icon_path = os.path.join(ASSETS_PATH, "iconimage.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
         self.setStyleSheet("""
-            QWidget { background: #0d1117; color: #e6edf3;
-                      font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; }
-            QFrame  { background: #161b22; border: 1px solid #30363d; border-radius: 12px; }
-            QLabel  { background: transparent; border: none; color: #e6edf3; }
+            QWidget {
+                background: #121212;
+                color: #E0E0E0;
+                font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+                font-size: 13px;
+            }
+            QFrame {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #121212,stop:1 #1A1A1A);
+                border: 1px solid #2a2a2a;
+                border-radius: 8px;
+            }
+            QLabel { background: transparent; border: none; color: #E0E0E0; }
 
             QPushButton {
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #2a3340,stop:1 #1e2530);
-                border: 1px solid #3d4f6e; border-radius: 8px;
-                color: #c9d8f0; padding: 8px 16px; font-size: 13px; font-weight: 600;
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #1E1E1E,stop:1 #181818);
+                border: 1px solid #333333;
+                border-radius: 8px;
+                color: #E0E0E0;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: 600;
                 min-height: 30px;
             }
             QPushButton:hover {
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #354060,stop:1 #26334d);
-                border-color: #58a6ff; color: #e6edf3;
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #252525,stop:1 #1E1E1E);
+                border-color: #9A4DFF;
+                color: #ffffff;
             }
-            QPushButton:pressed { background: #161b22; border-color: #1f6feb; }
+            QPushButton:pressed { background: #0e0e0e; border-color: #3A7BFF; }
             QPushButton:checked {
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #1a5ccc,stop:1 #1040a0);
-                border-color: #388bfd; color: #ffffff;
+                background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
+                border-color: #3A7BFF;
+                color: #ffffff;
             }
-            QPushButton:disabled { background: #161b22; color: #484f58; border-color: #21262d; }
+            QPushButton:disabled { background: #1A1A1A; color: #444444; border-color: #222222; }
 
             QToolButton {
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #1c2535,stop:1 #141a28);
-                border: 1px solid #2d3a55; border-radius: 10px;
-                color: #a8c0e8; font-size: 11px; font-weight: 700;
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #1E1E1E,stop:1 #161616);
+                border: 1px solid #2a2a2a;
+                border-radius: 8px;
+                color: #B0B0B0;
+                font-size: 11px;
+                font-weight: 700;
             }
-            QToolButton:hover { background: #253560; border-color: #58a6ff; color: #d0e8ff; }
-            QToolButton:pressed { background: #0f1a2e; }
+            QToolButton:hover { background: #252525; border-color: #3A7BFF; color: #ffffff; }
+            QToolButton:pressed { background: #0e0e0e; border-color: #9A4DFF; }
 
             QComboBox {
-                background: #21262d; border: 1px solid #30363d; border-radius: 8px;
-                color: #e6edf3; padding: 5px 10px; min-height: 30px;
+                background: #1E1E1E;
+                border: 1px solid #2a2a2a;
+                border-radius: 8px;
+                color: #E0E0E0;
+                padding: 5px 10px;
+                min-height: 30px;
             }
-            QComboBox:hover { border-color: #58a6ff; }
+            QComboBox:hover { border-color: #3A7BFF; }
             QComboBox::drop-down { border: none; width: 22px; }
             QComboBox QAbstractItemView {
-                background: #161b22; border: 1px solid #30363d;
-                selection-background-color: #1f6feb; color: #e6edf3;
+                background: #1A1A1A;
+                border: 1px solid #2a2a2a;
+                selection-background-color: #3A7BFF;
+                color: #E0E0E0;
             }
 
             QTextEdit {
-                background: #161b22; border: 1px solid #30363d; border-radius: 8px;
-                color: #e6edf3; padding: 6px; selection-background-color: #1f6feb;
+                background: #181818;
+                border: 1px solid #2a2a2a;
+                border-radius: 8px;
+                color: #E0E0E0;
+                padding: 6px;
+                selection-background-color: #3A7BFF;
             }
-            QTextEdit:focus { border-color: #58a6ff; }
+            QTextEdit:focus { border-color: #3A7BFF; }
             QLineEdit {
-                background: #21262d; border: 1px solid #30363d; border-radius: 8px;
-                color: #e6edf3; padding: 5px 10px; min-height: 30px;
+                background: #1E1E1E;
+                border: 1px solid #2a2a2a;
+                border-radius: 8px;
+                color: #E0E0E0;
+                padding: 5px 10px;
+                min-height: 30px;
             }
-            QLineEdit:focus { border-color: #58a6ff; }
+            QLineEdit:focus { border-color: #3A7BFF; }
 
-            QCheckBox { color: #e6edf3; background: transparent; spacing: 8px; }
-            QCheckBox::indicator { width: 17px; height: 17px; border-radius: 5px;
-                                   border: 1px solid #30363d; background: #21262d; }
-            QCheckBox::indicator:hover  { border-color: #58a6ff; }
-            QCheckBox::indicator:checked { background: #1f6feb; border-color: #388bfd; }
+            QCheckBox { color: #E0E0E0; background: transparent; spacing: 8px; }
+            QCheckBox::indicator {
+                width: 17px; height: 17px; border-radius: 5px;
+                border: 1px solid #333333; background: #1E1E1E;
+            }
+            QCheckBox::indicator:hover { border-color: #3A7BFF; }
+            QCheckBox::indicator:checked {
+                background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
+                border-color: #3A7BFF;
+            }
 
-            QScrollBar:vertical { background: #0d1117; width: 8px; border-radius: 4px; margin: 0; }
-            QScrollBar::handle:vertical { background: #30363d; border-radius: 4px; min-height: 24px; }
-            QScrollBar::handle:vertical:hover { background: #484f58; }
+            QScrollBar:vertical { background: #121212; width: 8px; border-radius: 4px; margin: 0; }
+            QScrollBar::handle:vertical {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
+                border-radius: 4px; min-height: 24px;
+            }
+            QScrollBar::handle:vertical:hover { background: #9A4DFF; }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+            QScrollBar:horizontal { background: #121212; height: 8px; border-radius: 4px; margin: 0; }
+            QScrollBar::handle:horizontal {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
+                border-radius: 4px; min-width: 24px;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 
-            QTabWidget::pane { border: 1px solid #30363d; border-radius: 10px;
-                               background: #161b22; }
-            QTabBar::tab { background: #21262d; color: #8b949e; padding: 9px 20px;
-                           font-weight: 700; border: 1px solid #30363d;
-                           border-bottom: none; border-radius: 8px 8px 0 0; margin-right: 3px; }
-            QTabBar::tab:selected  { background: #161b22; color: #58a6ff; }
-            QTabBar::tab:hover:!selected { background: #30363d; color: #c9d1d9; }
+            QTabWidget::pane {
+                border: 1px solid #2a2a2a;
+                border-radius: 8px;
+                background: #1A1A1A;
+            }
+            QTabBar::tab {
+                background: #1E1E1E;
+                color: #888888;
+                padding: 9px 20px;
+                font-weight: 700;
+                font-size: 12px;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+                border: 1px solid #2a2a2a;
+                border-bottom: none;
+                border-radius: 8px 8px 0 0;
+                margin-right: 3px;
+            }
+            QTabBar::tab:selected {
+                background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
+                color: #ffffff;
+                border-color: #3A7BFF;
+            }
+            QTabBar::tab:hover:!selected { background: #252525; color: #E0E0E0; border-color: #9A4DFF; }
 
-            QListWidget { background: #161b22; border: 1px solid #30363d; border-radius: 8px; }
-            QListWidget::item { background: #21262d; border: 1px solid #30363d;
-                                border-radius: 6px; margin: 2px 4px; padding: 5px 8px; color: #e6edf3; }
-            QListWidget::item:hover    { background: #30363d; border-color: #58a6ff; }
-            QListWidget::item:selected { background: #1f6feb; border-color: #388bfd; color: #fff; }
+            QListWidget { background: #1A1A1A; border: 1px solid #2a2a2a; border-radius: 8px; }
+            QListWidget::item {
+                background: #1E1E1E; border: 1px solid #2a2a2a;
+                border-radius: 6px; margin: 2px 4px; padding: 5px 8px; color: #E0E0E0;
+            }
+            QListWidget::item:hover { background: #252525; border-color: #9A4DFF; }
+            QListWidget::item:selected {
+                background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
+                border-color: #3A7BFF; color: #fff;
+            }
 
-            QScrollArea { background: #161b22; border: 1px solid #30363d; border-radius: 8px; }
-            QProgressBar { background: #0d1117; border: 1px solid #21262d; border-radius: 4px; }
-            QProgressBar::chunk { background: #1f6feb; border-radius: 3px; }
+            QScrollArea { background: #1A1A1A; border: 1px solid #2a2a2a; border-radius: 8px; }
+            QProgressBar { background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 4px; }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
+                border-radius: 3px;
+            }
+
+            QMenu {
+                background: #1A1A1A;
+                border: 1px solid #2a2a2a;
+                border-radius: 8px;
+                color: #E0E0E0;
+            }
+            QMenu::item { padding: 6px 20px; }
+            QMenu::item:selected {
+                background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
+                color: #ffffff;
+            }
         """)
 
         # Load app settings first so custom languages are available for icon building
@@ -1799,11 +1882,16 @@ class App(QWidget):
         self.is_recording = False
         self.recording_thread = None
 
-        # Mic level meter — updated by QTimer on main thread (never from PortAudio callback)
+        # Mic level meter — always running
         self._mic_peak_ref = [0.0]
+        self._mic_monitor_stream = None
         self._mic_timer = QTimer(self)
         self._mic_timer.setInterval(40)
         self._mic_timer.timeout.connect(self._tick_mic_meter)
+        self._mic_timer.start()
+
+        # Start always-on mic monitor (idle level display)
+        self._start_mic_monitor()
 
         # Connect Stream Deck after UI is ready
         if self.settings.get("stream_deck_enabled", True):
@@ -1815,40 +1903,88 @@ class App(QWidget):
         frame = QFrame()
         frame.setFrameShape(QFrame.Shape.StyledPanel)
         frame.setStyleSheet(
-            "QFrame { background: #161b22; border: 1px solid #30363d; border-radius: 12px; }"
+            "QFrame { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #141414,stop:1 #1A1A1A);"
+            " border: 1px solid #2a2a2a; border-radius: 8px; }"
         )
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(12, 10, 12, 12)
         layout.setSpacing(8)
         if title:
-            title_lbl = QLabel(title)
+            title_lbl = QLabel(title.upper())
             title_lbl.setStyleSheet(
-                "font-weight: 700; font-size: 14px; color: #58a6ff; border: none;"
-                " letter-spacing: 0.3px; padding-bottom: 2px;"
+                "font-weight: 700; font-size: 12px; color: #3A7BFF; border: none;"
+                " letter-spacing: 0.5px; padding-bottom: 2px;"
             )
             layout.addWidget(title_lbl)
         return frame, layout
 
     def _build_speech_card(self) -> QWidget:
-        frame, layout = self._make_card("Speech")
+        frame = QFrame()
+        frame.setFrameShape(QFrame.Shape.StyledPanel)
+        frame.setStyleSheet(
+            "QFrame { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #141414,stop:1 #1A1A1A);"
+            " border: 1px solid #2a2a2a; border-radius: 8px; }"
+        )
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(12, 8, 12, 10)
+        layout.setSpacing(6)
 
+        # Header: "SPEECH" title + hamburger menu
+        header_row = QHBoxLayout()
+        header_row.setSpacing(4)
+        title_lbl = QLabel("SPEECH")
+        title_lbl.setStyleSheet(
+            "font-weight: 700; font-size: 12px; color: #3A7BFF; border: none; letter-spacing: 0.5px;"
+        )
+        header_row.addWidget(title_lbl)
+        header_row.addStretch()
+        self._hamburger_btn = QPushButton("≡")
+        self._hamburger_btn.setFixedSize(28, 22)
+        self._hamburger_btn.setToolTip("Menu")
+        self._hamburger_btn.setStyleSheet(
+            "QPushButton { background: #1E1E1E; border: 1px solid #333; border-radius: 6px;"
+            " color: #777; font-size: 15px; font-weight: bold; padding: 0; }"
+            "QPushButton:hover { border-color: #3A7BFF; color: #E0E0E0; }"
+        )
+        self._hamburger_btn.clicked.connect(self._show_main_menu)
+        header_row.addWidget(self._hamburger_btn)
+        layout.addLayout(header_row)
+
+        # Status log — 5 rows
         self.status_text = QTextEdit()
         self.status_text.setReadOnly(True)
         self.status_text.setPlainText("Ready. Type or record. Hotkey: Ctrl+Alt+Space")
-        self.status_text.setMinimumHeight(60)
-        self.status_text.setMaximumHeight(90)
+        self.status_text.setMinimumHeight(90)
+        self.status_text.setMaximumHeight(115)
         self.status_text.setStyleSheet(
-            "QTextEdit { background: #0d1117; border: 1px solid #21262d; border-radius: 8px;"
-            " color: #8b949e; font-size: 12px; padding: 6px; }"
+            "QTextEdit { background: #0e0e0e; border: 1px solid #2a2a2a; border-radius: 8px;"
+            " color: #888888; font-size: 11px; padding: 5px; }"
         )
         layout.addWidget(self.status_text)
 
-        # Target lang + TTS backend
-        options_row = QHBoxLayout()
-        options_row.setSpacing(8)
-        lbl_target = QLabel("Target:")
-        lbl_target.setStyleSheet("color: #8b949e; font-size: 12px;")
-        options_row.addWidget(lbl_target)
+        # Translated text label
+        self.translated_label = QLabel("Translated text will appear here.")
+        self.translated_label.setWordWrap(True)
+        self.translated_label.setMinimumHeight(32)
+        self.translated_label.setStyleSheet(
+            "color: #3A7BFF; padding: 5px 10px; background: #0e0e0e;"
+            "border: 1px solid #3A7BFF; border-radius: 8px; font-size: 12px;"
+        )
+        layout.addWidget(self.translated_label)
+
+        # Target selector (left narrow column) + textbox (right)
+        text_row = QHBoxLayout()
+        text_row.setSpacing(6)
+        text_row.setContentsMargins(0, 0, 0, 0)
+
+        lang_col = QVBoxLayout()
+        lang_col.setSpacing(2)
+        lang_col.setContentsMargins(0, 0, 0, 0)
+        lbl_target = QLabel("TARGET")
+        lbl_target.setStyleSheet(
+            "color: #555555; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;"
+        )
+        lang_col.addWidget(lbl_target)
         self.langbox = QComboBox()
         for lang in LANGS.keys():
             icon = self.lang_icons.get(lang)
@@ -1859,40 +1995,26 @@ class App(QWidget):
         default_lang = self.settings.get("default_target_lang", "Auto")
         if self.langbox.findText(default_lang) >= 0:
             self.langbox.setCurrentText(default_lang)
-        options_row.addWidget(self.langbox, 1)
-        options_row.addSpacing(8)
-        lbl_tts = QLabel("TTS:")
-        lbl_tts.setStyleSheet("color: #8b949e; font-size: 12px;")
-        options_row.addWidget(lbl_tts)
-        self.backend_combo = QComboBox()
-        for backend in ("ElevenLabs", "Edge TTS (free)"):
-            self.backend_combo.addItem(backend)
-        self.backend_combo.setCurrentText(self.settings.get("default_tts_backend", DEFAULT_TTS_BACKEND))
-        options_row.addWidget(self.backend_combo, 1)
-        layout.addLayout(options_row)
-
-        self.translated_label = QLabel("Translated text will appear here.")
-        self.translated_label.setWordWrap(True)
-        self.translated_label.setMinimumHeight(38)
-        self.translated_label.setStyleSheet(
-            "color: #58a6ff; padding: 8px 10px; background: #0d1117;"
-            "border: 1px solid #21262d; border-radius: 8px; font-size: 13px;"
-        )
-        layout.addWidget(self.translated_label)
+        self.langbox.setFixedWidth(118)
+        lang_col.addWidget(self.langbox)
+        lang_col.addStretch()
+        text_row.addLayout(lang_col)
 
         self.textbox = QTextEdit()
-        self.textbox.setPlaceholderText("Type the phrase to speak…\nOr press Record to use voice input.")
+        self.textbox.setPlaceholderText("Type the phrase to speak…\nOr press 🎤 to record.")
         self.textbox.setMinimumHeight(90)
-        layout.addWidget(self.textbox, 1)
+        text_row.addWidget(self.textbox, 1)
+        layout.addLayout(text_row, 1)
 
+        # Record button — floating overlay inside textbox
         self.record_button = QPushButton("🎤", self.textbox)
         self.record_button.setFixedSize(38, 38)
         self.record_button.setToolTip("Record")
         self.record_button.clicked.connect(self.on_record_toggle)
         self.record_button.setStyleSheet(
-            "QPushButton { background: rgba(20,30,50,210); border: 1px solid #30363d;"
+            "QPushButton { background: rgba(18,18,18,210); border: 1px solid #333333;"
             " border-radius: 10px; font-size: 18px; padding: 0; }"
-            "QPushButton:hover { background: rgba(31,111,235,200); border-color: #388bfd; }"
+            "QPushButton:hover { background: rgba(58,123,255,180); border-color: #3A7BFF; }"
             "QPushButton:disabled { opacity: 0.3; }"
         )
         self.record_button.move(self.textbox.width() - 44, self.textbox.height() - 44)
@@ -1900,89 +2022,69 @@ class App(QWidget):
         self.textbox.installEventFilter(self._rec_filter)
         self.record_button.raise_()
 
-        # Primary action buttons
+        # Hidden widgets — needed by app logic but not shown in this card
+        self.backend_combo = QComboBox()
+        for backend in ("ElevenLabs", "Edge TTS (free)"):
+            self.backend_combo.addItem(backend)
+        self.backend_combo.setCurrentText(self.settings.get("default_tts_backend", DEFAULT_TTS_BACKEND))
+
+        self.test_audio_button = QPushButton("🧪  Test")
+        self.test_audio_button.clicked.connect(self.on_test_audio)
+
+        # Button row: Speak | Favorite | Listen
         button_row = QHBoxLayout()
         button_row.setSpacing(8)
 
         self.speak_button = QPushButton("🔊  Speak")
         self.speak_button.clicked.connect(self.on_speak)
         self.speak_button.setStyleSheet(
-            "QPushButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-            " stop:0 #1a5ccc, stop:1 #1040a0);"
-            " border: 1px solid #388bfd; border-radius: 8px; color: #fff;"
-            " font-size: 14px; font-weight: 700; padding: 9px 20px; }"
-            "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-            " stop:0 #2a6cdc, stop:1 #1a50b0); border-color: #58a6ff; }"
-            "QPushButton:pressed { background: #0f3080; }"
-            "QPushButton:disabled { background: #161b22; color: #484f58; border-color: #21262d; }"
+            "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
+            " stop:0 #3A7BFF, stop:1 #9A4DFF);"
+            " border: 1px solid #3A7BFF; border-radius: 8px; color: #fff;"
+            " font-size: 13px; font-weight: 700; padding: 8px 18px; letter-spacing: 0.5px; }"
+            "QPushButton:hover { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
+            " stop:0 #5590FF, stop:1 #B060FF); border-color: #9A4DFF; }"
+            "QPushButton:pressed { background: #1a1a1a; border-color: #3A7BFF; }"
+            "QPushButton:disabled { background: #1A1A1A; color: #444444; border-color: #222222; }"
         )
         button_row.addWidget(self.speak_button, 2)
-
-        self.test_audio_button = QPushButton("🧪  Test")
-        self.test_audio_button.clicked.connect(self.on_test_audio)
-        button_row.addWidget(self.test_audio_button, 1)
 
         self.favorite_button = QPushButton("⭐  Favorite")
         self.favorite_button.clicked.connect(self.toggle_favorite)
         self.favorite_button.setStyleSheet(
             "QPushButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-            " stop:0 #3a2800, stop:1 #251a00);"
-            " border: 1px solid #6a4f00; border-radius: 8px; color: #d4a017; font-weight: 600; }"
-            "QPushButton:hover { border-color: #eab308; color: #fbbf24; }"
+            " stop:0 #2a2000, stop:1 #1c1600);"
+            " border: 1px solid #5a4200; border-radius: 8px; color: #FFD700; font-weight: 600; }"
+            "QPushButton:hover { border-color: #FFD700; color: #FFE84D; background: #2e2200; }"
         )
         button_row.addWidget(self.favorite_button, 1)
-        layout.addLayout(button_row)
 
-        # Wake-word + settings row
-        ws_row = QHBoxLayout()
-        ws_row.setSpacing(8)
-        self.listen_button = QPushButton("👂  Start Listening")
+        self.listen_button = QPushButton("👂  Listen")
         self.listen_button.setCheckable(True)
         self.listen_button.clicked.connect(self.toggle_wake_listener)
         self.listen_button.setStyleSheet(
             "QPushButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-            " stop:0 #1a2a1a, stop:1 #101a10);"
-            " border: 1px solid #2d4a2d; border-radius: 8px; color: #6aaa6a; font-weight: 600; }"
-            "QPushButton:hover { border-color: #3fb950; color: #4ade80; }"
+            " stop:0 #141a14, stop:1 #0e130e);"
+            " border: 1px solid #1f3d1f; border-radius: 8px; color: #00FF6A; font-weight: 600; }"
+            "QPushButton:hover { border-color: #00FF6A; color: #5AFFAA; background: #192319; }"
             "QPushButton:checked { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-            " stop:0 #0f3d1a, stop:1 #0a2810);"
-            " border: 2px solid #22c55e; color: #4ade80; }"
+            " stop:0 #0a2e14, stop:1 #071e0d);"
+            " border: 2px solid #00FF6A; color: #00FF6A; }"
         )
-        ws_row.addWidget(self.listen_button)
+        button_row.addWidget(self.listen_button, 1)
+        layout.addLayout(button_row)
 
+        # Status + hotkey compact row
+        info_row = QHBoxLayout()
+        info_row.setContentsMargins(0, 0, 0, 0)
         self.wake_status_label = QLabel("Wake-word: off")
-        self.wake_status_label.setStyleSheet("color: #484f58; font-size: 11px; border: none;")
-        ws_row.addWidget(self.wake_status_label, 1)
-
-        self.settings_button = QPushButton("⚙️  Settings")
-        self.settings_button.clicked.connect(lambda: open_settings_dialog(self))
-        ws_row.addWidget(self.settings_button)
-        layout.addLayout(ws_row)
-
-        # MIC meter row (inside speech card, as in chosen preview)
-        mic_row = QHBoxLayout()
-        mic_lbl = QLabel("MIC")
-        mic_lbl.setStyleSheet(METER_LABEL_STYLE)
-        mic_lbl.setMinimumWidth(60)
-        self.mic_level_bar = QProgressBar()
-        self.mic_level_bar.setRange(0, 1000)
-        self.mic_level_bar.setValue(0)
-        self.mic_level_bar.setTextVisible(False)
-        self.mic_level_bar.setFixedHeight(12)
-        self.mic_level_bar.setStyleSheet(METER_STYLE_MIC)
-        self.mic_db_label = QLabel("-∞ dB")
-        self.mic_db_label.setStyleSheet("color: #99a; font-family: 'Consolas', monospace; font-size: 11px;")
-        self.mic_db_label.setMinimumWidth(64)
-        self.mic_db_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        mic_row.addWidget(mic_lbl)
-        mic_row.addWidget(self.mic_level_bar, 1)
-        mic_row.addWidget(self.mic_db_label)
-        layout.addLayout(mic_row)
-
-        self.hotkey_label = QLabel(f"Global hotkey: {self.settings.get('hotkey', 'ctrl+alt+space')}")
-        self.hotkey_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hotkey_label.setStyleSheet("color: #99a6c8; font-size: 11px; margin-top: 4px;")
-        layout.addWidget(self.hotkey_label)
+        self.wake_status_label.setStyleSheet("color: #444444; font-size: 10px; border: none;")
+        info_row.addWidget(self.wake_status_label, 1)
+        self.hotkey_label = QLabel(f"Hotkey: {self.settings.get('hotkey', 'ctrl+alt+space')}")
+        self.hotkey_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.hotkey_label.setStyleSheet("color: #444444; font-size: 10px; border: none;")
+        info_row.addWidget(self.hotkey_label)
+        layout.addLayout(info_row)
 
         return frame
 
@@ -1995,8 +2097,8 @@ class App(QWidget):
         self.history_list.setStyleSheet(LIST_STYLE)
         layout.addWidget(self.history_list, 1)
 
-        fav_title = QLabel("Favorites")
-        fav_title.setStyleSheet("font-weight: bold; font-size: 14px; color: #cce; border: none; margin-top: 6px;")
+        fav_title = QLabel("FAVORITES")
+        fav_title.setStyleSheet("font-weight: 700; font-size: 11px; color: #9A4DFF; border: none; margin-top: 6px; letter-spacing: 0.5px;")
         layout.addWidget(fav_title)
 
         self.favorites_list = QListWidget()
@@ -2017,12 +2119,14 @@ class App(QWidget):
         self._sb_tabs = QTabWidget()
         self._sb_tabs.setTabsClosable(False)
         self._sb_tabs.setStyleSheet(
-            "QTabWidget::pane { border: 1px solid #21262d; border-radius: 4px; background: #0d1117; }"
+            "QTabWidget::pane { border: 1px solid #2a2a2a; border-radius: 8px; background: #121212; }"
             "QTabBar { margin-right: 36px; }"
-            "QTabBar::tab { background: #161b22; color: #8b949e; padding: 5px 14px;"
-            " border: 1px solid #21262d; border-bottom: none; border-radius: 4px 4px 0 0; margin-right: 2px; }"
-            "QTabBar::tab:selected { background: #1f6feb; color: #fff; border-color: #388bfd; }"
-            "QTabBar::tab:hover:!selected { background: #21262d; color: #cdd; }"
+            "QTabBar::tab { background: #1E1E1E; color: #666666; padding: 5px 14px;"
+            " font-size: 11px; font-weight: 700; letter-spacing: 0.5px;"
+            " border: 1px solid #2a2a2a; border-bottom: none; border-radius: 4px 4px 0 0; margin-right: 2px; }"
+            "QTabBar::tab:selected { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);"
+            " color: #fff; border-color: #3A7BFF; }"
+            "QTabBar::tab:hover:!selected { background: #252525; color: #E0E0E0; border-color: #9A4DFF; }"
         )
 
         # Right-click context menu on tab bar
@@ -2037,10 +2141,10 @@ class App(QWidget):
         add_page_btn.setFixedSize(26, 22)
         add_page_btn.setToolTip("Lisää sivu (max 10)")
         add_page_btn.setStyleSheet(
-            "QPushButton { background: #1f6feb; color: #fff; border: none;"
-            " border-radius: 4px; font-size: 15px; font-weight: bold; padding: 0; }"
-            "QPushButton:hover { background: #388bfd; }"
-            "QPushButton:pressed { background: #1040a0; }"
+            "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);"
+            " color: #fff; border: none; border-radius: 4px; font-size: 15px; font-weight: bold; padding: 0; }"
+            "QPushButton:hover { background: #9A4DFF; }"
+            "QPushButton:pressed { background: #1a1a1a; border: 1px solid #3A7BFF; }"
         )
         add_page_btn.clicked.connect(self._sb_add_page)
         _corner_lay.addWidget(add_page_btn)
@@ -2149,16 +2253,18 @@ class App(QWidget):
         self._fx_toggle = QPushButton("Enable Voice FX")
         self._fx_toggle.setCheckable(True)
         self._fx_toggle.setStyleSheet(
-            "QPushButton { background: #2a3a5a; }"
-            "QPushButton:checked { background: #1a6a3a; border: 1px solid #2a9a5a; }"
+            "QPushButton { background: #1E1E1E; border: 1px solid #2a2a2a; color: #888888; }"
+            "QPushButton:hover { border-color: #3A7BFF; color: #E0E0E0; }"
+            "QPushButton:checked { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #003A1A,stop:1 #00270F);"
+            " border: 1px solid #00FF6A; color: #00FF6A; }"
         )
         self._fx_toggle.clicked.connect(self._toggle_voice_fx)
         layout.addWidget(self._fx_toggle)
 
         # FX output device selector
         out_row = QHBoxLayout()
-        out_lbl = QLabel("FX Output:")
-        out_lbl.setStyleSheet("border: none; font-size: 12px;")
+        out_lbl = QLabel("FX OUTPUT:")
+        out_lbl.setStyleSheet("border: none; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: #666666;")
         out_row.addWidget(out_lbl)
         self._fx_output_combo = QComboBox()
         self._populate_fx_output_combo()
@@ -2166,8 +2272,8 @@ class App(QWidget):
         layout.addLayout(out_row)
 
         # Preset buttons
-        presets_lbl = QLabel("Preset:")
-        presets_lbl.setStyleSheet("font-size: 12px; font-weight: bold; border: none; margin-top: 6px;")
+        presets_lbl = QLabel("PRESET:")
+        presets_lbl.setStyleSheet("font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: #3A7BFF; border: none; margin-top: 6px;")
         layout.addWidget(presets_lbl)
 
         preset_grid = QGridLayout()
@@ -2178,11 +2284,11 @@ class App(QWidget):
             btn.setCheckable(True)
             btn.setChecked(preset == "Normal")
             btn.setStyleSheet(
-                "QPushButton { background: #1c2535; border: 1px solid #2d3a55;"
-                " border-radius: 8px; color: #a8c0e8; font-weight: 600; padding: 7px 10px; }"
-                "QPushButton:hover { background: #253560; border-color: #58a6ff; color: #d0e8ff; }"
-                "QPushButton:checked { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-                " stop:0 #1a5ccc, stop:1 #1040a0); border: 2px solid #388bfd; color: #fff; }"
+                "QPushButton { background: #1E1E1E; border: 1px solid #2a2a2a;"
+                " border-radius: 8px; color: #888888; font-weight: 600; padding: 7px 10px; }"
+                "QPushButton:hover { background: #252525; border-color: #9A4DFF; color: #E0E0E0; }"
+                "QPushButton:checked { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
+                " stop:0 #3A7BFF, stop:1 #9A4DFF); border: 2px solid #3A7BFF; color: #fff; }"
             )
             btn.clicked.connect(lambda checked, p=preset: self._select_fx_preset(p))
             preset_grid.addWidget(btn, i // 2, i % 2)
@@ -2192,7 +2298,7 @@ class App(QWidget):
         layout.addStretch()
 
         hint = QLabel("Tip: select VB-Cable or Voicemod as FX Output\nso the morphed audio reaches your games/apps.")
-        hint.setStyleSheet("color: #778899; font-size: 11px; border: none; margin-top: 4px;")
+        hint.setStyleSheet("color: #444444; font-size: 11px; border: none; margin-top: 4px;")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         return frame
@@ -2227,8 +2333,8 @@ class App(QWidget):
 
         # Header row: title + action buttons
         header = QHBoxLayout()
-        title_lbl = QLabel("Output Devices & Levels")
-        title_lbl.setStyleSheet("font-weight: bold; font-size: 14px; color: #cce; border: none;")
+        title_lbl = QLabel("OUTPUT DEVICES & LEVELS")
+        title_lbl.setStyleSheet("font-weight: 700; font-size: 12px; color: #3A7BFF; letter-spacing: 0.5px; border: none;")
         header.addWidget(title_lbl)
         header.addStretch()
         self.refresh_devices_button = QPushButton("🔄 Refresh")
@@ -2245,10 +2351,10 @@ class App(QWidget):
         scroll.setMinimumHeight(80)
         scroll.setMaximumHeight(160)
         scroll.setStyleSheet(
-            "QScrollArea { border: 1px solid #2f3c5a; border-radius: 4px; background: #151a28; }"
+            "QScrollArea { border: 1px solid #2a2a2a; border-radius: 8px; background: #111111; }"
         )
         container = QWidget()
-        container.setStyleSheet("background: #151a28;")
+        container.setStyleSheet("background: #111111;")
         self._device_rows_layout = QVBoxLayout(container)
         self._device_rows_layout.setSpacing(2)
         self._device_rows_layout.setContentsMargins(4, 4, 4, 4)
@@ -2258,8 +2364,8 @@ class App(QWidget):
 
         # Input device row at the bottom
         input_row = QHBoxLayout()
-        input_lbl = QLabel("Input mic:")
-        input_lbl.setStyleSheet("border: none;")
+        input_lbl = QLabel("INPUT MIC:")
+        input_lbl.setStyleSheet("border: none; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: #666666;")
         input_row.addWidget(input_lbl)
         self.input_device_combo = QComboBox()
         self.input_device_combo.currentIndexChanged.connect(self.on_input_device_changed)
@@ -2269,24 +2375,57 @@ class App(QWidget):
         return frame
 
     def _build_meters_bar(self) -> QWidget:
-        """Always-visible compact output meters strip at the bottom of the window."""
+        """Always-visible compact mic + output meters strip at the bottom of the window."""
         frame = QFrame()
         frame.setFixedHeight(36)
         frame.setStyleSheet(
-            "QFrame { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; }"
+            "QFrame { background: #0e0e0e; border: 1px solid #2a2a2a; border-radius: 8px; }"
         )
         outer = QHBoxLayout(frame)
         outer.setContentsMargins(10, 4, 10, 4)
         outer.setSpacing(0)
 
+        # MIC section (always visible)
+        mic_lbl = QLabel("MIC")
+        mic_lbl.setStyleSheet("color: #00FF6A; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; border: none; min-width: 26px;")
+        outer.addWidget(mic_lbl)
+        outer.addSpacing(4)
+
+        self.mic_level_bar = QProgressBar()
+        self.mic_level_bar.setRange(0, 1000)
+        self.mic_level_bar.setValue(0)
+        self.mic_level_bar.setTextVisible(False)
+        self.mic_level_bar.setFixedHeight(6)
+        self.mic_level_bar.setMinimumWidth(80)
+        self.mic_level_bar.setMaximumWidth(140)
+        self.mic_level_bar.setStyleSheet(METER_STYLE_MIC)
+        outer.addWidget(self.mic_level_bar)
+        outer.addSpacing(4)
+
+        self.mic_db_label = QLabel("-∞")
+        self.mic_db_label.setStyleSheet(
+            "color: #444444; font-size: 9px; font-family: Consolas; border: none;"
+        )
+        self.mic_db_label.setFixedWidth(34)
+        self.mic_db_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        outer.addWidget(self.mic_db_label)
+
+        sep0 = QFrame()
+        sep0.setFrameShape(QFrame.Shape.VLine)
+        sep0.setFixedWidth(1)
+        sep0.setStyleSheet("background: #2a2a2a; border: none;")
+        outer.addSpacing(6)
+        outer.addWidget(sep0)
+        outer.addSpacing(6)
+
         lbl = QLabel("OUT")
-        lbl.setStyleSheet("color: #3b82f6; font-size: 10px; font-weight: 700; border: none; min-width: 28px;")
+        lbl.setStyleSheet("color: #3A7BFF; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; border: none; min-width: 26px;")
         outer.addWidget(lbl)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
         sep.setFixedWidth(1)
-        sep.setStyleSheet("background: #21262d; border: none;")
+        sep.setStyleSheet("background: #2a2a2a; border: none;")
         outer.addWidget(sep)
         outer.addSpacing(8)
 
@@ -2297,7 +2436,7 @@ class App(QWidget):
         self._mb_inner_lay.setContentsMargins(0, 0, 0, 0)
         self._mb_inner_lay.setSpacing(14)
         self._mb_placeholder = QLabel("No output devices selected")
-        self._mb_placeholder.setStyleSheet("color: #30363d; font-size: 11px; border: none;")
+        self._mb_placeholder.setStyleSheet("color: #333333; font-size: 11px; border: none;")
         self._mb_inner_lay.addWidget(self._mb_placeholder)
         self._mb_inner_lay.addStretch()
         outer.addWidget(self._mb_inner, 1)
@@ -2321,7 +2460,7 @@ class App(QWidget):
             short = (name[:15] + "…") if len(name) > 15 else name
 
             name_lbl = QLabel(short)
-            name_lbl.setStyleSheet("color: #8b949e; font-size: 9px; border: none;")
+            name_lbl.setStyleSheet("color: #555555; font-size: 9px; border: none;")
 
             bar = QProgressBar()
             bar.setRange(0, 1000)
@@ -2333,7 +2472,7 @@ class App(QWidget):
 
             db_lbl = QLabel("-∞")
             db_lbl.setStyleSheet(
-                "color: #484f58; font-size: 9px; font-family: Consolas; border: none;"
+                "color: #444444; font-size: 9px; font-family: Consolas; border: none;"
             )
             db_lbl.setFixedWidth(34)
             db_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -2365,7 +2504,7 @@ class App(QWidget):
     def _add_device_row(self, device_index: int, display_name: str, full_name: str, was_selected: bool):
         container = QWidget()
         container.setStyleSheet(
-            "QWidget { background: #2a3441; border: 1px solid #3b4a6b; border-radius: 4px; }"
+            "QWidget { background: #1A1A1A; border: 1px solid #2a2a2a; border-radius: 8px; }"
         )
         row = QHBoxLayout(container)
         row.setContentsMargins(6, 4, 6, 4)
@@ -2376,7 +2515,7 @@ class App(QWidget):
         cb.stateChanged.connect(self.on_output_device_changed)
 
         name_lbl = QLabel(display_name)
-        name_lbl.setStyleSheet("color: #ddd; font-size: 12px; border: none;")
+        name_lbl.setStyleSheet("color: #C0C0C0; font-size: 12px; border: none;")
         name_lbl.setMinimumWidth(180)
         name_lbl.setMaximumWidth(280)
         name_lbl.setToolTip(full_name)
@@ -2389,7 +2528,7 @@ class App(QWidget):
         bar.setStyleSheet(METER_STYLE_OUT)
 
         db_lbl = QLabel("-∞ dB")
-        db_lbl.setStyleSheet("color: #99a; font-family: 'Consolas', monospace; font-size: 11px; border: none;")
+        db_lbl.setStyleSheet("color: #555555; font-family: 'Consolas', monospace; font-size: 11px; border: none;")
         db_lbl.setMinimumWidth(64)
         db_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -2765,6 +2904,8 @@ class App(QWidget):
         if selected_device is not None:
             self.history_data["selected_input_device"] = selected_device
             save_history_data(self.history_data)
+        self._stop_mic_monitor()
+        self._start_mic_monitor()
 
     def register_hotkey(self):
         # Unregister previous hotkey first (if any)
@@ -2806,23 +2947,21 @@ class App(QWidget):
     def toggle_wake_listener(self):
         if self.wake_listener.is_running():
             self.wake_listener.stop()
-            self.listen_button.setText("👂 Start Listening")
+            self.listen_button.setText("👂  Listen")
             self.listen_button.setChecked(False)
-            self.wake_status_label.setText("Wake-word listener: off")
-            self._mic_timer.stop()
-            self.mic_level_bar.setValue(0)
-            self.mic_db_label.setText("-∞ dB")
+            self.wake_status_label.setText("Wake-word: off")
+            self._start_mic_monitor()
         else:
             ok = self._start_wake_listener()
             if ok:
-                self.listen_button.setText("⏹️ Stop Listening")
+                self.listen_button.setText("⏹  Stop")
                 self.listen_button.setChecked(True)
                 kw = self.settings.get("wake_keyword", "jarvis")
                 custom = self.settings.get("wake_custom_ppn_path", "")
                 kw_display = os.path.basename(custom) if custom else kw
-                self.wake_status_label.setText(f"Listening for: {kw_display}")
+                self.wake_status_label.setText(f"Listening: {kw_display}")
                 self._mic_peak_ref[0] = 0.0
-                self._mic_timer.start()
+                self._stop_mic_monitor()
             else:
                 self.listen_button.setChecked(False)
 
@@ -2867,7 +3006,6 @@ class App(QWidget):
                 frames.append(indata.copy())
 
             self._mic_peak_ref[0] = 0.0
-            self._mic_timer.start()
             with sd.InputStream(
                 device=device_index, channels=channels, samplerate=sample_rate,
                 blocksize=1024, dtype="float32", callback=_cb,
@@ -2875,7 +3013,6 @@ class App(QWidget):
                 end_time = time.time() + seconds
                 while time.time() < end_time:
                     time.sleep(0.05)
-            QTimer.singleShot(0, lambda: (self._mic_timer.stop(), self.mic_level_bar.setValue(0)))
 
             if not frames:
                 self.append_status("Wake command: no audio captured.")
@@ -2973,7 +3110,7 @@ class App(QWidget):
 
         self.is_recording = True
         self._mic_peak_ref[0] = 0.0
-        self._mic_timer.start()
+        self._stop_mic_monitor()
         self.recording_thread = threading.Thread(
             target=self.do_recording, args=(input_device_index, input_device_name), daemon=True
         )
@@ -3092,9 +3229,7 @@ class App(QWidget):
 
     def reset_recording_ui(self):
         if not self.wake_listener.is_running():
-            self._mic_timer.stop()
-            self.mic_level_bar.setValue(0)
-            self.mic_db_label.setText("-∞ dB")
+            self._start_mic_monitor()
         self.record_button.setEnabled(True)
         self.record_button.setText("🎤")
         self.record_button.setStyleSheet(
@@ -3107,8 +3242,67 @@ class App(QWidget):
     def _tick_mic_meter(self):
         val = int(min(self._mic_peak_ref[0] * 1000, 1000))
         self.mic_level_bar.setValue(val)
-        self.mic_db_label.setText(self._level_to_db(val))
+        db = self._level_to_db(val)
+        self.mic_db_label.setText(db.replace(" dB", ""))
         self._mic_peak_ref[0] *= 0.75  # decay between ticks
+
+    def _start_mic_monitor(self):
+        """Open a lightweight always-on InputStream just for level metering when idle."""
+        if self._mic_monitor_stream is not None:
+            return
+        dev = self.get_selected_input_device()
+        if dev is None:
+            return
+        try:
+            def _cb(indata, frames, time_info, status):
+                peak = float(np.max(np.abs(indata)))
+                if peak > self._mic_peak_ref[0]:
+                    self._mic_peak_ref[0] = peak
+            self._mic_monitor_stream = sd.InputStream(
+                device=dev, channels=1, samplerate=16000,
+                blocksize=1024, dtype="float32", callback=_cb, latency="low",
+            )
+            self._mic_monitor_stream.start()
+        except Exception:
+            self._mic_monitor_stream = None
+
+    def _stop_mic_monitor(self):
+        """Close the idle mic monitor stream (called before recording starts)."""
+        s = self._mic_monitor_stream
+        self._mic_monitor_stream = None
+        if s:
+            try:
+                s.stop(); s.close()
+            except Exception:
+                pass
+
+    def _show_main_menu(self):
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background: #1A1A1A; border: 1px solid #2a2a2a; border-radius: 8px; color: #E0E0E0; }"
+            "QMenu::item { padding: 7px 20px; }"
+            "QMenu::item:selected { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF); color: #fff; }"
+            "QMenu::separator { height: 1px; background: #2a2a2a; margin: 4px 0; }"
+        )
+        menu.addAction("⚙  Settings", lambda: open_settings_dialog(self))
+        menu.addSeparator()
+        menu.addAction("ℹ  About Voice Royale", self._show_app_info)
+        menu.addAction("✕  Exit", QApplication.instance().quit)
+        btn = self._hamburger_btn
+        menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def _show_app_info(self):
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.information(
+            self, "Voice Royale",
+            "Voice Royale — AI Voice Translation\n"
+            "© 2026 Juha Lempiäinen. All rights reserved.\n\n"
+            "Speech-to-text: OpenAI Whisper\n"
+            "Translation: GPT-4.1-mini\n"
+            "TTS: Edge TTS (free) / ElevenLabs\n"
+            "Voice FX: pyrubberband / scipy\n"
+            "Stream Deck: Elgato StreamDeck SDK"
+        )
 
     def update_mic_level(self, peak: float):
         # Safe to call from any thread — just writes a float to a list slot
@@ -3865,7 +4059,7 @@ class SetupWizard(QDialog):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("AI Voice Router — Alkuasennus")
+        self.setWindowTitle("Voice Royale — Alkuasennus")
         self.setFixedSize(620, 540)
         self.setStyleSheet(self._STYLE)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
@@ -3917,7 +4111,7 @@ class SetupWizard(QDialog):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         lay.addWidget(self._header(
-            "Tervetuloa AI Voice Router",
+            "Tervetuloa Voice Royale",
             "Alkuasennus — kestää noin 2 minuuttia."
         ))
 
@@ -3987,7 +4181,7 @@ class SetupWizard(QDialog):
             "  1.  Klikkaa alla olevaa painiketta  →  sivu avautuu selaimeen\n"
             "  2.  Kirjaudu sisään tai luo ilmainen tili  (Sign up)\n"
             "  3.  Klikkaa  \"Create new secret key\"\n"
-            "  4.  Anna avaimelle nimi, esim.  AI Voice Router\n"
+            "  4.  Anna avaimelle nimi, esim.  Voice Royale\n"
             "  5.  Kopioi avain  —  se näytetään vain kerran!\n\n"
             "Jos sinulla on jo OpenAI-tili, kirjaudu vain sisään ja luo uusi avain."
         )

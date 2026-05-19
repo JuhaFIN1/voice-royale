@@ -1,4 +1,4 @@
-# AI Voice Router
+# Voice Royale
 
 Copyright (c) 2026 Juha Lempiäinen. All rights reserved.
 Use permitted. Modification and redistribution of source code prohibited — see [LICENSE](LICENSE).
@@ -7,9 +7,9 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 
 ## Download
 
-**[→ Download installer (Windows)](https://github.com/JuhaFIN1/ai-voice-router/releases/latest)**
+**[→ Download installer (Windows)](https://github.com/JuhaFIN1/voice-royale/releases/latest)**
 
-Run `AI_Voice_Router_Setup_1.1.0.exe` — no Python needed. The first-run wizard guides you through setup.
+Run `Voice_Royale_Setup_1.1.0.exe` — no Python needed. The first-run wizard guides you through setup.
 
 > **Windows SmartScreen warning?** Click **"More info"** → **"Run anyway"**.
 > This appears because the installer is not commercially code-signed. The app is safe.
@@ -36,7 +36,7 @@ Run `AI_Voice_Router_Setup_1.1.0.exe` — no Python needed. The first-run wizard
 
 ## Installation (EXE — recommended)
 
-1. Download `AI_Voice_Router_Setup_1.1.0.exe` from [Releases](https://github.com/JuhaFIN1/ai-voice-router/releases/latest)
+1. Download `Voice_Royale_Setup_1.1.0.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
 2. Run the installer — it creates Start Menu shortcuts and an optional desktop icon
 3. On first launch the **Setup Wizard** opens automatically:
    - **Step 1** — get an OpenAI API key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) (free tier available)
@@ -135,7 +135,7 @@ build_app.bat
 ```
 
 Requires Python + PyInstaller. Inno Setup is downloaded automatically if not installed.
-Output: `installer_output\AI_Voice_Router_Setup_1.1.0.exe`
+Output: `installer_output\Voice_Royale_Setup_1.1.0.exe`
 
 ## File Structure
 

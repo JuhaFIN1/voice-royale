@@ -1,11 +1,11 @@
 @echo off
 REM ============================================================
-REM  AI Voice Router — Full build: PyInstaller + Windows Installer
+REM  Voice Royale — Full build: PyInstaller + Windows Installer
 REM
-REM  Output: installer_output\AI_Voice_Router_Setup_%VERSION%.exe
+REM  Output: installer_output\Voice_Royale_Setup_%VERSION%.exe
 REM ============================================================
 
-set NAME=AI Voice Router
+set NAME=Voice Royale
 set SCRIPT=ai_voice_app.py
 set VENV_PYTHON=.venv\Scripts\python.exe
 set VERSION=1.1.0
@@ -98,7 +98,7 @@ echo.
 echo ============================================================
 echo  Step 3/3 — Done!
 echo.
-echo  Installer: installer_output\AI_Voice_Router_Setup_%VERSION%.exe
+echo  Installer: installer_output\Voice_Royale_Setup_%VERSION%.exe
 echo.
 echo  Distribute that single file.
 echo  Users run it and follow the wizard.
