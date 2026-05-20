@@ -1,13 +1,12 @@
 {
     "Name": "Voice Royale",
-    "Version": "1.2.2",
+    "Version": "1.2.3",
     "Author": "Juha Lempiäinen",
     "Description": "Control Voice Royale — real-time speech translation — directly from your Elgato Stream Deck.",
     "Category": "Voice Royale",
-    "CategoryIcon": "icons/category",
     "Icon": "icons/plugin",
     "URL": "https://github.com/JuhaFIN1/voice-royale",
-    "CodePath": "plugin.js",
+    "CodePath": "plugin.html",
     "PropertyInspectorPath": "propertyinspector/index.html",
     "SDKVersion": 2,
     "Software": {
@@ -21,116 +20,116 @@
         {
             "Name": "Record Toggle",
             "UUID": "com.voiceroyale.record.toggle",
-            "Icon": "icons/action-record",
+            "Icon": "icons/plugin",
             "Tooltip": "Start or stop recording",
             "SupportedInMultiActions": true,
             "States": [
-                { "Image": "icons/action-record-off", "Title": "Record" },
-                { "Image": "icons/action-record-on",  "Title": "Recording" }
+                { "Image": "icons/plugin", "Title": "Record" },
+                { "Image": "icons/plugin", "Title": "REC..." }
             ]
         },
         {
             "Name": "Wake Listen",
             "UUID": "com.voiceroyale.wake.toggle",
-            "Icon": "icons/action-listen",
+            "Icon": "icons/plugin",
             "Tooltip": "Toggle wake-word listening",
             "SupportedInMultiActions": true,
             "States": [
-                { "Image": "icons/action-listen-off", "Title": "Listen" },
-                { "Image": "icons/action-listen-on",  "Title": "Listening" }
+                { "Image": "icons/plugin", "Title": "Listen" },
+                { "Image": "icons/plugin", "Title": "Listening" }
             ]
         },
         {
             "Name": "Speak Now",
             "UUID": "com.voiceroyale.speak",
-            "Icon": "icons/action-speak",
+            "Icon": "icons/plugin",
             "Tooltip": "Translate and speak the last transcript",
             "SupportedInMultiActions": true,
             "States": [
-                { "Image": "icons/action-speak", "Title": "Speak" }
+                { "Image": "icons/plugin", "Title": "Speak" }
             ]
         },
         {
             "Name": "Stop Recording",
             "UUID": "com.voiceroyale.stop",
-            "Icon": "icons/action-stop",
+            "Icon": "icons/plugin",
             "Tooltip": "Stop recording immediately",
             "SupportedInMultiActions": true,
             "States": [
-                { "Image": "icons/action-stop", "Title": "Stop" }
+                { "Image": "icons/plugin", "Title": "Stop" }
             ]
         },
         {
             "Name": "Switch Language",
             "UUID": "com.voiceroyale.lang",
-            "Icon": "icons/action-lang",
+            "Icon": "icons/plugin",
             "Tooltip": "Switch translation target language",
             "SupportedInMultiActions": true,
             "States": [
-                { "Image": "icons/action-lang", "Title": "Language" }
+                { "Image": "icons/plugin", "Title": "Language" }
             ],
             "PropertyInspectorPath": "propertyinspector/lang.html"
         },
         {
             "Name": "Play Soundboard",
             "UUID": "com.voiceroyale.soundboard",
-            "Icon": "icons/action-soundboard",
+            "Icon": "icons/plugin",
             "Tooltip": "Play a soundboard sound",
             "SupportedInMultiActions": true,
             "States": [
-                { "Image": "icons/action-soundboard", "Title": "Sound" }
+                { "Image": "icons/plugin", "Title": "Sound" }
             ],
             "PropertyInspectorPath": "propertyinspector/soundboard.html"
         },
         {
             "Name": "Next Soundboard Page",
             "UUID": "com.voiceroyale.sb.page.next",
-            "Icon": "icons/action-sb-next",
+            "Icon": "icons/plugin",
             "Tooltip": "Switch to the next soundboard page",
             "SupportedInMultiActions": false,
             "States": [
-                { "Image": "icons/action-sb-next", "Title": "SB Next" }
+                { "Image": "icons/plugin", "Title": "SB Next" }
             ]
         },
         {
             "Name": "Prev Soundboard Page",
             "UUID": "com.voiceroyale.sb.page.prev",
-            "Icon": "icons/action-sb-prev",
+            "Icon": "icons/plugin",
             "Tooltip": "Switch to the previous soundboard page",
             "SupportedInMultiActions": false,
             "States": [
-                { "Image": "icons/action-sb-prev", "Title": "SB Prev" }
+                { "Image": "icons/plugin", "Title": "SB Prev" }
             ]
         },
         {
             "Name": "Voice FX Preset",
             "UUID": "com.voiceroyale.fx",
-            "Icon": "icons/action-fx",
+            "Icon": "icons/plugin",
             "Tooltip": "Apply a Voice FX preset",
             "SupportedInMultiActions": true,
             "States": [
-                { "Image": "icons/action-fx", "Title": "FX" }
+                { "Image": "icons/plugin", "Title": "FX" }
             ],
             "PropertyInspectorPath": "propertyinspector/fx.html"
         },
         {
             "Name": "TTS Toggle",
             "UUID": "com.voiceroyale.tts.toggle",
-            "Icon": "icons/action-tts",
-            "Tooltip": "Cycle between TTS backends (Edge TTS / ElevenLabs)",
+            "Icon": "icons/plugin",
+            "Tooltip": "Cycle between TTS backends",
             "SupportedInMultiActions": true,
             "States": [
-                { "Image": "icons/action-tts", "Title": "TTS" }
+                { "Image": "icons/plugin", "Title": "TTS" }
             ]
         },
         {
             "Name": "Open Settings",
             "UUID": "com.voiceroyale.settings",
-            "Icon": "icons/action-settings",
+            "Icon": "icons/plugin",
             "Tooltip": "Open Voice Royale settings dialog",
             "SupportedInMultiActions": false,
             "States": [
-                { "Image": "icons/action-settings", "Title": "Settings" }
+                { "Image": "icons/plugin", "Title": "Settings" }
             ]
         }
     ]
