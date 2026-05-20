@@ -645,6 +645,11 @@ class StreamDeckHttpServer:
                     self._json(app._get_sd_state())
                 elif self.path == "/actions":
                     self._json({"actions": StreamDeckHttpServer.ACTIONS})
+                elif self.path.startswith("/action/"):
+                    import urllib.parse as _up
+                    action = _up.unquote(self.path[8:].strip("/"))
+                    QTimer.singleShot(0, lambda a=action: app._handle_sd_action(a))
+                    self._json({"ok": True, "action": action})
                 else:
                     self.send_response(404)
                     self._cors()
@@ -3673,6 +3678,12 @@ class App(QWidget):
     # ============ Stream Deck ============
 
     def _handle_sd_action(self, action: str):
+        try:
+            self._handle_sd_action_impl(action)
+        except Exception as e:
+            self.append_status(f"SD action '{action}' error: {e}")
+
+    def _handle_sd_action_impl(self, action: str):
         if action == "record_toggle":
             self.on_record_toggle()
         elif action == "wake_listen_toggle":
@@ -3710,6 +3721,8 @@ class App(QWidget):
                 self._play_soundboard_slot(self._sb_tabs.currentIndex(), int(parts[0]))
         elif action.startswith("fx_"):
             self._select_fx_preset(action[3:])
+        else:
+            self.append_status(f"SD: tuntematon toiminto '{action}'")
 
     def _refresh_sd_state(self):
         """Update state cache from the main thread (called by QTimer every 1.5s).
