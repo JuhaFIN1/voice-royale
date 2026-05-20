@@ -1,106 +1,66 @@
 # Voice Royale — Claude Code context
 
-## Projekti lyhyesti
+## Projekti
 
-Windows-työpöytäsovellus (PyQt6) joka:
-1. Tallentaa ääntä mikrofonista (sounddevice)
-2. Transkriptoi Whisperillä (OpenAI Whisper API)
-3. Kääntää GPT-4.1-mini:llä valittuun kieleen
-4. Toistaa käännöksen TTS:llä (Edge TTS / ElevenLabs / pyttsx3)
-
-## Käynnistys
+Windows-työpöytäsovellus (PyQt6): mikrofoni → Whisper → käännös (Google/DeepL/OpenAI) → TTS.
 
 ```bat
-cd /d "E:\CLOUDS\AI-SYSTEMS\ai-voice-router"
-python ai_voice_app.py
+python ai_voice_app.py          # kehitys
+build_app.bat                   # PyInstaller + Inno Setup + signing → installer_output\
 ```
 
-Tai `build_app.bat` → PyInstaller EXE.
-
-## Tiedostorakenne
+## Tiedostot
 
 | Tiedosto | Kuvaus |
 |---|---|
-| `ai_voice_app.py` | Koko sovellus, ~2100 riviä |
+| `ai_voice_app.py` | Koko sovellus, ~4300 riviä |
 | `credentials.env` | API-avaimet (OPENAI_API_KEY, ELEVEN_API_KEY, VOICE_ID) |
-| `app_settings.json` | Käyttäjäasetukset (hotkey, wake keyword, TTS backend) |
+| `.env` | Signing-muuttujat (SIGN_CERT_PATH, SIGN_CERT_PASSWORD) — ei githubiin |
+| `app_settings.json` | Käyttäjäasetukset |
 | `speech_history.json` | Historia + suosikit |
-| `requirements.txt` / `requirements 2.txt` | Riippuvuudet |
-| `build_app.bat` | PyInstaller-build |
+| `build_app.bat` | PyInstaller + Inno Setup + signtool |
+| `installer.iss` | Inno Setup -skripti |
+| `certs/juha-signing.pfx` | Self-signed cert — ei githubiin |
 
 ## Arkkitehtuuri (ai_voice_app.py)
 
-- **rivit 10–32**: `install_deps()` — automaattinen pip-asennus käynnistyksessä
-- **rivit 76–111**: UI-tyylikionstantit (`METER_LABEL_STYLE`, `METER_STYLE_MIC`, jne.)
-- **rivit 140–193**: Kielidictit (`LANGS`, `LANG_FLAG_CODES`, `EDGE_VOICES`)
-- **rivit 618–779**: `WakeListener` — wake-word kuuntelija
-- **rivit 784+**: `App(QWidget)` — pääluokka koko UI:lla
-- **rivit ~1990+**: `open_settings_dialog()` — asetusikkuna
+- `install_deps()` — automaattinen pip-asennus käynnistyksessä
+- `LANGS`, `LANG_FLAG_CODES`, `EDGE_VOICES`, `_GOOGLE_LANG_MAP`, `_DEEPL_LANG_MAP` — kielidictit
+- `create_flag_icon(country_code)` — lippuikonit
+- `WakeListener` — wake-word kuuntelija (Porcupine tai Whisper VAD fallback)
+- `App(QWidget)` — pääluokka koko UI:lla
+- `SoundboardButton` — soundboard-nappi, `_edit_mode` on luokkatason flag
+- `translate_text(text, lang, backend, deepl_key)` — käännös, backend default "Google (free)"
+- `open_settings_dialog()` — 4-välilehtinen asetusikkuna
 
-## Tuetut kielet (15 kpl)
+## Kriittiset säännöt
 
-Auto, English, German, Swedish, Finnish, Russian, Italian,
-Dutch, Norwegian, Danish, Romanian, Latvian, Lithuanian,
-Japanese, Chinese, Hungarian
+**Lippuikonit:** `create_flag_icon()` käyttää VAIN `fillRect` — ei `setBrush/drawEllipse`. PyQt6 strict-mode kaatuu muuten.
 
-## Kriittiset tekniset huomiot
+**Thread-safety:** Ei suoria widget-kutsuja bg-threadista — käytä signaaleja.
 
-### Lippuikonit
-`create_flag_icon(country_code)` käyttää VAIN `fillRect` — ei `setBrush/drawEllipse`.
-PyQt6 strict-mode kaataa `build_language_icons()` jos käytetään ellipsiä.
+**Uuden kielen lisääminen:** Päivitä kaikki viisi paikkaa: `LANGS`, `LANG_FLAG_CODES`, `EDGE_VOICES`, `_GOOGLE_LANG_MAP`, `_DEEPL_LANG_MAP`, ja `create_flag_icon()` elif-ketju. Huom: Hebrew = `"iw"` Google-mapissa (ei `"he"`). Hindi/Hebrew/Croatian = `None` DeepL-mapissa (ei tueta).
 
-### WakeListener
-Kaksi moodia automaattisesti:
-- **Porcupine** (jos `pvporcupine` asennettu JA Picovoice-avain asetettu Asetuksissa)
-- **Whisper VAD fallback** (toimii ilman avainta — tallentaa 2.5s pätkiä, tarkistaa onko wake-sana)
+**Soundboard:** `_sb_play_id` (int) counter estää concurrent play -kaatumisen. `SoundboardButton._edit_mode` on classmethod `set_edit_mode(bool)`.
 
-### Uuden kielen lisääminen
-Lisää kolmeen dict:iin (`LANGS`, `LANG_FLAG_CODES`, `EDGE_VOICES`) ja `create_flag_icon()` elif-ketjuun. Käytä vain `fillRect`.
+## Tuetut kielet
 
-### Monilaitetoisto
-`play_wav_bytes()` tukee useaa output-laitetta samanaikaisesti (threading).
+28 built-in + käyttäjän omat (tallennetaan `app_settings.json` → `custom_languages`).
 
-## Käyttäjäasetukset
+## Käyttäjäasetukset (app_settings.json)
 
-Tallennetaan `app_settings.json`:
-- `hotkey` — globaali pikanäppäin (oletus: `ctrl+alt+space`)
-- `wake_keyword` — wake-sana (oletus: `jarvis`)
-- `picovoice_access_key` — Porcupine-avain (valinnainen)
-- `default_target_lang` — oletuskohde
-- `default_tts_backend` — Edge TTS (free) tai ElevenLabs
-- `wake_command_seconds` — äänityspituus wake-sanan jälkeen (oletus: 6s)
+`hotkey`, `wake_keyword`, `picovoice_access_key`, `default_target_lang`, `default_tts_backend`, `wake_command_seconds`, `translation_backend`, `deepl_api_key`, `custom_languages`.
 
-## Viimeksi tehty (2026-05-12)
+## Code Signing
 
-1. Iso UI-refaktorointi: per-device output-rivit checkboxeilla, tasomittarit, asetukset-dialogi
-2. WakeListener korjattu — Whisper VAD fallback lisätty
-3. Lisätty 9 uutta kieltä: Dutch, Norwegian, Danish, Romanian, Latvian, Lithuanian, Japanese, Chinese, Hungarian
-4. Korjattu lippuikonit (JP/CN käyttivät setBrush/drawEllipse → korjattu fillRect:ksi)
+Self-signed cert kehityskäyttöön (ei luotettu SmartScreenissä).
 
-## Code Signing Setup (Windows EXE Signing)
+- Paikallinen build: `build_app.bat` lukee `.env`:stä `SIGN_CERT_PATH` + `SIGN_CERT_PASSWORD`, ajaa signtool automaattisesti
+- CI/GitHub Actions: secretit `SIGN_CERT_BASE64` + `SIGN_CERT_PASSWORD` GitHubin Settings → Secrets → Actions
+- **Ei koskaan githubiin:** `.env`, `certs/`, `*.pfx`
 
-Project uses Windows Code Signing with a locally generated self-signed certificate for development/testing.
+## Releases
 
-### Certificate location
-- PFX file: `certs/juha-signing.pfx`
-
-### Environment variables (.env)
-- SIGN_CERT_PATH=certs/juha-signing.pfx
-- SIGN_CERT_PASSWORD=The password used when exporting the PFX certificate
-
-### Important rules
-- NEVER commit `.env`, `.pfx` files, or the `certs/` folder to GitHub
-- Signing certificate and password are local-only secrets
-- If either the PFX or password changes, both must be updated together
-- The certificate is used only for development/testing signing (not trusted by Windows SmartScreen globally)
-
-### Build / Signing workflow (manual for now)
-1. Build the application (no automation yet)
-2. Load environment variables from `.env`
-3. Use `signtool.exe` to sign the generated `.exe` using:
-   - Certificate from `SIGN_CERT_PATH`
-   - Password from `SIGN_CERT_PASSWORD`
-4. Output is a signed executable ready for distribution/testing
-
-### Security note
-This setup is temporary and intended for development. For production releases, a trusted Code Signing Certificate (or EV Code Signing Certificate) is required to reduce Windows SmartScreen warnings.
+`.github/workflows/release.yml` — triggeröityy `v*`-tagista:
+- Windows: PyInstaller → Inno Setup → signtool → release asset
+- macOS: PyInstaller → DMG → ad-hoc sign → release asset
