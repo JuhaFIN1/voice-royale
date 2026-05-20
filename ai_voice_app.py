@@ -1489,52 +1489,32 @@ class SoundboardButton(QWidget):
             rq: _q.Queue = _q.Queue()
 
             def _worker():
+                import html as _html
                 hdrs = {
                     "User-Agent": (
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) "
                         "Chrome/124.0.0.0 Safari/537.36"
                     ),
-                    "Accept-Language": "fi-FI,fi;q=0.9,en;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9",
                 }
                 try:
-                    sess = requests.Session()
-                    sess.headers.update(hdrs)
-                    r = sess.get(
-                        "https://duckduckgo.com/",
-                        params={"q": q, "iax": "images", "ia": "images"},
+                    r = requests.get(
+                        "https://www.bing.com/images/search",
+                        params={"q": q, "form": "HDRSC2", "first": "1"},
+                        headers=hdrs,
                         timeout=12,
                     )
-                    m = (_re.search(r'vqd=["\']([\d-]+)["\']', r.text)
-                         or _re.search(r'vqd=([\d-]+)', r.text))
-                    if not m:
-                        rq.put(("err", "vqd-tokenia ei löydy — yritä uudelleen"))
+                    # Bing HTML-entity-encodes the JSON — unescape first
+                    text = _html.unescape(r.text)
+                    fulls  = _re.findall(r'"murl":"(https?://[^"]+)"', text)
+                    thumbs = _re.findall(r'"turl":"(https?://[^"]+)"', text)
+                    n = min(len(fulls), len(thumbs), 24)
+                    if n == 0:
+                        rq.put(("err", "Ei kuvatuloksia — kokeile eri hakusanaa"))
                         return
-                    vqd = m.group(1)
-                    r2 = sess.get(
-                        "https://duckduckgo.com/i.js",
-                        params={"q": q, "vqd": vqd, "f": ",,,,,", "p": "1"},
-                        headers={
-                            "Accept": "application/json, text/javascript, */*; q=0.01",
-                            "Referer": "https://duckduckgo.com/",
-                            "X-Requested-With": "XMLHttpRequest",
-                        },
-                        timeout=12,
-                    )
-                    body = r2.text.strip()
-                    if not body:
-                        rq.put(("err", "Tyhjä vastaus — yritä uudelleen"))
-                        return
-                    try:
-                        data = r2.json()
-                    except Exception:
-                        rq.put(("err", f"JSON-virhe: {body[:120]}"))
-                        return
-                    results = data.get("results", [])[:24]
-                    if not results:
-                        rq.put(("err", "Ei kuvatuloksia tälle hakusanalle"))
-                        return
-                    rq.put(("ok", [(r_["image"], r_["thumbnail"]) for r_ in results]))
+                    pairs = list(zip(fulls[:n], thumbs[:n]))
+                    rq.put(("ok", pairs))
                 except Exception as e:
                     rq.put(("err", str(e)))
 
