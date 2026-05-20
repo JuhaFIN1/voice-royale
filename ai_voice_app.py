@@ -4560,7 +4560,10 @@ class SetupWizard(QDialog):
         cl = QVBoxLayout(cost)
         cl.setContentsMargins(16, 12, 16, 12)
         lbl = QLabel(
-            "💡  Hinta-arvio:  ~0,001 $ per puheenvuoro  —  1 000 puheenvuoroa ≈ 1 $\n"
+            "💡  Hinta-arvio per puheenvuoro:\n"
+            "     • Whisper (puheentunnistus):  ~0,006 $ / minuutti ääntä\n"
+            "     • GPT-4.1-mini (käännös):     ~0,001 $ per kutsu\n"
+            "     → Yhteensä n. 0,007–0,01 $ / puheenvuoro  —  1 000 puheenvuoroa ≈ 7–10 $\n\n"
             "     Uudet OpenAI-tilit saavat ilmaisia krediittejä aloitukseen."
         )
         lbl.setStyleSheet("color: #8b949e; font-size: 12px; background: transparent;")
