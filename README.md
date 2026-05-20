@@ -9,8 +9,8 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 
 | Platform | Link |
 |---|---|
-| **Windows** | [Voice_Royale_Setup_1.2.0.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
-| **macOS** | [Voice_Royale_1.2.0.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
+| **Windows** | [Voice_Royale_Setup_1.2.1.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
+| **macOS** | [Voice_Royale_1.2.1.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
 
 > **Windows SmartScreen warning?** Click **"More info"** → **"Run anyway"**.
 > This appears because the installer uses a self-signed certificate. The app is safe.
@@ -30,6 +30,7 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 - **Global hotkey** — push-to-talk from any app (default: `Ctrl+Alt+Space`)
 - **History & favorites** — favorites auto-cache translated audio so replaying needs no API call
 - **Live voice morphing (Voice FX)** — real-time pitch shift and effects routed to a virtual output (VB-Cable / Voicemod). Presets: Normal, Pitch +4/+8, Pitch -4/-8, Robot, Deep, Helium
+- **Wake-word instructions** — usage guide appears automatically when Listen mode is active
 - **Soundboard** — up to 10 pages × 56 buttons. Edit Mode: drag-and-drop audio/image onto any button. Right-click to configure. Pages support rename and delete
 - **Stream Deck XL** — full 32-button layout: record, wake, speak, stop, language shortcuts, soundboard slots, Voice FX presets, TTS toggle, settings
 - **Virtual mic (VB-Cable)** — one-click install from Settings so TTS audio goes into game voice chat
@@ -38,7 +39,7 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 
 ## Installation (Windows)
 
-1. Download `Voice_Royale_Setup_1.2.0.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
+1. Download `Voice_Royale_Setup_1.2.1.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
 2. Run the installer — it creates Start Menu shortcuts and an optional desktop icon
 3. On first launch the **Setup Wizard** opens automatically:
    - **Step 1** — get an OpenAI API key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) (free tier available)
@@ -50,7 +51,7 @@ Upgrading: just run the new installer over the old one. Your API key, settings, 
 
 ## Installation (macOS)
 
-1. Download `Voice_Royale_1.2.0.dmg` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
+1. Download `Voice_Royale_1.2.1.dmg` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
 2. Open the DMG and drag **Voice Royale** to Applications
 3. First launch: right-click → **Open** to bypass Gatekeeper (app is ad-hoc signed, not notarized)
 4. Grant microphone and accessibility permissions when prompted
@@ -148,7 +149,7 @@ build_app.bat
 
 Requires Python + PyInstaller. Inno Setup is installed automatically via Chocolatey if not present.
 The installer is signed automatically if `SIGN_CERT_PATH` and `SIGN_CERT_PASSWORD` are set in `.env`.
-Output: `installer_output\Voice_Royale_Setup_1.2.0.exe`
+Output: `installer_output\Voice_Royale_Setup_1.2.1.exe`
 
 ## File Structure
 
