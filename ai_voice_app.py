@@ -2145,8 +2145,10 @@ class App(QWidget):
         self._sd_action_queue: _queue.Queue = _queue.Queue()
         self._sd_state_timer = QTimer(self)
         self._sd_state_timer.timeout.connect(self._refresh_sd_state)
-        self._sd_state_timer.timeout.connect(self._drain_sd_action_queue)
         self._sd_state_timer.start(1500)
+        self._sd_action_timer = QTimer(self)
+        self._sd_action_timer.timeout.connect(self._drain_sd_action_queue)
+        self._sd_action_timer.start(50)
         self._stream_deck.start(self)
 
     # ============ Card builders ============
@@ -3850,6 +3852,7 @@ class App(QWidget):
             pass
         try:
             self._sd_state_timer.stop()
+            self._sd_action_timer.stop()
         except Exception:
             pass
         try:
