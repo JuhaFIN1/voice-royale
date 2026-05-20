@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.2"
+APP_VERSION = "1.3.3"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -903,6 +903,7 @@ class SoundboardButton(QWidget):
     clicked_play = pyqtSignal(int)
     data_changed = pyqtSignal(int)
     swap_requested = pyqtSignal(int, int, int, int)   # src_page, src_slot, dst_page, dst_slot
+    bulk_import_requested = pyqtSignal(int, list)     # start_slot, [paths]
 
     _edit_mode: bool = False
 
@@ -1086,13 +1087,26 @@ class SoundboardButton(QWidget):
                 event.ignore()
             return
         if mime.hasUrls():
+            audio_files = []
+            image_file = None
             for url in mime.urls():
                 path = url.toLocalFile()
-                ext = os.path.splitext(path)[1].lower()
-                if ext in self._IMAGE_EXTS:
-                    self._drop_image(path)
-                elif ext in self._AUDIO_EXTS:
-                    self._drop_sound(path)
+                if os.path.isdir(path):
+                    for fn in sorted(os.listdir(path)):
+                        if os.path.splitext(fn)[1].lower() in self._AUDIO_EXTS:
+                            audio_files.append(os.path.join(path, fn))
+                else:
+                    ext = os.path.splitext(path)[1].lower()
+                    if ext in self._AUDIO_EXTS:
+                        audio_files.append(path)
+                    elif ext in self._IMAGE_EXTS and image_file is None:
+                        image_file = path
+            if len(audio_files) > 1:
+                self.bulk_import_requested.emit(self.slot_index, audio_files)
+            elif len(audio_files) == 1:
+                self._drop_sound(audio_files[0])
+            if image_file and not audio_files:
+                self._drop_image(image_file)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -1207,6 +1221,9 @@ class SoundboardButton(QWidget):
         menu.addAction("Assign Image…", self._assign_image)
         menu.addAction("Rename…", self._rename)
         menu.addSeparator()
+        menu.addAction("Bulk Import — tiedostot…", self._bulk_import_files)
+        menu.addAction("Bulk Import — kansio…", self._bulk_import_folder)
+        menu.addSeparator()
         menu.addAction("Link to Page…", self._assign_page_link)
         has_content = bool(self._data.get("file") or self._data.get("image") or self._data.get("link_page_name"))
         if has_content:
@@ -1312,6 +1329,25 @@ class SoundboardButton(QWidget):
         self._data = {"name": f"Slot {self.slot_index + 1}", "file": "", "image": "", "link_page_name": ""}
         self._refresh()
         self.data_changed.emit(self.slot_index)
+
+    def _bulk_import_files(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Valitse äänitiedostot", "",
+            "Audio files (*.wav *.mp3 *.ogg *.flac *.aiff)"
+        )
+        if paths:
+            self.bulk_import_requested.emit(self.slot_index, sorted(paths))
+
+    def _bulk_import_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Valitse kansio")
+        if not folder:
+            return
+        paths = sorted(
+            os.path.join(folder, fn) for fn in os.listdir(folder)
+            if os.path.splitext(fn)[1].lower() in self._AUDIO_EXTS
+        )
+        if paths:
+            self.bulk_import_requested.emit(self.slot_index, paths)
 
 
 # =========================
@@ -2632,6 +2668,15 @@ class App(QWidget):
         self._sb_tabs.tabBar().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._sb_tabs.tabBar().customContextMenuRequested.connect(self._sb_tab_ctx_menu)
 
+        # Drag-over-tab auto-navigation and tab reordering
+        self._sb_tabs.tabBar().setAcceptDrops(True)
+        self._sb_tabs.tabBar().installEventFilter(self)
+        self._sb_tabs.tabBar().tabMoved.connect(self._sb_tab_moved)
+        self._sb_hover_tab = -1
+        self._sb_tab_hover_timer = QTimer(self)
+        self._sb_tab_hover_timer.setSingleShot(True)
+        self._sb_tab_hover_timer.timeout.connect(self._sb_do_tab_switch)
+
         # Corner buttons — height locked to tab bar height so they don't overflow
         _corner_wrap = QWidget()
         _corner_wrap.setFixedHeight(28)
@@ -2681,7 +2726,7 @@ class App(QWidget):
         pi = len(self._soundboard_buttons)
         name = page_data.get("name", f"Sivu {pi + 1}")
         slots = list(page_data.get("slots", []))
-        while len(slots) < 56:
+        while len(slots) < 55:
             slots.append({"name": f"Slot {len(slots)+1}", "file": "", "image": ""})
 
         page_btns: list[SoundboardButton] = []
@@ -2690,16 +2735,29 @@ class App(QWidget):
         grid.setSpacing(6)
         grid.setContentsMargins(6, 6, 6, 6)
 
-        for i in range(56):
+        for i in range(55):
             btn = SoundboardButton(pi, i)
             if slots[i]:
                 btn.set_data(slots[i])
             btn.clicked_play.connect(self._sb_play_handler)
             btn.data_changed.connect(self._sb_data_handler)
             btn.swap_requested.connect(self._sb_swap_handler)
+            btn.bulk_import_requested.connect(self._sb_bulk_import_handler)
             page_btns.append(btn)
             row, col = divmod(i, 14)
             grid.addWidget(btn, row, col)
+
+        _stop_btn = QPushButton("■  STOP")
+        _stop_btn.setFixedSize(72, 68)
+        _stop_btn.setToolTip("Pysäytä soitto heti")
+        _stop_btn.clicked.connect(self._sb_stop_playback)
+        _stop_btn.setStyleSheet(
+            "QPushButton { background: #2A0000; color: #FF3333; border: 2px solid #6B0000;"
+            " border-radius: 10px; font-size: 12px; font-weight: 900; letter-spacing: 1px; }"
+            "QPushButton:hover { background: #4A0000; border-color: #FF3333; color: #FF6666; }"
+            "QPushButton:pressed { background: #FF1111; color: #fff; border-color: #FF1111; }"
+        )
+        grid.addWidget(_stop_btn, 3, 13)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -2776,10 +2834,94 @@ class App(QWidget):
         dst_btn.set_data(src_data)
         self._save_soundboard()
 
+    def _sb_stop_playback(self):
+        self._sb_play_id += 1
+        sd.stop()
+        if self._sb_playing_btn:
+            btn = self._sb_playing_btn
+            self._sb_playing_btn = None
+            btn.set_playing(False)
+
+    def _sb_tab_moved(self, from_idx: int, to_idx: int):
+        page = self._soundboard_buttons.pop(from_idx)
+        self._soundboard_buttons.insert(to_idx, page)
+        for pi, page_btns in enumerate(self._soundboard_buttons):
+            for btn in page_btns:
+                btn.page_index = pi
+
+    def _sb_do_tab_switch(self):
+        if self._sb_hover_tab >= 0:
+            self._sb_tabs.setCurrentIndex(self._sb_hover_tab)
+
+    def eventFilter(self, obj, event):
+        if hasattr(self, '_sb_tabs') and obj is self._sb_tabs.tabBar():
+            t = event.type()
+            if t == QEvent.Type.DragEnter:
+                if SoundboardButton._edit_mode and event.mimeData().hasFormat(SoundboardButton._SLOT_MIME):
+                    event.acceptProposedAction()
+                else:
+                    event.ignore()
+                return True
+            if t == QEvent.Type.DragMove:
+                if SoundboardButton._edit_mode and event.mimeData().hasFormat(SoundboardButton._SLOT_MIME):
+                    tab = self._sb_tabs.tabBar().tabAt(event.position().toPoint())
+                    if tab >= 0 and tab != self._sb_hover_tab:
+                        self._sb_hover_tab = tab
+                        self._sb_tab_hover_timer.start(700)
+                    event.acceptProposedAction()
+                else:
+                    event.ignore()
+                return True
+            if t == QEvent.Type.DragLeave:
+                self._sb_tab_hover_timer.stop()
+                self._sb_hover_tab = -1
+                return True
+            if t == QEvent.Type.Drop:
+                self._sb_tab_hover_timer.stop()
+                self._sb_hover_tab = -1
+                event.ignore()
+                return True
+        return super().eventFilter(obj, event)
+
+    def _sb_bulk_import_handler(self, start_slot: int, paths: list):
+        sender_btn = self.sender()
+        page_idx = None
+        for pi, page_btns in enumerate(self._soundboard_buttons):
+            if sender_btn in page_btns:
+                page_idx = pi
+                break
+        if page_idx is None:
+            return
+        page_btns = self._soundboard_buttons[page_idx]
+        imported = 0
+        for i, path in enumerate(paths):
+            slot_idx = start_slot + i
+            if slot_idx >= len(page_btns):
+                break
+            btn = page_btns[slot_idx]
+            try:
+                dest, _, _ = _sb_import_audio(path, page_idx, slot_idx)
+                data = btn.get_data()
+                data["file"] = dest
+                data["link_page_name"] = ""
+                if not data.get("name") or data["name"].startswith("Slot "):
+                    data["name"] = os.path.splitext(os.path.basename(path))[0]
+                btn.set_data(data)
+                imported += 1
+            except Exception as e:
+                self.append_status(f"Bulk import slot {slot_idx+1}: {e}")
+        if imported:
+            self._save_soundboard()
+            self.append_status(
+                f"Bulk import: {imported}/{len(paths)} ääntä tuotu sivulle {page_idx+1}, "
+                f"slotit {start_slot+1}–{start_slot+imported}"
+            )
+
     def _sb_toggle_edit_mode(self, enabled: bool):
         SoundboardButton.set_edit_mode(enabled)
+        self._sb_tabs.tabBar().setMovable(enabled)
         if enabled:
-            self.append_status("Soundboard muokkaustila ON — vedä nappi toisen päälle vaihtaaksesi, oikeaklikkaa muokataksesi")
+            self.append_status("Soundboard muokkaustila ON — vedä nappi toiselle sivulle/slotille; vedä otsikko järjestyksen muuttamiseksi; oikeaklikkaa muokataksesi")
         else:
             self._save_soundboard()
             self.append_status("Soundboard muokkaustila OFF — tallennettu")
@@ -5067,10 +5209,13 @@ def open_settings_dialog(parent_app: "App") -> None:
     _asset_url = [None]
 
     def _check_updates():
+        import queue as _q
         _check_btn.setEnabled(False)
         _upd_status.setText("Tarkistetaan...")
         _upd_status.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
         _dl_btn.setVisible(False)
+
+        _result_q: _q.Queue = _q.Queue()
 
         def _worker():
             try:
@@ -5083,45 +5228,57 @@ def open_settings_dialog(parent_app: "App") -> None:
                 data = resp.json()
                 tag = data.get("tag_name", "").lstrip("v")
                 assets = data.get("assets", [])
-
-                def _apply():
-                    _check_btn.setEnabled(True)
-                    _latest_lbl.setText(f"v{tag}")
-                    cur = [int(x) for x in APP_VERSION.split(".")]
-                    lat = [int(x) for x in tag.split(".")]
-                    if lat > cur:
-                        url = next(
-                            (a["browser_download_url"] for a in assets
-                             if a["name"].endswith(".exe" if sys.platform == "win32" else ".dmg")),
-                            None
-                        )
-                        _asset_url[0] = url
-                        if url:
-                            _upd_status.setText(f"Versio v{tag} saatavilla!")
-                            _upd_status.setStyleSheet("color: #00FF6A; font-size: 11px; background: transparent;")
-                            _dl_btn.setVisible(True)
-                        else:
-                            _upd_status.setText(f"v{tag} saatavilla, mutta asentajaa ei löydy releasesta.")
-                            _upd_status.setStyleSheet("color: #FF9A00; font-size: 11px; background: transparent;")
-                    else:
-                        _upd_status.setText("Käytät uusinta versiota.")
-                        _upd_status.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
-                QTimer.singleShot(0, _apply)
+                url = next(
+                    (a["browser_download_url"] for a in assets
+                     if a["name"].endswith(".exe" if sys.platform == "win32" else ".dmg")),
+                    None
+                )
+                _result_q.put(("ok", tag, url))
             except Exception as e:
-                def _err():
-                    _check_btn.setEnabled(True)
-                    _upd_status.setText(f"Virhe: {e}")
-                    _upd_status.setStyleSheet("color: #ff8888; font-size: 11px; background: transparent;")
-                QTimer.singleShot(0, _err)
+                _result_q.put(("err", str(e)))
 
+        def _poll():
+            try:
+                result = _result_q.get_nowait()
+            except Exception:
+                return
+            _poll_timer.stop()
+            _check_btn.setEnabled(True)
+            if result[0] == "ok":
+                _, tag, url = result
+                _latest_lbl.setText(f"v{tag}")
+                cur = [int(x) for x in APP_VERSION.split(".")]
+                lat = [int(x) for x in tag.split(".")]
+                if lat > cur:
+                    _asset_url[0] = url
+                    if url:
+                        _upd_status.setText(f"Versio v{tag} saatavilla!")
+                        _upd_status.setStyleSheet("color: #00FF6A; font-size: 11px; background: transparent;")
+                        _dl_btn.setVisible(True)
+                    else:
+                        _upd_status.setText(f"v{tag} saatavilla, mutta asentajaa ei löydy releasesta.")
+                        _upd_status.setStyleSheet("color: #FF9A00; font-size: 11px; background: transparent;")
+                else:
+                    _upd_status.setText("Käytät uusinta versiota.")
+                    _upd_status.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+            else:
+                _upd_status.setText(f"Virhe: {result[1]}")
+                _upd_status.setStyleSheet("color: #ff8888; font-size: 11px; background: transparent;")
+
+        _poll_timer = QTimer(dlg)
+        _poll_timer.timeout.connect(_poll)
+        _poll_timer.start(200)
         threading.Thread(target=_worker, daemon=True).start()
 
     def _download_and_open():
+        import queue as _q
         url = _asset_url[0]
         if not url:
             return
         _dl_btn.setEnabled(False)
         _dl_btn.setText("Ladataan...")
+
+        _result_q: _q.Queue = _q.Queue()
 
         def _worker():
             try:
@@ -5132,22 +5289,31 @@ def open_settings_dialog(parent_app: "App") -> None:
                 with os.fdopen(fd, "wb") as f:
                     for chunk in resp.iter_content(65536):
                         f.write(chunk)
-
-                def _launch():
-                    _dl_btn.setEnabled(True)
-                    _dl_btn.setText("Lataa & Avaa asentaja")
-                    if sys.platform == "win32":
-                        subprocess.Popen([tmp_path])
-                    else:
-                        subprocess.Popen(["open", tmp_path])
-                QTimer.singleShot(0, _launch)
+                _result_q.put(("ok", tmp_path))
             except Exception as e:
-                def _err():
-                    _dl_btn.setEnabled(True)
-                    _dl_btn.setText("Lataa & Avaa asentaja")
-                    _upd_status.setText(f"Latausvirhe: {e}")
-                QTimer.singleShot(0, _err)
+                _result_q.put(("err", str(e)))
 
+        def _poll():
+            try:
+                result = _result_q.get_nowait()
+            except Exception:
+                return
+            _dl_poll_timer.stop()
+            _dl_btn.setEnabled(True)
+            _dl_btn.setText("Lataa & Avaa asentaja")
+            if result[0] == "ok":
+                tmp_path = result[1]
+                if sys.platform == "win32":
+                    subprocess.Popen([tmp_path])
+                else:
+                    subprocess.Popen(["open", tmp_path])
+            else:
+                _upd_status.setText(f"Latausvirhe: {result[1]}")
+                _upd_status.setStyleSheet("color: #ff8888; font-size: 11px; background: transparent;")
+
+        _dl_poll_timer = QTimer(dlg)
+        _dl_poll_timer.timeout.connect(_poll)
+        _dl_poll_timer.start(500)
         threading.Thread(target=_worker, daemon=True).start()
 
     _check_btn = _QPushButton("Tarkista päivitykset")
