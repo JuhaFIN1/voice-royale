@@ -8,7 +8,7 @@ REM ============================================================
 set NAME=Voice Royale
 set SCRIPT=ai_voice_app.py
 set VENV_PYTHON=.venv\Scripts\python.exe
-set VERSION=1.2.1
+set VERSION=1.2.3
 set ISCC="C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 set INNO_INSTALLER_URL=https://files.jrsoftware.org/is/6/innosetup-6.3.3.exe
 set INNO_TEMP=%TEMP%\innosetup_installer.exe
@@ -57,7 +57,25 @@ echo PyInstaller build complete.
 REM ============================================================
 echo.
 echo ============================================================
-echo  Step 2/3 — Inno Setup (Windows Installer)
+echo  Step 2/4 — Stream Deck Plugin Package
+echo ============================================================
+
+echo Building Stream Deck plugin...
+powershell -NoProfile -Command ^
+    "Compress-Archive -Path 'streamdeck-plugin\com.voiceroyale.sdPlugin' -DestinationPath 'streamdeck-plugin\_tmp.zip' -Force; Rename-Item 'streamdeck-plugin\_tmp.zip' 'com.voiceroyale.streamDeckPlugin'"
+
+if not exist "streamdeck-plugin\com.voiceroyale.streamDeckPlugin" (
+    echo.
+    echo *** Stream Deck plugin build FAILED ***
+    pause
+    exit /b 1
+)
+echo Stream Deck plugin built.
+
+REM ============================================================
+echo.
+echo ============================================================
+echo  Step 3/4 — Inno Setup (Windows Installer)
 echo ============================================================
 
 REM Check for Inno Setup; download and install if missing
@@ -96,7 +114,7 @@ if errorlevel 1 (
 REM ============================================================
 echo.
 echo ============================================================
-echo  Step 3/4 — Code Signing
+echo  Step 4/4 — Code Signing
 echo ============================================================
 
 set SIGNTOOL="C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
