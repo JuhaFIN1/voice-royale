@@ -4,6 +4,7 @@
     "Author": "Juha Lempiäinen",
     "Description": "Control Voice Royale — real-time speech translation — directly from your Elgato Stream Deck.",
     "Category": "Voice Royale",
+    "CategoryIcon": "icons/plugin",
     "Icon": "icons/plugin",
     "URL": "https://github.com/JuhaFIN1/voice-royale",
     "CodePath": "plugin.html",
