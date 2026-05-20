@@ -25,8 +25,9 @@ const ACTION_MAP = {
     "com.voiceroyale.settings":       "settings",
 };
 
-const contexts = {};    // context → action UUID
-const settings = {};    // context → settings object
+const contexts = {};      // context → action UUID
+const settings = {};      // context → settings object
+const imageKeys = {};     // context → "page_slot" key of last loaded image
 
 let ws = null;
 let sdPort = null;
@@ -71,13 +72,22 @@ function handleEvent(msg) {
             contexts[context] = action;
             if (payload && payload.settings) settings[context] = payload.settings;
             applyState(context, action, lastState);
+            if (action === "com.voiceroyale.soundboard") fetchSoundboardImage(context);
             break;
         case "willDisappear":
             delete contexts[context];
             delete settings[context];
+            delete imageKeys[context];
             break;
         case "didReceiveSettings":
-            if (payload && payload.settings) settings[context] = payload.settings;
+            if (payload && payload.settings) {
+                settings[context] = payload.settings;
+                delete imageKeys[context];  // force image reload with new settings
+                if (contexts[context] === "com.voiceroyale.soundboard") {
+                    applyState(context, "com.voiceroyale.soundboard", lastState);
+                    fetchSoundboardImage(context);
+                }
+            }
             break;
     }
 }
@@ -185,6 +195,28 @@ function applyState(context, action, state) {
             break;
         }
     }
+}
+
+// ─── Soundboard image ─────────────────────────────────────────────────────────
+async function fetchSoundboardImage(context) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const ctx = settings[context] || {};
+    const page = ctx.page !== undefined ? Number(ctx.page) : 0;
+    const slot = ctx.slot !== undefined ? Number(ctx.slot) : 0;
+    const key = `${page}_${slot}`;
+    if (imageKeys[context] === key) return;  // already loaded
+
+    try {
+        const resp = await fetch(`${VR_BASE}/soundboard/image/${page}/${slot}`, { cache: "no-store" });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        imageKeys[context] = key;
+        ws.send(JSON.stringify({
+            event: "setImage",
+            context,
+            payload: { image: data.image || null, target: 0 }
+        }));
+    } catch {}
 }
 
 // ─── WebSocket send helpers ───────────────────────────────────────────────────

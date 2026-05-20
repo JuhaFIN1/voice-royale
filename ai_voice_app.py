@@ -650,6 +650,28 @@ class StreamDeckHttpServer:
                     action = _up.unquote(self.path[8:].strip("/"))
                     app._sd_action_queue.put(action)
                     self._json({"ok": True, "action": action})
+                elif self.path.startswith("/soundboard/image/"):
+                    parts = self.path[18:].strip("/").split("/")
+                    img_b64 = None
+                    if len(parts) == 2:
+                        try:
+                            pi, si = int(parts[0]), int(parts[1])
+                            st = app._get_sd_state()
+                            pages_st = st.get("soundboard_pages", [])
+                            if pi < len(pages_st):
+                                sl = pages_st[pi].get("slots", [])
+                                if si < len(sl):
+                                    ip = sl[si].get("image_path", "")
+                                    if ip and os.path.exists(ip):
+                                        import base64 as _b64
+                                        with open(ip, "rb") as _f:
+                                            raw = _b64.b64encode(_f.read()).decode()
+                                        _ext = os.path.splitext(ip)[1].lower()
+                                        _mime = "image/jpeg" if _ext in (".jpg", ".jpeg") else "image/png"
+                                        img_b64 = f"data:{_mime};base64,{raw}"
+                        except Exception:
+                            pass
+                    self._json({"image": img_b64})
                 else:
                     self.send_response(404)
                     self._cors()
@@ -3743,9 +3765,12 @@ class App(QWidget):
             for pi, page_data in enumerate(self.settings.get("soundboard_pages", [])):
                 slots = []
                 for si, slot in enumerate(page_data.get("slots", [])):
+                    img = slot.get("image", "")
                     slots.append({
                         "name": slot.get("name", f"Slot {si+1}"),
                         "has_file": bool(slot.get("file")),
+                        "has_image": bool(img and os.path.exists(img)),
+                        "image_path": img if img and os.path.exists(img) else "",
                     })
                 pages.append({"name": page_data.get("name", f"Page {pi+1}"), "slots": slots})
             self._sd_state = {
