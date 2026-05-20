@@ -61,8 +61,8 @@ import requests
 import sounddevice as sd
 from dotenv import load_dotenv
 from openai import OpenAI
-from PyQt6.QtCore import QEvent, QObject, QRectF, QSize, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtCore import QEvent, QMimeData, QObject, QPoint, QRectF, QSize, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QDrag, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -899,6 +899,7 @@ class SoundboardButton(QWidget):
 
     clicked_play = pyqtSignal(int)
     data_changed = pyqtSignal(int)
+    swap_requested = pyqtSignal(int, int, int, int)   # src_page, src_slot, dst_page, dst_slot
 
     _edit_mode: bool = False
 
@@ -927,12 +928,24 @@ class SoundboardButton(QWidget):
         "QToolButton { background: #080C1A; border: 2px dashed #3A7BFF; border-radius: 10px;"
         " color: #3A7BFF; font-size: 8px; font-weight: 700; padding-bottom: 2px; }"
     )
+    _STYLE_LINK = (
+        "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+        " stop:0 #0A1428, stop:1 #060C18);"
+        " border: 2px solid #1A3A70; border-radius: 10px;"
+        " color: #3A7BFF; font-size: 8px; font-weight: 700;"
+        " padding-bottom: 2px; }"
+        "QToolButton:hover { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+        " stop:0 #142040, stop:1 #0A1828);"
+        " border: 2px solid #3A7BFF; color: #6AA0FF; }"
+        "QToolButton:pressed { background: #060C18; border: 2px solid #9A4DFF; }"
+    )
 
     def __init__(self, page_index: int, slot_index: int, parent=None):
         super().__init__(parent)
         self.page_index = page_index
         self.slot_index = slot_index
-        self._data = {"name": f"Slot {slot_index + 1}", "file": "", "image": ""}
+        self._data = {"name": f"Slot {slot_index + 1}", "file": "", "image": "", "link_page_name": ""}
+        self._drag_start: QPoint | None = None
         self.setFixedSize(72, 68)
 
         lay = QVBoxLayout(self)
@@ -954,45 +967,96 @@ class SoundboardButton(QWidget):
 
     def set_data(self, d: dict):
         self._data = dict(d)
+        if "link_page_name" not in self._data:
+            self._data["link_page_name"] = ""
         self._refresh()
 
     def get_data(self) -> dict:
         return dict(self._data)
 
     def set_playing(self, playing: bool):
-        self._btn.setStyleSheet(self._STYLE_PLAY if playing else self._STYLE_IDLE)
+        if not self._data.get("link_page_name"):
+            self._btn.setStyleSheet(self._STYLE_PLAY if playing else self._STYLE_IDLE)
 
-    # ---- drag-and-drop (only active in edit mode) ----
+    # ---- drag-and-drop ----
 
     _IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'}
     _AUDIO_EXTS = {'.wav', '.mp3', '.ogg', '.flac', '.aiff', '.aif'}
+    _SLOT_MIME = "application/x-soundboard-slot"
 
     def eventFilter(self, obj, event):
         if obj is self._btn:
             t = event.type()
+            if t == QEvent.Type.MouseButtonPress:
+                if SoundboardButton._edit_mode and event.button() == Qt.MouseButton.LeftButton:
+                    self._drag_start = event.position().toPoint()
+                return False
+            if t == QEvent.Type.MouseMove:
+                if (SoundboardButton._edit_mode and self._drag_start is not None
+                        and event.buttons() & Qt.MouseButton.LeftButton):
+                    dist = (event.position().toPoint() - self._drag_start).manhattanLength()
+                    if dist >= QApplication.startDragDistance():
+                        self._drag_start = None
+                        self._start_slot_drag()
+                        return True
+                return False
+            if t == QEvent.Type.MouseButtonRelease:
+                self._drag_start = None
+                return False
             if t == QEvent.Type.DragEnter:
                 self._on_drag_enter(event)
                 return True
             if t == QEvent.Type.DragMove:
-                if SoundboardButton._edit_mode and event.mimeData().hasUrls():
+                mime = event.mimeData()
+                if SoundboardButton._edit_mode and (mime.hasUrls() or mime.hasFormat(self._SLOT_MIME)):
                     event.acceptProposedAction()
                 else:
                     event.ignore()
                 return True
             if t == QEvent.Type.DragLeave:
-                self._btn.setStyleSheet(self._STYLE_IDLE)
+                self._restore_style()
                 return True
             if t == QEvent.Type.Drop:
                 self._on_drop(event)
                 return True
         return super().eventFilter(obj, event)
 
+    def _restore_style(self):
+        if self._data.get("link_page_name"):
+            self._btn.setStyleSheet(self._STYLE_LINK)
+        else:
+            self._btn.setStyleSheet(self._STYLE_IDLE)
+
+    def _start_slot_drag(self):
+        mime = QMimeData()
+        payload = json.dumps({"page": self.page_index, "slot": self.slot_index}).encode()
+        mime.setData(self._SLOT_MIME, payload)
+        drag = QDrag(self._btn)
+        drag.setMimeData(mime)
+        px = self._btn.grab().scaled(54, 51, Qt.AspectRatioMode.KeepAspectRatio,
+                                      Qt.TransformationMode.SmoothTransformation)
+        drag.setPixmap(px)
+        drag.setHotSpot(QPoint(px.width() // 2, px.height() // 2))
+        drag.exec(Qt.DropAction.MoveAction)
+
     def _on_drag_enter(self, event):
         if not SoundboardButton._edit_mode:
             event.ignore()
             return
-        if event.mimeData().hasUrls():
-            for url in event.mimeData().urls():
+        mime = event.mimeData()
+        if mime.hasFormat(self._SLOT_MIME):
+            try:
+                info = json.loads(bytes(mime.data(self._SLOT_MIME)).decode())
+                if info["page"] == self.page_index and info["slot"] == self.slot_index:
+                    event.ignore()
+                    return
+            except Exception:
+                pass
+            event.acceptProposedAction()
+            self._btn.setStyleSheet(self._STYLE_DRAG)
+            return
+        if mime.hasUrls():
+            for url in mime.urls():
                 ext = os.path.splitext(url.toLocalFile())[1].lower()
                 if ext in self._IMAGE_EXTS or ext in self._AUDIO_EXTS:
                     event.acceptProposedAction()
@@ -1001,18 +1065,34 @@ class SoundboardButton(QWidget):
         event.ignore()
 
     def _on_drop(self, event):
-        self._btn.setStyleSheet(self._STYLE_IDLE)
-        if not SoundboardButton._edit_mode or not event.mimeData().hasUrls():
+        self._restore_style()
+        if not SoundboardButton._edit_mode:
             event.ignore()
             return
-        for url in event.mimeData().urls():
-            path = url.toLocalFile()
-            ext = os.path.splitext(path)[1].lower()
-            if ext in self._IMAGE_EXTS:
-                self._drop_image(path)
-            elif ext in self._AUDIO_EXTS:
-                self._drop_sound(path)
-        event.acceptProposedAction()
+        mime = event.mimeData()
+        if mime.hasFormat(self._SLOT_MIME):
+            try:
+                info = json.loads(bytes(mime.data(self._SLOT_MIME)).decode())
+                src_p, src_s = info["page"], info["slot"]
+                if src_p == self.page_index and src_s == self.slot_index:
+                    event.ignore()
+                    return
+                self.swap_requested.emit(src_p, src_s, self.page_index, self.slot_index)
+                event.acceptProposedAction()
+            except Exception:
+                event.ignore()
+            return
+        if mime.hasUrls():
+            for url in mime.urls():
+                path = url.toLocalFile()
+                ext = os.path.splitext(path)[1].lower()
+                if ext in self._IMAGE_EXTS:
+                    self._drop_image(path)
+                elif ext in self._AUDIO_EXTS:
+                    self._drop_sound(path)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
 
     def _drop_image(self, path: str):
         try:
@@ -1042,7 +1122,7 @@ class SoundboardButton(QWidget):
         px.fill(Qt.GlobalColor.transparent)
         p = QPainter(px)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        r = 8  # corner radius
+        r = 8
         inner = QRectF(2, 2, size - 4, size - 4)
         has_img = bool(img_path and os.path.exists(img_path))
         if has_img:
@@ -1080,13 +1160,41 @@ class SoundboardButton(QWidget):
         p.end()
         return px
 
+    def _make_link_pixmap(self, size: int) -> QPixmap:
+        px = QPixmap(size, size)
+        px.fill(Qt.GlobalColor.transparent)
+        p = QPainter(px)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        inner = QRectF(2, 2, size - 4, size - 4)
+        clip = QPainterPath()
+        clip.addRoundedRect(inner, 8, 8)
+        p.setClipPath(clip)
+        p.fillRect(inner.toRect(), QColor("#060C18"))
+        p.setClipping(False)
+        p.setPen(QColor("#3A7BFF"))
+        p.setFont(QFont("Segoe UI", size // 3))
+        p.drawText(QRectF(0, 0, size, size - 4), Qt.AlignmentFlag.AlignCenter, "▶")
+        pen = QPen(QColor("#1A3A70"))
+        pen.setWidthF(1.5)
+        p.setPen(pen)
+        p.drawRoundedRect(inner, 8, 8)
+        p.end()
+        return px
+
     def _refresh(self):
+        link_name = self._data.get("link_page_name", "")
         name = self._data.get("name") or f"Slot {self.slot_index + 1}"
-        px = self._make_icon_pixmap(46)
-        self._btn.setIcon(QIcon(px))
         display = name if len(name) <= 9 else name[:8] + "…"
-        self._btn.setText(display)
-        self._btn.setToolTip(name + ("\n" + self._data["file"] if self._data.get("file") else ""))
+        if link_name:
+            self._btn.setIcon(QIcon(self._make_link_pixmap(46)))
+            self._btn.setText(display)
+            self._btn.setToolTip(f"→ Sivu: {link_name}")
+            self._btn.setStyleSheet(self._STYLE_LINK)
+        else:
+            self._btn.setIcon(QIcon(self._make_icon_pixmap(46)))
+            self._btn.setText(display)
+            self._btn.setToolTip(name + ("\n" + self._data["file"] if self._data.get("file") else ""))
+            self._btn.setStyleSheet(self._STYLE_IDLE)
 
     def _ctx_menu(self, pos):
         if not SoundboardButton._edit_mode:
@@ -1095,7 +1203,10 @@ class SoundboardButton(QWidget):
         menu.addAction("Assign Sound…", self._assign_sound)
         menu.addAction("Assign Image…", self._assign_image)
         menu.addAction("Rename…", self._rename)
-        if self._data.get("file"):
+        menu.addSeparator()
+        menu.addAction("Link to Page…", self._assign_page_link)
+        has_content = bool(self._data.get("file") or self._data.get("image") or self._data.get("link_page_name"))
+        if has_content:
             menu.addSeparator()
             menu.addAction("Clear", self._clear)
         menu.exec(self.mapToGlobal(pos))
@@ -1110,6 +1221,7 @@ class SoundboardButton(QWidget):
         try:
             dest, orig, new = _sb_import_audio(path, self.page_index, self.slot_index)
             self._data["file"] = dest
+            self._data["link_page_name"] = ""
             ratio = (1 - new / orig) * 100 if orig > 0 else 0
             self._notify_status(
                 f"Soundboard {self.slot_index+1}: ääni tuotu "
@@ -1118,7 +1230,8 @@ class SoundboardButton(QWidget):
         except Exception as e:
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Tuontivirhe", str(e))
-            self._data["file"] = path  # fallback: alkuperäinen polku
+            self._data["file"] = path
+            self._data["link_page_name"] = ""
         if not self._data.get("name") or self._data["name"].startswith("Slot "):
             self._data["name"] = os.path.splitext(os.path.basename(path))[0]
         self._refresh()
@@ -1146,13 +1259,41 @@ class SoundboardButton(QWidget):
         self._refresh()
         self.data_changed.emit(self.slot_index)
 
+    def _assign_page_link(self):
+        p = self.parent()
+        app = None
+        while p is not None:
+            if hasattr(p, "_sb_tabs"):
+                app = p
+                break
+            p = p.parent()
+        if app is None:
+            return
+        all_pages = [app._sb_tabs.tabText(i) for i in range(app._sb_tabs.count())]
+        own_name = all_pages[self.page_index] if self.page_index < len(all_pages) else ""
+        choices = [pg for pg in all_pages if pg != own_name]
+        if not choices:
+            return
+        current = self._data.get("link_page_name", "")
+        idx = choices.index(current) if current in choices else 0
+        choice, ok = QInputDialog.getItem(
+            self, "Linkki sivulle", "Valitse sivu:", choices, idx, False
+        )
+        if ok and choice:
+            self._data["link_page_name"] = choice
+            self._data["file"] = ""
+            if not self._data.get("name") or self._data["name"].startswith("Slot "):
+                self._data["name"] = f"→ {choice}"
+            self._refresh()
+            self.data_changed.emit(self.slot_index)
+
     def _notify_status(self, msg: str):
         p = self.parent()
         while p is not None:
             if isinstance(p, QWidget) and hasattr(p, "append_status"):
                 p.append_status(msg)
                 return
-            p = p.parent() if hasattr(p, "parent") else None
+            p = p.parent()
 
     def _rename(self):
         text, ok = QInputDialog.getText(
@@ -1165,7 +1306,7 @@ class SoundboardButton(QWidget):
             self.data_changed.emit(self.slot_index)
 
     def _clear(self):
-        self._data = {"name": f"Slot {self.slot_index + 1}", "file": "", "image": ""}
+        self._data = {"name": f"Slot {self.slot_index + 1}", "file": "", "image": "", "link_page_name": ""}
         self._refresh()
         self.data_changed.emit(self.slot_index)
 
@@ -2552,6 +2693,7 @@ class App(QWidget):
                 btn.set_data(slots[i])
             btn.clicked_play.connect(self._sb_play_handler)
             btn.data_changed.connect(self._sb_data_handler)
+            btn.swap_requested.connect(self._sb_swap_handler)
             page_btns.append(btn)
             row, col = divmod(i, 14)
             grid.addWidget(btn, row, col)
@@ -2616,12 +2758,28 @@ class App(QWidget):
                 self._save_soundboard()
                 return
 
+    def _sb_swap_handler(self, src_page: int, src_slot: int, dst_page: int, dst_slot: int):
+        if src_page >= len(self._soundboard_buttons) or dst_page >= len(self._soundboard_buttons):
+            return
+        src_btns = self._soundboard_buttons[src_page]
+        dst_btns = self._soundboard_buttons[dst_page]
+        if src_slot >= len(src_btns) or dst_slot >= len(dst_btns):
+            return
+        src_btn = src_btns[src_slot]
+        dst_btn = dst_btns[dst_slot]
+        src_data = src_btn.get_data()
+        dst_data = dst_btn.get_data()
+        src_btn.set_data(dst_data)
+        dst_btn.set_data(src_data)
+        self._save_soundboard()
+
     def _sb_toggle_edit_mode(self, enabled: bool):
         SoundboardButton.set_edit_mode(enabled)
         if enabled:
-            self.append_status("Soundboard muokkaustila ON — vedä kuva/ääni napin päälle tai oikeaklikkaa")
+            self.append_status("Soundboard muokkaustila ON — vedä nappi toisen päälle vaihtaaksesi, oikeaklikkaa muokataksesi")
         else:
-            self.append_status("Soundboard muokkaustila OFF")
+            self._save_soundboard()
+            self.append_status("Soundboard muokkaustila OFF — tallennettu")
 
     def _build_voice_fx_card(self) -> QWidget:
         frame, layout = self._make_card("Voice FX — real-time voice morphing via virtual output")
@@ -3766,6 +3924,17 @@ class App(QWidget):
             return
         btn = page_btns[slot_index]
         data = btn.get_data()
+
+        # Page-link button — navigate to target page (only in play mode)
+        link_name = data.get("link_page_name", "")
+        if link_name and not SoundboardButton._edit_mode:
+            for i in range(self._sb_tabs.count()):
+                if self._sb_tabs.tabText(i) == link_name:
+                    self._sb_tabs.setCurrentIndex(i)
+                    return
+            self.append_status(f"Soundboard: sivu '{link_name}' ei löydy")
+            return
+
         path = data.get("file", "")
         if not path or not os.path.exists(path):
             self.append_status(f"Soundboard p{page_index+1} slot {slot_index+1}: ei ääntä (oikeaklikkaa)")
