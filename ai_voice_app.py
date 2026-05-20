@@ -648,7 +648,6 @@ class StreamDeckHttpServer:
                 elif self.path.startswith("/action/"):
                     import urllib.parse as _up
                     action = _up.unquote(self.path[8:].strip("/"))
-                    status_cb(f"SD GET saapu: {action}")
                     app._sd_action_queue.put(action)
                     self._json({"ok": True, "action": action})
                 else:
@@ -660,7 +659,6 @@ class StreamDeckHttpServer:
                 if self.path.startswith("/action/"):
                     import urllib.parse as _up
                     action = _up.unquote(self.path[8:].strip("/"))
-                    status_cb(f"SD POST saapu: {action}")
                     app._sd_action_queue.put(action)
                     self._json({"ok": True, "action": action})
                 else:
