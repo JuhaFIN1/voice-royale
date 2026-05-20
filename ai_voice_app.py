@@ -260,6 +260,9 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
+APP_VERSION = "1.3.1"
+GITHUB_REPO = "JuhaFIN1/voice-royale"
+
 # =========================
 # APP SETTINGS (separate from credentials/history)
 # =========================
@@ -4366,15 +4369,15 @@ def open_settings_dialog(parent_app: "App") -> None:
 
     dlg = QDialog(parent_app)
     dlg.setWindowTitle("Voice Royale — Asetukset")
-    dlg.resize(860, 660)
-    dlg.setMinimumSize(700, 520)
+    dlg.resize(900, 660)
+    dlg.setMinimumSize(720, 520)
     dlg.setStyleSheet(parent_app.styleSheet() + """
         QTabWidget::pane { border: 1px solid #2a2a3a; border-radius: 0 8px 8px 8px;
             background: #111118; padding: 4px; }
-        QTabBar::tab { background: #1A1A26; color: #666680; padding: 9px 22px;
-            font-size: 12px; font-weight: 700; letter-spacing: 0.4px;
+        QTabBar::tab { background: #1A1A26; color: #666680; padding: 5px 9px;
+            font-size: 10px; font-weight: 700; letter-spacing: 0;
             border: 1px solid #2a2a3a; border-bottom: none;
-            border-radius: 6px 6px 0 0; margin-right: 3px; }
+            border-radius: 5px 5px 0 0; margin-right: 2px; }
         QTabBar::tab:selected { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,
             stop:0 #3A7BFF, stop:1 #9A4DFF); color: #fff; border-color: #3A7BFF; }
         QTabBar::tab:hover:!selected { background: #222232; color: #C0C0E0;
@@ -5036,12 +5039,136 @@ def open_settings_dialog(parent_app: "App") -> None:
     vbc_install_btn.clicked.connect(_do_vbc_install)
     f6.addRow("", vbc_install_btn)
 
-    tabs.addTab(_scroll_tab(f1), "  Käännös & Ääni  ")
-    tabs.addTab(_scroll_tab(f2), "  Wake Word  ")
-    tabs.addTab(_scroll_tab(f3), "  Kielet  ")
-    tabs.addTab(_scroll_tab(f4), "  Pikavalinnat & Data  ")
-    tabs.addTab(sd_scroll, "  Stream Deck  ")
-    tabs.addTab(_scroll_tab(f6), "  Asennukset  ")
+    # ── TAB 7 — Päivitys ─────────────────────────────────────────────
+    f7 = _make_form()
+    f7.addRow(_header("Sovelluspäivitykset"))
+
+    _cur_lbl = QLabel(f"v{APP_VERSION}")
+    _cur_lbl.setStyleSheet("color: #e6edf3; font-size: 13px; font-weight: 700; background: transparent;")
+    f7.addRow(_lbl("Nykyinen versio:"), _cur_lbl)
+
+    _latest_lbl = QLabel("—")
+    _latest_lbl.setStyleSheet("color: #8b949e; font-size: 12px; background: transparent;")
+    f7.addRow(_lbl("Uusin versio:"), _latest_lbl)
+
+    _upd_status = QLabel("")
+    _upd_status.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+    _upd_status.setWordWrap(True)
+
+    _dl_btn = _QPushButton("Lataa & Avaa asentaja")
+    _dl_btn.setVisible(False)
+    _dl_btn.setStyleSheet(
+        "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);"
+        " color: #fff; border: none; border-radius: 6px; padding: 8px 20px; font-weight: 700; }"
+        "QPushButton:hover { background: #9A4DFF; }"
+        "QPushButton:disabled { background: #21262d; color: #8b949e; }"
+    )
+
+    _asset_url = [None]
+
+    def _check_updates():
+        _check_btn.setEnabled(False)
+        _upd_status.setText("Tarkistetaan...")
+        _upd_status.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        _dl_btn.setVisible(False)
+
+        def _worker():
+            try:
+                resp = requests.get(
+                    f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
+                    headers={"User-Agent": "VoiceRoyale-Updater"},
+                    timeout=10
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                tag = data.get("tag_name", "").lstrip("v")
+                assets = data.get("assets", [])
+
+                def _apply():
+                    _check_btn.setEnabled(True)
+                    _latest_lbl.setText(f"v{tag}")
+                    cur = [int(x) for x in APP_VERSION.split(".")]
+                    lat = [int(x) for x in tag.split(".")]
+                    if lat > cur:
+                        url = next(
+                            (a["browser_download_url"] for a in assets
+                             if a["name"].endswith(".exe" if sys.platform == "win32" else ".dmg")),
+                            None
+                        )
+                        _asset_url[0] = url
+                        if url:
+                            _upd_status.setText(f"Versio v{tag} saatavilla!")
+                            _upd_status.setStyleSheet("color: #00FF6A; font-size: 11px; background: transparent;")
+                            _dl_btn.setVisible(True)
+                        else:
+                            _upd_status.setText(f"v{tag} saatavilla, mutta asentajaa ei löydy releasesta.")
+                            _upd_status.setStyleSheet("color: #FF9A00; font-size: 11px; background: transparent;")
+                    else:
+                        _upd_status.setText("Käytät uusinta versiota.")
+                        _upd_status.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+                QTimer.singleShot(0, _apply)
+            except Exception as e:
+                def _err():
+                    _check_btn.setEnabled(True)
+                    _upd_status.setText(f"Virhe: {e}")
+                    _upd_status.setStyleSheet("color: #ff8888; font-size: 11px; background: transparent;")
+                QTimer.singleShot(0, _err)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _download_and_open():
+        url = _asset_url[0]
+        if not url:
+            return
+        _dl_btn.setEnabled(False)
+        _dl_btn.setText("Ladataan...")
+
+        def _worker():
+            try:
+                resp = requests.get(url, stream=True, timeout=300)
+                resp.raise_for_status()
+                suffix = ".exe" if url.endswith(".exe") else ".dmg"
+                fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+                with os.fdopen(fd, "wb") as f:
+                    for chunk in resp.iter_content(65536):
+                        f.write(chunk)
+
+                def _launch():
+                    _dl_btn.setEnabled(True)
+                    _dl_btn.setText("Lataa & Avaa asentaja")
+                    if sys.platform == "win32":
+                        subprocess.Popen([tmp_path])
+                    else:
+                        subprocess.Popen(["open", tmp_path])
+                QTimer.singleShot(0, _launch)
+            except Exception as e:
+                def _err():
+                    _dl_btn.setEnabled(True)
+                    _dl_btn.setText("Lataa & Avaa asentaja")
+                    _upd_status.setText(f"Latausvirhe: {e}")
+                QTimer.singleShot(0, _err)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    _check_btn = _QPushButton("Tarkista päivitykset")
+    _check_btn.clicked.connect(_check_updates)
+    _dl_btn.clicked.connect(_download_and_open)
+
+    f7.addRow("", _check_btn)
+    f7.addRow("", _upd_status)
+    f7.addRow("", _dl_btn)
+    f7.addRow("", _desc(
+        "Windows: Inno Setup -asentaja käynnistyy — vanha versio suljetaan automaattisesti.\n"
+        "macOS: DMG-tiedosto aukeaa — vedä Voice Royale.app Applications-kansioon."
+    ))
+
+    tabs.addTab(_scroll_tab(f1), "Käännös & TTS")
+    tabs.addTab(_scroll_tab(f2), "Wake Word")
+    tabs.addTab(_scroll_tab(f3), "Kielet")
+    tabs.addTab(_scroll_tab(f4), "Pika & Data")
+    tabs.addTab(sd_scroll, "Stream Deck")
+    tabs.addTab(_scroll_tab(f6), "Asennus")
+    tabs.addTab(_scroll_tab(f7), "Päivitys")
 
     # ── Buttons ───────────────────────────────────────────────────────
     btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
