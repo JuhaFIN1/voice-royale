@@ -2837,6 +2837,7 @@ class App(QWidget):
     def _sb_stop_playback(self):
         self._sb_play_id += 1
         sd.stop()
+        self.update_output_level(0.0)
         if self._sb_playing_btn:
             btn = self._sb_playing_btn
             self._sb_playing_btn = None
@@ -4094,13 +4095,17 @@ class App(QWidget):
             QTimer.singleShot(0, lambda: old_btn.set_playing(False))
         self._sb_playing_btn = btn
 
+        def _level_cb(level: float):
+            # Silences the meter immediately when this slot's playback has been superseded
+            self.update_output_level(level if self._sb_play_id == my_play_id else 0.0)
+
         def _play():
             try:
                 QTimer.singleShot(0, lambda: btn.set_playing(True))
                 wav = self._load_audio_as_wav(path)
                 if self._sb_play_id == my_play_id:
                     play_wav_bytes(wav, device_indices=self.get_selected_devices(),
-                                   level_callback=self.update_output_level)
+                                   level_callback=_level_cb)
                 self.update_output_level(0.0)
             except Exception as e:
                 if self._sb_play_id == my_play_id:
