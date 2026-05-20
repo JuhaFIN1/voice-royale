@@ -55,10 +55,7 @@ jobs:
         shell: pwsh
 
       - name: Install Inno Setup
-        run: |
-          $url = "https://files.jrsoftware.org/is/6/innosetup-6.3.3.exe"
-          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\innosetup.exe"
-          Start-Process -FilePath "$env:TEMP\innosetup.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+        run: choco install innosetup --yes --no-progress
         shell: pwsh
 
       - name: Patch installer version
