@@ -2320,6 +2320,16 @@ class App(QWidget):
         info_row.addWidget(self.hotkey_label)
         layout.addLayout(info_row)
 
+        # Wake-word usage instructions — shown only when listening is active
+        self.wake_instructions_label = QLabel()
+        self.wake_instructions_label.setWordWrap(True)
+        self.wake_instructions_label.setStyleSheet(
+            "QLabel { background: #0d1f12; border: 1px solid #1f6b35; border-radius: 6px;"
+            " color: #7ee89a; font-size: 11px; padding: 8px 10px; }"
+        )
+        self.wake_instructions_label.setVisible(False)
+        layout.addWidget(self.wake_instructions_label)
+
         return frame
 
     def _build_history_card(self) -> QWidget:
@@ -3211,6 +3221,7 @@ class App(QWidget):
             self.listen_button.setText("👂  Listen")
             self.listen_button.setChecked(False)
             self.wake_status_label.setText("Wake-word: off")
+            self.wake_instructions_label.setVisible(False)
             self._start_mic_monitor()
         else:
             ok = self._start_wake_listener()
@@ -3223,6 +3234,18 @@ class App(QWidget):
                 self.wake_status_label.setText(f"Listening: {kw_display}")
                 self._mic_peak_ref[0] = 0.0
                 self._stop_mic_monitor()
+                secs = self.settings.get("wake_command_seconds", 6.0)
+                self.wake_instructions_label.setText(
+                    f'Say  "{kw_display}"  then within {secs:.0f}s:\n'
+                    f'  "[target language]: [text to translate]"\n\n'
+                    f'Examples:\n'
+                    f'  "{kw_display}, in German: hello how are you"\n'
+                    f'  "{kw_display}, saksaksi: mitä kuuluu"\n'
+                    f'  "{kw_display}, auf Deutsch: guten Tag"\n\n'
+                    f'Language hint works in any language. Source language auto-detected.\n'
+                    f'No language = uses the language selected in the dropdown.'
+                )
+                self.wake_instructions_label.setVisible(True)
             else:
                 self.listen_button.setChecked(False)
 
