@@ -13,7 +13,7 @@ build_app.bat                   # PyInstaller + Inno Setup + signing → install
 
 | Tiedosto | Kuvaus |
 |---|---|
-| `ai_voice_app.py` | Koko sovellus, ~4300 riviä |
+| `ai_voice_app.py` | Koko sovellus, ~5600 riviä |
 | `credentials.env` | API-avaimet (OPENAI_API_KEY, ELEVEN_API_KEY, VOICE_ID) |
 | `.env` | Signing-muuttujat (SIGN_CERT_PATH, SIGN_CERT_PASSWORD) — ei githubiin |
 | `app_settings.json` | Käyttäjäasetukset |
@@ -31,7 +31,9 @@ build_app.bat                   # PyInstaller + Inno Setup + signing → install
 - `App(QWidget)` — pääluokka koko UI:lla
 - `SoundboardButton` — soundboard-nappi, `_edit_mode` on luokkatason flag
 - `translate_text(text, lang, backend, deepl_key)` — käännös, backend default "Google (free)"
-- `open_settings_dialog()` — 4-välilehtinen asetusikkuna
+- `VoiceEffectProcessor` — real-time DSP, `set_monitor(device, enabled)` = Hear Myself
+- `SetupWizard` — 4-vaiheinen: Welcome / API key / Enter key / VB-Cable / Devices
+- `open_settings_dialog()` — 6-välilehtinen asetusikkuna (Käännös, Wake Word, Kielet, Pikavalinnat, Stream Deck, Asennukset)
 
 ## Stream Deck HTTP API (ai_voice_app.py — sessio 8)
 
@@ -65,7 +67,7 @@ self._sd_state_timer.start(1500)
 
 `streamdeck-plugin/com.voiceroyale.sdPlugin/` — virallinen Elgato-plugin.
 
-- `manifest.json` — v1.2.6, **`CategoryIcon` vaaditaan SD 7.x:ssä** (puuttuva → "unable to install")
+- `manifest.json` — v1.2.7, **`CategoryIcon` vaaditaan SD 7.x:ssä** (puuttuva → "unable to install")
 - `plugin.html` — HTML-pohjainen plugin (native WebSocket + fetch, ei Node.js); `CodePath: "plugin.html"`
 - `propertyinspector/soundboard.html` — SD WebSocket API: `getSettings`/`setSettings`/`didReceiveSettings`, lataa nimimuuttujat `/state`-endpointista
 - `propertyinspector/lang.html`, `propertyinspector/fx.html` — vastaavat
@@ -94,7 +96,15 @@ self._sd_state_timer.start(1500)
 
 ## Käyttäjäasetukset (app_settings.json)
 
-`hotkey`, `wake_keyword`, `picovoice_access_key`, `default_target_lang`, `default_tts_backend`, `wake_command_seconds`, `translation_backend`, `deepl_api_key`, `custom_languages`.
+`hotkey`, `wake_keyword`, `picovoice_access_key`, `default_target_lang`, `default_tts_backend`, `wake_command_seconds`, `translation_backend`, `deepl_api_key`, `custom_languages`, `voice_fx_output_device`, `voice_fx_monitor_device`, `voice_fx_hear_myself`.
+
+## Kriittinen: Settings-ikkuna exe-tilassa
+
+`_pkg_status()` asetusikkunan Asennukset-välilehdellä käyttää `sys.modules` frozen-tilassa (`getattr(sys, "frozen", False)`). ÄLÄ käytä `importlib.import_module` frozen-tilassa valinnaisten natiivi-kirjastojen (pvporcupine, pyrubberband) kanssa — ne voivat kaataa prosessin muulla kuin `ImportError`-poikkeuksella.
+
+## Hear Myself — Voice FX -monitorointi
+
+`VoiceEffectProcessor.set_monitor(device, enabled)` käynnistää/pysäyttää erillisen `_monitor_stream` OutputStream-virran. Prosessori kirjoittaa käsitellyn audion sekä FX-outputtiin (VB-Cable) että monitor-outputtiin (kuulokkeet) kun `_hear_myself=True`. Asetetaan myös `start()`:ssa jos `_monitor_device` on asetettu.
 
 ## Code Signing
 
