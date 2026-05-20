@@ -10,3 +10,5 @@ edge-tts
 pvporcupine
 scipy
 deep-translator
+Pillow
+streamdeck

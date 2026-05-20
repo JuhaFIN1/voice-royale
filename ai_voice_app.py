@@ -25,6 +25,8 @@ REQUIRED = {
     "pyttsx3": "pyttsx3",
     "edge_tts": "edge-tts",
     "deep_translator": "deep-translator",
+    "PIL": "Pillow",
+    "StreamDeck": "streamdeck",
 }
 
 
