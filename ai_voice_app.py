@@ -4326,45 +4326,6 @@ def open_settings_dialog(parent_app: "App") -> None:
         "Vältä OS:n tai pelin omia pikanäppäimiä."
     ))
 
-    f4.addRow(_header("Virtuaalimikrofoni"))
-
-    _vbc_installed = _is_vbcable_installed()
-    vbc_status_lbl = QLabel("VB-Cable: ✅ Asennettu" if _vbc_installed else "VB-Cable: ❌ Ei asennettu")
-    vbc_status_lbl.setStyleSheet("color: #7fc97f; font-size: 13px;" if _vbc_installed else "color: #ff8888; font-size: 13px;")
-    f4.addRow(_lbl("Tila:"), vbc_status_lbl)
-    f4.addRow("", _desc(
-        "VB-Audio Virtual Cable — ilmainen virtuaaliäänilaite, jolla tämän sovelluksen "
-        "käännetty puhe näkyy mikrofonina peleissä ja Discord/TeamSpeak-sovelluksissa.\n"
-        "Asennuksen jälkeen: aseta lähtölaite → 'CABLE Input' tässä appissa, "
-        "ja mikrofoni → 'CABLE Output' pelissä tai Discordissa."
-    ))
-
-    vbc_install_btn = _QPushButton(
-        "VB-Cable on jo asennettu" if _vbc_installed else "Asenna VB-Cable (Virtuaalimikrofoni)"
-    )
-    vbc_install_btn.setEnabled(not _vbc_installed)
-
-    def _do_vbc_install():
-        vbc_install_btn.setEnabled(False)
-        vbc_install_btn.setText("Asennetaan...")
-
-        def _status(msg):
-            def _apply():
-                vbc_status_lbl.setText(msg)
-                vbc_status_lbl.setStyleSheet("color: #7fc97f; font-size: 13px;" if "✅" in msg else "color: #ff8888; font-size: 13px;")
-                if "✅" in msg:
-                    vbc_install_btn.setText("VB-Cable on jo asennettu")
-                    QTimer.singleShot(800, parent_app.populate_output_devices)
-                else:
-                    vbc_install_btn.setEnabled(True)
-                    vbc_install_btn.setText("Yritä uudelleen")
-            QTimer.singleShot(0, _apply)
-
-        threading.Thread(target=_install_vbcable, args=(_status,), daemon=True).start()
-
-    vbc_install_btn.clicked.connect(_do_vbc_install)
-    f4.addRow("", vbc_install_btn)
-
     f4.addRow(_header("Varmuuskopio"))
 
     _DATA_FILES = ["app_settings.json", "speech_history.json", "credentials.env"]
@@ -4539,11 +4500,121 @@ def open_settings_dialog(parent_app: "App") -> None:
 
     # ── Tabs ──────────────────────────────────────────────────────────
     tabs = QTabWidget()
+    # ══════════════════════════════════════════════════════════════════
+    # TAB 6 — Asennukset
+    # ══════════════════════════════════════════════════════════════════
+    import importlib.util
+    import importlib.metadata
+
+    _PKG_LIST = [
+        ("PyQt6",          "PyQt6",          True,  "UI-framework"),
+        ("requests",       "requests",        True,  "HTTP"),
+        ("dotenv",         "python-dotenv",   True,  "Ympäristömuuttujat"),
+        ("sounddevice",    "sounddevice",     True,  "Äänilaitteet"),
+        ("numpy",          "numpy",           True,  "Audion käsittely"),
+        ("scipy",          "scipy",           True,  "Resampling"),
+        ("keyboard",       "keyboard",        True,  "Global hotkey"),
+        ("openai",         "openai",          True,  "Whisper + GPT"),
+        ("pyttsx3",        "pyttsx3",         True,  "Paikallinen TTS"),
+        ("edge_tts",       "edge-tts",        True,  "Edge TTS"),
+        ("deep_translator","deep-translator", True,  "Google Translate"),
+        ("PIL",            "Pillow",          True,  "Stream Deck -kuvat"),
+        ("StreamDeck",     "streamdeck",      True,  "Stream Deck XL"),
+        ("pvporcupine",    "pvporcupine",     False, "Wake word offline (valinnainen)"),
+        ("pyrubberband",   "pyrubberband",    False, "Voice FX laatu (valinnainen)"),
+        ("pydub",          "pydub",           False, "MP3/OGG soundboard (valinnainen)"),
+    ]
+
+    def _pkg_status(import_name, pip_name):
+        try:
+            importlib.import_module(import_name)
+            try:
+                ver = importlib.metadata.version(pip_name)
+            except Exception:
+                ver = "?"
+            return True, ver
+        except ImportError:
+            return False, ""
+
+    f6 = _make_form()
+    f6.addRow(_header("Python-paketit"))
+
+    for import_name, pip_name, required, desc in _PKG_LIST:
+        ok, ver = _pkg_status(import_name, pip_name)
+        row_w = QWidget()
+        row_h = QHBoxLayout(row_w)
+        row_h.setContentsMargins(0, 0, 0, 0)
+        row_h.setSpacing(8)
+
+        icon_lbl = QLabel("✅" if ok else ("❌" if required else "○"))
+        icon_lbl.setFixedWidth(22)
+        icon_lbl.setStyleSheet("font-size: 14px; background: transparent;")
+
+        name_lbl = QLabel(f"<b>{pip_name}</b>")
+        name_lbl.setStyleSheet(
+            "color: #e6edf3; background: transparent;" if ok
+            else ("color: #ff8888; background: transparent;" if required
+                  else "color: #8b949e; background: transparent;")
+        )
+        name_lbl.setFixedWidth(160)
+
+        desc_lbl = QLabel(f"{desc}   <span style='color:#8b949e'>v{ver}</span>" if ok
+                          else f"<span style='color:#8b949e'>{desc}</span>")
+        desc_lbl.setStyleSheet("background: transparent; font-size: 11px;")
+
+        row_h.addWidget(icon_lbl)
+        row_h.addWidget(name_lbl)
+        row_h.addWidget(desc_lbl, 1)
+
+        label_txt = "Pakollinen" if required else "Valinnainen"
+        f6.addRow(_lbl(label_txt + ":"), row_w)
+
+    # ---- VB-Cable (siirretty tänne) ----
+    f6.addRow(_header("Virtuaalimikrofoni"))
+
+    _vbc_installed = _is_vbcable_installed()
+    vbc_status_lbl = QLabel("VB-Cable: ✅ Asennettu" if _vbc_installed else "VB-Cable: ❌ Ei asennettu")
+    vbc_status_lbl.setStyleSheet("color: #7fc97f; font-size: 13px;" if _vbc_installed else "color: #ff8888; font-size: 13px;")
+    f6.addRow(_lbl("Tila:"), vbc_status_lbl)
+    f6.addRow("", _desc(
+        "VB-Audio Virtual Cable — ilmainen virtuaaliäänilaite, jolla tämän sovelluksen "
+        "käännetty puhe näkyy mikrofonina peleissä ja Discord/TeamSpeak-sovelluksissa.\n"
+        "Asennuksen jälkeen: aseta lähtölaite → 'CABLE Input' tässä appissa, "
+        "ja mikrofoni → 'CABLE Output' pelissä tai Discordissa."
+    ))
+
+    vbc_install_btn = _QPushButton(
+        "VB-Cable on jo asennettu" if _vbc_installed else "Asenna VB-Cable (Virtuaalimikrofoni)"
+    )
+    vbc_install_btn.setEnabled(not _vbc_installed)
+
+    def _do_vbc_install():
+        vbc_install_btn.setEnabled(False)
+        vbc_install_btn.setText("Asennetaan...")
+
+        def _vbc_status(msg):
+            def _apply():
+                vbc_status_lbl.setText(msg)
+                vbc_status_lbl.setStyleSheet("color: #7fc97f; font-size: 13px;" if "✅" in msg else "color: #ff8888; font-size: 13px;")
+                if "✅" in msg:
+                    vbc_install_btn.setText("VB-Cable on jo asennettu")
+                    QTimer.singleShot(800, parent_app.populate_output_devices)
+                else:
+                    vbc_install_btn.setEnabled(True)
+                    vbc_install_btn.setText("Yritä uudelleen")
+            QTimer.singleShot(0, _apply)
+
+        threading.Thread(target=_install_vbcable, args=(_vbc_status,), daemon=True).start()
+
+    vbc_install_btn.clicked.connect(_do_vbc_install)
+    f6.addRow("", vbc_install_btn)
+
     tabs.addTab(_scroll_tab(f1), "  Käännös & Ääni  ")
     tabs.addTab(_scroll_tab(f2), "  Wake Word  ")
     tabs.addTab(_scroll_tab(f3), "  Kielet  ")
     tabs.addTab(_scroll_tab(f4), "  Pikavalinnat & Data  ")
     tabs.addTab(sd_scroll, "  Stream Deck  ")
+    tabs.addTab(_scroll_tab(f6), "  Asennukset  ")
 
     # ── Buttons ───────────────────────────────────────────────────────
     btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
