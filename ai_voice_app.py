@@ -648,23 +648,20 @@ class StreamDeckHttpServer:
                 elif self.path.startswith("/action/"):
                     import urllib.parse as _up
                     action = _up.unquote(self.path[8:].strip("/"))
-                    QTimer.singleShot(0, lambda a=action: app._handle_sd_action(a))
+                    status_cb(f"SD GET saapu: {action}")
+                    app._sd_action_queue.put(action)
                     self._json({"ok": True, "action": action})
                 else:
                     self.send_response(404)
                     self._cors()
                     self.end_headers()
 
-            def do_OPTIONS(self):
-                self.send_response(200)
-                self._cors()
-                self.end_headers()
-
             def do_POST(self):
                 if self.path.startswith("/action/"):
                     import urllib.parse as _up
                     action = _up.unquote(self.path[8:].strip("/"))
-                    QTimer.singleShot(0, lambda a=action: app._handle_sd_action(a))
+                    status_cb(f"SD POST saapu: {action}")
+                    app._sd_action_queue.put(action)
                     self._json({"ok": True, "action": action})
                 else:
                     self.send_response(404)
@@ -2123,9 +2120,12 @@ class App(QWidget):
         self._start_mic_monitor()
 
         # Start Stream Deck HTTP server (used by the Elgato plugin)
+        import queue as _queue
         self._sd_state: dict = {}
+        self._sd_action_queue: _queue.Queue = _queue.Queue()
         self._sd_state_timer = QTimer(self)
         self._sd_state_timer.timeout.connect(self._refresh_sd_state)
+        self._sd_state_timer.timeout.connect(self._drain_sd_action_queue)
         self._sd_state_timer.start(1500)
         self._stream_deck.start(self)
 
@@ -3676,6 +3676,18 @@ class App(QWidget):
             self.append_status(f"Voice FX: preset → {preset}")
 
     # ============ Stream Deck ============
+
+    def _drain_sd_action_queue(self):
+        import queue as _q
+        while True:
+            try:
+                action = self._sd_action_queue.get_nowait()
+            except _q.Empty:
+                break
+            try:
+                self._handle_sd_action_impl(action)
+            except Exception as e:
+                self.append_status(f"SD '{action}' virhe: {e}")
 
     def _handle_sd_action(self, action: str):
         try:
