@@ -5,27 +5,28 @@
 <script>
 // Voice Royale Stream Deck Plugin — HTML-based (SDK v2)
 // Uses native browser WebSocket + fetch — no npm dependencies.
+// POST requests use no body/headers → simple CORS request, no preflight needed.
 
 const VR_PORT = 17842;
 const VR_BASE = `http://127.0.0.1:${VR_PORT}`;
 
+// Maps Stream Deck action UUID → VR HTTP action name (null = built dynamically)
 const ACTION_MAP = {
     "com.voiceroyale.record.toggle":  "record_toggle",
     "com.voiceroyale.wake.toggle":    "wake_listen_toggle",
     "com.voiceroyale.speak":          "speak",
     "com.voiceroyale.stop":           "stop_recording",
-    "com.voiceroyale.lang":           "switch_language",
-    "com.voiceroyale.soundboard":     "soundboard_play",
-    "com.voiceroyale.sb.page.next":   "soundboard_page_next",
-    "com.voiceroyale.sb.page.prev":   "soundboard_page_prev",
-    "com.voiceroyale.fx":             "fx_preset",
+    "com.voiceroyale.lang":           null,  // lang_{language}
+    "com.voiceroyale.soundboard":     null,  // soundboard_{page}_{slot}
+    "com.voiceroyale.sb.page.next":   "sb_page_next",
+    "com.voiceroyale.sb.page.prev":   "sb_page_prev",
+    "com.voiceroyale.fx":             null,  // fx_{preset}
     "com.voiceroyale.tts.toggle":     "tts_toggle",
-    "com.voiceroyale.settings":       "open_settings",
+    "com.voiceroyale.settings":       "settings",
 };
 
-// context => action UUID, for state updates
-const contexts = {};    // context => actionUUID
-const settings = {};    // context => settings object
+const contexts = {};    // context → action UUID
+const settings = {};    // context → settings object
 
 let ws = null;
 let sdPort = null;
@@ -34,7 +35,7 @@ let sdRegisterEvent = null;
 let pollTimer = null;
 let lastState = {};
 
-// ─── SDK v2 entrypoint ───────────────────────────────────────────────────────
+// ─── SDK v2 entrypoint ────────────────────────────────────────────────────────
 function connectElgatoStreamDeckSocket(port, pluginUUID, registerEvent, info) {
     sdPort = port;
     sdUUID = pluginUUID;
@@ -55,31 +56,26 @@ function connectElgatoStreamDeckSocket(port, pluginUUID, registerEvent, info) {
 
     ws.onclose = () => {
         stopPolling();
-        // Reconnect after 3 s
         setTimeout(() => connectElgatoStreamDeckSocket(sdPort, sdUUID, sdRegisterEvent, {}), 3000);
     };
 }
 
-// ─── Event handler ───────────────────────────────────────────────────────────
+// ─── Event handler ────────────────────────────────────────────────────────────
 function handleEvent(msg) {
     const { event, action, context, payload } = msg;
-
     switch (event) {
         case "keyDown":
             onKeyDown(action, context, payload);
             break;
-
         case "willAppear":
             contexts[context] = action;
             if (payload && payload.settings) settings[context] = payload.settings;
             applyState(context, action, lastState);
             break;
-
         case "willDisappear":
             delete contexts[context];
             delete settings[context];
             break;
-
         case "didReceiveSettings":
             if (payload && payload.settings) settings[context] = payload.settings;
             break;
@@ -88,28 +84,31 @@ function handleEvent(msg) {
 
 // ─── Button press ─────────────────────────────────────────────────────────────
 async function onKeyDown(action, context, payload) {
-    const vrAction = ACTION_MAP[action];
-    if (!vrAction) return;
-
     const ctx = settings[context] || {};
-    let body = {};
+    let vrAction;
 
-    if (action === "com.voiceroyale.lang" && ctx.language) {
-        body.language = ctx.language;
-    }
-    if (action === "com.voiceroyale.soundboard") {
-        body.page  = ctx.page  !== undefined ? ctx.page  : 0;
-        body.slot  = ctx.slot  !== undefined ? ctx.slot  : 0;
-    }
-    if (action === "com.voiceroyale.fx" && ctx.preset) {
-        body.preset = ctx.preset;
+    switch (action) {
+        case "com.voiceroyale.soundboard": {
+            const page = ctx.page !== undefined ? Number(ctx.page) : 0;
+            const slot = ctx.slot !== undefined ? Number(ctx.slot) : 0;
+            vrAction = `soundboard_${page}_${slot}`;
+            break;
+        }
+        case "com.voiceroyale.lang":
+            vrAction = `lang_${ctx.language || "English"}`;
+            break;
+        case "com.voiceroyale.fx":
+            vrAction = `fx_${ctx.preset || "Normal"}`;
+            break;
+        default:
+            vrAction = ACTION_MAP[action];
+            if (!vrAction) return;
     }
 
     try {
-        const resp = await fetch(`${VR_BASE}/action/${vrAction}`, {
+        // No body, no custom headers → simple CORS request, no OPTIONS preflight
+        const resp = await fetch(`${VR_BASE}/action/${encodeURIComponent(vrAction)}`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
         });
         if (!resp.ok) showAlert(context);
     } catch {
@@ -137,7 +136,6 @@ async function pollState() {
     } catch { return; }
 
     lastState = state;
-
     for (const [ctx, action] of Object.entries(contexts)) {
         applyState(ctx, action, state);
     }
@@ -152,54 +150,50 @@ function applyState(context, action, state) {
             setState(context, state.recording ? 1 : 0);
             setTitle(context, state.recording ? "REC..." : "Record");
             break;
-
         case "com.voiceroyale.wake.toggle":
             setState(context, state.listening ? 1 : 0);
             setTitle(context, state.listening ? "Listening" : "Listen");
             break;
-
         case "com.voiceroyale.lang":
             setTitle(context, state.language || "Lang");
             break;
-
         case "com.voiceroyale.fx":
             setTitle(context, state.fx_preset || "FX");
             break;
-
         case "com.voiceroyale.tts.toggle":
-            setTitle(context, state.tts_backend || "TTS");
+            setTitle(context, (state.tts_backend || "TTS").split(" ")[0]);
             break;
-
         case "com.voiceroyale.soundboard": {
             const ctx = settings[context] || {};
-            const page = ctx.page !== undefined ? ctx.page : 0;
-            const slot = ctx.slot !== undefined ? ctx.slot : 0;
+            const page = ctx.page !== undefined ? Number(ctx.page) : 0;
+            const slot = ctx.slot !== undefined ? Number(ctx.slot) : 0;
             const pages = state.soundboard_pages || [];
-            const sounds = pages[page] || [];
-            const label = sounds[slot] || "Sound";
+            const slots = (pages[page] && pages[page].slots) ? pages[page].slots : [];
+            const label = (slots[slot] && slots[slot].name) ? slots[slot].name : `S${slot + 1}`;
             setTitle(context, label);
             break;
         }
-
-        case "com.voiceroyale.sb.page.next":
-            setTitle(context, `SB >${(state.soundboard_page || 0) + 1}`);
+        case "com.voiceroyale.sb.page.next": {
+            const cur = (state.soundboard_pages || []).findIndex
+                ? state.soundboard_page || 0 : 0;
+            setTitle(context, `SB >${cur + 2}`);
             break;
-
-        case "com.voiceroyale.sb.page.prev":
-            setTitle(context, `SB <${(state.soundboard_page || 0) + 1}`);
+        }
+        case "com.voiceroyale.sb.page.prev": {
+            const cur = state.soundboard_page || 0;
+            setTitle(context, `SB <${cur}`);
             break;
-
-        // speak / stop / settings — static titles, no update needed
+        }
     }
 }
 
-// ─── WebSocket helpers ────────────────────────────────────────────────────────
+// ─── WebSocket send helpers ───────────────────────────────────────────────────
 function setState(context, stateIndex) {
     ws.send(JSON.stringify({ event: "setState", context, payload: { state: stateIndex } }));
 }
 
 function setTitle(context, title) {
-    ws.send(JSON.stringify({ event: "setTitle", context, payload: { title, target: 0 } }));
+    ws.send(JSON.stringify({ event: "setTitle", context, payload: { title: String(title), target: 0 } }));
 }
 
 function showAlert(context) {

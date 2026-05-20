@@ -650,6 +650,11 @@ class StreamDeckHttpServer:
                     self._cors()
                     self.end_headers()
 
+            def do_OPTIONS(self):
+                self.send_response(200)
+                self._cors()
+                self.end_headers()
+
             def do_POST(self):
                 if self.path.startswith("/action/"):
                     import urllib.parse as _up
