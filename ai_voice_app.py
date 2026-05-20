@@ -1498,23 +1498,39 @@ class SoundboardButton(QWidget):
                     "Accept-Language": "fi-FI,fi;q=0.9,en;q=0.8",
                 }
                 try:
-                    r = requests.get(
+                    sess = requests.Session()
+                    sess.headers.update(hdrs)
+                    r = sess.get(
                         "https://duckduckgo.com/",
                         params={"q": q, "iax": "images", "ia": "images"},
-                        headers=hdrs, timeout=12,
+                        timeout=12,
                     )
                     m = (_re.search(r'vqd=["\']([\d-]+)["\']', r.text)
                          or _re.search(r'vqd=([\d-]+)', r.text))
                     if not m:
-                        rq.put(("err", "Haku epäonnistui (vqd ei löydy) — yritä uudelleen"))
+                        rq.put(("err", "vqd-tokenia ei löydy — yritä uudelleen"))
                         return
                     vqd = m.group(1)
-                    r2 = requests.get(
+                    r2 = sess.get(
                         "https://duckduckgo.com/i.js",
                         params={"q": q, "vqd": vqd, "f": ",,,,,", "p": "1"},
-                        headers=hdrs, timeout=12,
+                        headers={
+                            "Accept": "application/json, text/javascript, */*; q=0.01",
+                            "Referer": "https://duckduckgo.com/",
+                            "X-Requested-With": "XMLHttpRequest",
+                        },
+                        timeout=12,
                     )
-                    results = r2.json().get("results", [])[:24]
+                    body = r2.text.strip()
+                    if not body:
+                        rq.put(("err", "Tyhjä vastaus — yritä uudelleen"))
+                        return
+                    try:
+                        data = r2.json()
+                    except Exception:
+                        rq.put(("err", f"JSON-virhe: {body[:120]}"))
+                        return
+                    results = data.get("results", [])[:24]
                     if not results:
                         rq.put(("err", "Ei kuvatuloksia tälle hakusanalle"))
                         return
