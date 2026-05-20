@@ -1219,6 +1219,7 @@ class SoundboardButton(QWidget):
         menu = QMenu(self)
         menu.addAction("Assign Sound…", self._assign_sound)
         menu.addAction("Assign Image…", self._assign_image)
+        menu.addAction("Etsi kuva netistä…", self._search_image_online)
         menu.addAction("Rename…", self._rename)
         menu.addSeparator()
         menu.addAction("Bulk Import — tiedostot…", self._bulk_import_files)
@@ -1348,6 +1349,307 @@ class SoundboardButton(QWidget):
         )
         if paths:
             self.bulk_import_requested.emit(self.slot_index, paths)
+
+    def _search_image_online(self):
+        import re as _re
+        import queue as _q
+
+        query_init = self._data.get("name", "")
+        if query_init.startswith("Slot "):
+            query_init = ""
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Etsi kuva netistä")
+        dlg.resize(740, 580)
+        dlg.setStyleSheet(
+            "QDialog { background: #0e0e0e; }"
+            "QScrollArea { background: #0e0e0e; border: 1px solid #222; border-radius: 6px; }"
+            "QWidget#grid_bg { background: #0e0e0e; }"
+        )
+
+        outer = QVBoxLayout(dlg)
+        outer.setContentsMargins(12, 12, 12, 12)
+        outer.setSpacing(8)
+
+        # ── Search bar ──────────────────────────────────────────────────
+        search_row = QHBoxLayout()
+        search_row.setSpacing(6)
+        query_edit = QLineEdit(query_init)
+        query_edit.setPlaceholderText("Hakusana…")
+        query_edit.setStyleSheet(
+            "QLineEdit { background: #1E1E1E; color: #E0E0E0; border: 1px solid #333;"
+            " border-radius: 5px; padding: 6px 10px; font-size: 13px; }"
+            "QLineEdit:focus { border-color: #3A7BFF; }"
+        )
+        search_btn = QPushButton("Hae")
+        search_btn.setFixedWidth(70)
+        search_btn.setStyleSheet(
+            "QPushButton { background: #3A7BFF; color: #fff; border: none; border-radius: 5px;"
+            " padding: 6px 12px; font-weight: 700; }"
+            "QPushButton:hover { background: #5090FF; }"
+            "QPushButton:disabled { background: #333; color: #666; }"
+        )
+        search_row.addWidget(query_edit)
+        search_row.addWidget(search_btn)
+        outer.addLayout(search_row)
+
+        status_lbl = QLabel("Kirjoita hakusana ja paina Hae")
+        status_lbl.setStyleSheet("color: #888; font-size: 11px; background: transparent;")
+        outer.addWidget(status_lbl)
+
+        # ── Thumbnail grid ───────────────────────────────────────────────
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        grid_bg = QWidget()
+        grid_bg.setObjectName("grid_bg")
+        grid_lay = QGridLayout(grid_bg)
+        grid_lay.setSpacing(6)
+        grid_lay.setContentsMargins(8, 8, 8, 8)
+        scroll.setWidget(grid_bg)
+        outer.addWidget(scroll, 1)
+
+        # ── Bottom buttons ───────────────────────────────────────────────
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        use_btn = QPushButton("Käytä valittua kuvaa")
+        use_btn.setEnabled(False)
+        use_btn.setStyleSheet(
+            "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);"
+            " color: #fff; border: none; border-radius: 5px; padding: 8px 20px; font-weight: 700; }"
+            "QPushButton:hover { background: #9A4DFF; }"
+            "QPushButton:disabled { background: #222; color: #555; }"
+        )
+        cancel_btn = QPushButton("Peruuta")
+        cancel_btn.setStyleSheet(
+            "QPushButton { background: #1E1E1E; color: #999; border: 1px solid #333;"
+            " border-radius: 5px; padding: 8px 16px; }"
+            "QPushButton:hover { border-color: #666; color: #CCC; }"
+        )
+        btn_row.addStretch()
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(use_btn)
+        outer.addLayout(btn_row)
+        cancel_btn.clicked.connect(dlg.reject)
+
+        # ── State ────────────────────────────────────────────────────────
+        THUMB_W, THUMB_H, COLS = 130, 100, 5
+        SEL_STYLE  = "border: 3px solid #3A7BFF; border-radius: 6px; background: #0a1428;"
+        IDLE_STYLE = "border: 2px solid #2A2A2A; border-radius: 6px; background: #111;"
+
+        thumb_labels: list[QLabel] = []
+        full_urls: list[str] = []
+        sel_lbl   = [None]
+        sel_url   = [None]
+
+        def _clear_grid():
+            for w in thumb_labels:
+                grid_lay.removeWidget(w)
+                w.deleteLater()
+            thumb_labels.clear()
+            full_urls.clear()
+            sel_lbl[0] = None
+            sel_url[0] = None
+            use_btn.setEnabled(False)
+
+        def _add_thumb(full_url: str, pixmap: "QPixmap"):
+            idx = len(thumb_labels)
+            lbl = QLabel()
+            lbl.setFixedSize(THUMB_W, THUMB_H)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet(IDLE_STYLE)
+            lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            px = pixmap.scaled(THUMB_W - 6, THUMB_H - 6,
+                               Qt.AspectRatioMode.KeepAspectRatio,
+                               Qt.TransformationMode.SmoothTransformation)
+            lbl.setPixmap(px)
+            thumb_labels.append(lbl)
+            full_urls.append(full_url)
+            row, col = divmod(idx, COLS)
+            grid_lay.addWidget(lbl, row, col)
+
+            def _click(_=None, _l=lbl, _u=full_url):
+                if sel_lbl[0]:
+                    sel_lbl[0].setStyleSheet(IDLE_STYLE)
+                sel_lbl[0] = _l
+                sel_url[0] = _u
+                _l.setStyleSheet(SEL_STYLE)
+                use_btn.setEnabled(True)
+
+            lbl.mousePressEvent = _click
+
+        # ── Search ───────────────────────────────────────────────────────
+        def _do_search():
+            q = query_edit.text().strip()
+            if not q:
+                return
+            _clear_grid()
+            status_lbl.setText("Haetaan…")
+            search_btn.setEnabled(False)
+
+            rq: _q.Queue = _q.Queue()
+
+            def _worker():
+                hdrs = {
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                    "Accept-Language": "fi-FI,fi;q=0.9,en;q=0.8",
+                }
+                try:
+                    r = requests.get(
+                        "https://duckduckgo.com/",
+                        params={"q": q, "iax": "images", "ia": "images"},
+                        headers=hdrs, timeout=12,
+                    )
+                    m = (_re.search(r'vqd=["\']([\d-]+)["\']', r.text)
+                         or _re.search(r'vqd=([\d-]+)', r.text))
+                    if not m:
+                        rq.put(("err", "Haku epäonnistui (vqd ei löydy) — yritä uudelleen"))
+                        return
+                    vqd = m.group(1)
+                    r2 = requests.get(
+                        "https://duckduckgo.com/i.js",
+                        params={"q": q, "vqd": vqd, "f": ",,,,,", "p": "1"},
+                        headers=hdrs, timeout=12,
+                    )
+                    results = r2.json().get("results", [])[:24]
+                    if not results:
+                        rq.put(("err", "Ei kuvatuloksia tälle hakusanalle"))
+                        return
+                    rq.put(("ok", [(r_["image"], r_["thumbnail"]) for r_ in results]))
+                except Exception as e:
+                    rq.put(("err", str(e)))
+
+            threading.Thread(target=_worker, daemon=True).start()
+
+            def _poll_search():
+                try:
+                    msg = rq.get_nowait()
+                except _q.Empty:
+                    return
+                _t_search.stop()
+                search_btn.setEnabled(True)
+                if msg[0] == "err":
+                    status_lbl.setText(f"Virhe: {msg[1]}")
+                    return
+                pairs = msg[1]
+                status_lbl.setText(f"Ladataan {len(pairs)} kuvaa…")
+                _load_thumbs(pairs)
+
+            _t_search = QTimer(dlg)
+            _t_search.timeout.connect(_poll_search)
+            _t_search.start(200)
+
+        # ── Thumbnail loader ─────────────────────────────────────────────
+        def _load_thumbs(pairs: list):
+            tq: _q.Queue = _q.Queue()
+            pending = [len(pairs)]
+
+            def _fetch(idx, full, thumb):
+                for url in (thumb, full):
+                    try:
+                        r = requests.get(url, timeout=8)
+                        px = QPixmap()
+                        px.loadFromData(r.content)
+                        if not px.isNull():
+                            tq.put(("ok", full, px))
+                            return
+                    except Exception:
+                        pass
+                tq.put(("skip",))
+
+            for i, (full, thumb) in enumerate(pairs):
+                threading.Thread(target=_fetch, args=(i, full, thumb), daemon=True).start()
+
+            added = [0]
+
+            def _drain():
+                try:
+                    while True:
+                        item = tq.get_nowait()
+                        pending[0] -= 1
+                        if item[0] == "ok":
+                            _add_thumb(item[1], item[2])
+                            added[0] += 1
+                except _q.Empty:
+                    pass
+                if pending[0] <= 0:
+                    _t_drain.stop()
+                    status_lbl.setText(f"{added[0]} kuvaa — valitse ja paina 'Käytä'")
+
+            _t_drain = QTimer(dlg)
+            _t_drain.timeout.connect(_drain)
+            _t_drain.start(100)
+
+        # ── Download & save ───────────────────────────────────────────────
+        def _use_selected():
+            url = sel_url[0]
+            if not url:
+                return
+            use_btn.setEnabled(False)
+            use_btn.setText("Ladataan…")
+
+            dq: _q.Queue = _q.Queue()
+
+            def _dl():
+                try:
+                    r = requests.get(
+                        url,
+                        headers={"User-Agent": "Mozilla/5.0"},
+                        timeout=20,
+                    )
+                    r.raise_for_status()
+                    ct = r.headers.get("content-type", "")
+                    ext = ".png" if "png" in ct else ".gif" if "gif" in ct else ".jpg"
+                    fd, tmp = tempfile.mkstemp(suffix=ext)
+                    with os.fdopen(fd, "wb") as f:
+                        f.write(r.content)
+                    dq.put(("ok", tmp))
+                except Exception as e:
+                    dq.put(("err", str(e)))
+
+            threading.Thread(target=_dl, daemon=True).start()
+
+            def _poll_dl():
+                try:
+                    msg = dq.get_nowait()
+                except _q.Empty:
+                    return
+                _t_dl.stop()
+                use_btn.setEnabled(True)
+                use_btn.setText("Käytä valittua kuvaa")
+                if msg[0] == "err":
+                    status_lbl.setText(f"Latausvirhe: {msg[1]}")
+                    return
+                tmp_path = msg[1]
+                try:
+                    dest, _, _ = _sb_import_image(tmp_path, self.page_index, self.slot_index)
+                    self._data["image"] = dest
+                except Exception:
+                    self._data["image"] = tmp_path
+                finally:
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
+                self._refresh()
+                self.data_changed.emit(self.slot_index)
+                dlg.accept()
+
+            _t_dl = QTimer(dlg)
+            _t_dl.timeout.connect(_poll_dl)
+            _t_dl.start(200)
+
+        search_btn.clicked.connect(_do_search)
+        query_edit.returnPressed.connect(_do_search)
+        use_btn.clicked.connect(_use_selected)
+
+        if query_init:
+            _do_search()
+
+        dlg.exec()
 
 
 # =========================
