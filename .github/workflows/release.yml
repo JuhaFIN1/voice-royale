@@ -54,6 +54,13 @@ jobs:
             ai_voice_app.py
         shell: pwsh
 
+      - name: Build Stream Deck plugin package
+        run: |
+          Compress-Archive -Path 'streamdeck-plugin\com.voiceroyale.sdPlugin' `
+            -DestinationPath 'streamdeck-plugin\_tmp.zip' -Force
+          Rename-Item 'streamdeck-plugin\_tmp.zip' 'com.voiceroyale.streamDeckPlugin'
+        shell: pwsh
+
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
         shell: pwsh
@@ -89,7 +96,9 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: installer_output/Voice_Royale_Setup_${{ steps.ver.outputs.VERSION }}.exe
+          files: |
+            installer_output/Voice_Royale_Setup_${{ steps.ver.outputs.VERSION }}.exe
+            streamdeck-plugin/com.voiceroyale.streamDeckPlugin
           generate_release_notes: true
 
   build-macos:
@@ -111,7 +120,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip pillow
+          python -m pip install --upgrade pip
           pip install pyinstaller
           pip install PyQt6 requests python-dotenv sounddevice numpy keyboard openai pyttsx3 edge-tts scipy deep-translator
           pip install pvporcupine || true
@@ -135,11 +144,19 @@ jobs:
       - name: Ad-hoc sign app bundle
         run: codesign --deep -s - "dist/Voice Royale.app" || true
 
+      - name: Build Stream Deck plugin package
+        run: |
+          cd streamdeck-plugin
+          zip -r com.voiceroyale.streamDeckPlugin com.voiceroyale.sdPlugin
+
       - name: Create DMG
         run: |
+          mkdir -p dmg_contents
+          cp -r "dist/Voice Royale.app" dmg_contents/
+          cp "streamdeck-plugin/com.voiceroyale.streamDeckPlugin" dmg_contents/
           hdiutil create \
             -volname "Voice Royale" \
-            -srcfolder "dist/Voice Royale.app" \
+            -srcfolder dmg_contents \
             -ov -format UDZO \
             "Voice_Royale_${{ steps.ver.outputs.VERSION }}.dmg"
 

@@ -1,7 +1,7 @@
 [Setup]
 AppId={{F3A7C2E1-9B4D-4F8A-BC23-1E5D7A9F0C42}
 AppName=Voice Royale
-AppVersion=1.2.1
+AppVersion=1.2.3
 AppPublisher=Juha Lempiäinen
 AppPublisherURL=https://github.com/JuhaFIN1/voice-royale
 AppSupportURL=https://github.com/JuhaFIN1/voice-royale/issues
@@ -9,7 +9,7 @@ DefaultDirName={autopf}\Voice Royale
 DefaultGroupName=Voice Royale
 AllowNoIcons=yes
 OutputDir=installer_output
-OutputBaseFilename=Voice_Royale_Setup_1.2.1
+OutputBaseFilename=Voice_Royale_Setup_1.2.3
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -33,10 +33,12 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 Source: "dist\Voice Royale\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "credentials.env.example"; DestDir: "{app}"; Flags: ignoreversion
 Source: "iconimage.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "streamdeck-plugin\com.voiceroyale.streamDeckPlugin"; DestDir: "{app}\StreamDeck"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Voice Royale"; Filename: "{app}\Voice Royale.exe"; IconFilename: "{app}\iconimage.ico"
 Name: "{group}\Edit credentials (API keys)"; Filename: "notepad.exe"; Parameters: "{app}\credentials.env.example"
+Name: "{group}\Install Stream Deck Plugin"; Filename: "{app}\StreamDeck\com.voiceroyale.streamDeckPlugin"
 Name: "{group}\Uninstall Voice Royale"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\Voice Royale"; Filename: "{app}\Voice Royale.exe"; IconFilename: "{app}\iconimage.ico"; Tasks: desktopicon
 
