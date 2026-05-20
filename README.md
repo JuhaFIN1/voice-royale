@@ -9,15 +9,15 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 
 | Platform | Link |
 |---|---|
-| **Windows** | [Voice_Royale_Setup_1.2.1.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
-| **macOS** | [Voice_Royale_1.2.1.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
+| **Windows** | [Voice_Royale_Setup_1.2.7.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
+| **macOS** | [Voice_Royale_1.2.7.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
 
 > **Windows SmartScreen warning?** Click **"More info"** → **"Run anyway"**.
 > This appears because the installer uses a self-signed certificate. The app is safe.
 
 ## Features
 
-- **First-run wizard** — guided setup: OpenAI API key + mic and speaker selection with live audio test
+- **First-run wizard** — guided 4-step setup: OpenAI API key → VB-Cable virtual mic check/install → mic and speaker selection with live recording test (records 3 s and plays back)
 - **Wake-word detection** — say "Jarvis, in German: hello team" to trigger automatically
   - Picovoice Porcupine (offline, accurate) if you have an AccessKey
   - Whisper VAD fallback (works without any key)
@@ -29,7 +29,7 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 - **28 built-in languages + custom** — Auto, English, German, Swedish, Finnish, Russian, Italian, Dutch, Norwegian, Danish, Romanian, Latvian, Lithuanian, Japanese, Chinese, Hungarian, Polish, Czech, Catalan, Belarusian, Spanish, French, Turkish, Hindi, Hebrew, Greek, Croatian, Arabic — plus any language you add in Settings
 - **Global hotkey** — push-to-talk from any app (default: `Ctrl+Alt+Space`)
 - **History & favorites** — favorites auto-cache translated audio so replaying needs no API call
-- **Live voice morphing (Voice FX)** — real-time pitch shift and effects routed to a virtual output (VB-Cable / Voicemod). Presets: Normal, Pitch +4/+8, Pitch -4/-8, Robot, Deep, Helium
+- **Live voice morphing (Voice FX)** — real-time pitch shift and effects routed to a virtual output (VB-Cable / Voicemod). Presets: Normal, Pitch +4/+8, Pitch -4/-8, Robot, Deep, Helium. **Hear Myself** toggle lets you monitor your own processed voice through headphones in real time
 - **Wake-word instructions** — usage guide appears automatically when Listen mode is active
 - **Soundboard** — up to 10 pages × 56 buttons. Edit Mode: drag-and-drop audio/image onto any button. Right-click to configure. Pages support rename and delete
 - **Stream Deck XL** — full 32-button layout: record, wake, speak, stop, language shortcuts, soundboard slots, Voice FX presets, TTS toggle, settings
@@ -39,19 +39,20 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 
 ## Installation (Windows)
 
-1. Download `Voice_Royale_Setup_1.2.1.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
+1. Download `Voice_Royale_Setup_1.2.7.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
 2. Run the installer — it creates Start Menu shortcuts and an optional desktop icon
 3. On first launch the **Setup Wizard** opens automatically:
-   - **Step 1** — get an OpenAI API key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) (free tier available)
-   - **Step 2** — paste and test the key
-   - **Step 3** — select your microphone and speakers, play a test beep
+   - **Step 1/4** — get an OpenAI API key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) (free tier available)
+   - **Step 2/4** — paste and test the key
+   - **Step 3/4** — VB-Cable virtual mic check — install with one click if not already present (needed for game voice chat)
+   - **Step 4/4** — select your microphone and speakers, record 3 seconds to verify the mic works, play a test beep
 4. Done — the app opens and is ready to use
 
 Upgrading: just run the new installer over the old one. Your API key, settings, and history are preserved.
 
 ## Installation (macOS)
 
-1. Download `Voice_Royale_1.2.1.dmg` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
+1. Download `Voice_Royale_1.2.7.dmg` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
 2. Open the DMG and drag **Voice Royale** to Applications
 3. First launch: right-click → **Open** to bypass Gatekeeper (app is ad-hoc signed, not notarized)
 4. Grant microphone and accessibility permissions when prompted
@@ -62,7 +63,6 @@ Install these for extra features (all optional):
 
 | Package | Feature |
 |---|---|
-| `pip install streamdeck` | Stream Deck XL control (requires Pillow) |
 | `pip install pyrubberband` | Higher-quality pitch shift in Voice FX (+ rubberband CLI) |
 | `pip install pydub` | MP3/OGG support in Soundboard (+ ffmpeg on PATH) |
 
@@ -100,8 +100,11 @@ Drag an audio file (WAV/MP3/OGG) or image onto any button to assign it.
 Right-click a button for options. Add pages with **+** (up to 10). Right-click a tab to rename or delete.
 
 ### Voice FX (live voice morphing)
-Enable in the **Voice FX** tab — select a virtual output (VB-Cable/Voicemod) and pick a preset.
+Enable in the **Voice FX** tab — select a virtual output (VB-Cable/Voicemod) as FX Output and pick a preset.
 Your mic audio is pitch-shifted in real time and sent to the chosen output device.
+
+**Hear Myself** — toggle the **Hear Myself** button and select a monitor output (e.g. your headphones).
+You will hear your own voice with the active preset applied so you know what others hear.
 
 ### Stream Deck XL
 Connect before launching — the app assigns buttons automatically:
@@ -149,13 +152,13 @@ build_app.bat
 
 Requires Python + PyInstaller. Inno Setup is installed automatically via Chocolatey if not present.
 The installer is signed automatically if `SIGN_CERT_PATH` and `SIGN_CERT_PASSWORD` are set in `.env`.
-Output: `installer_output\Voice_Royale_Setup_1.2.1.exe`
+Output: `installer_output\Voice_Royale_Setup_1.2.7.exe`
 
 ## File Structure
 
 | File / Folder | Description |
 |---|---|
-| `ai_voice_app.py` | Entire app (~4300 lines) |
+| `ai_voice_app.py` | Entire app (~5600 lines) |
 | `credentials.env` | API keys (not committed) |
 | `app_settings.json` | User settings |
 | `speech_history.json` | Translation history + favorites |
