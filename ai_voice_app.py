@@ -25,8 +25,6 @@ REQUIRED = {
     "pyttsx3": "pyttsx3",
     "edge_tts": "edge-tts",
     "deep_translator": "deep-translator",
-    "PIL": "Pillow",
-    "StreamDeck": "streamdeck",
 }
 
 
@@ -418,17 +416,6 @@ except Exception:
 
 
 # =========================
-# OPTIONAL: Stream Deck
-# =========================
-try:
-    from StreamDeck.DeviceManager import DeviceManager as _SDDeviceManager  # type: ignore
-    STREAMDECK_AVAILABLE = True
-except Exception:
-    _SDDeviceManager = None
-    STREAMDECK_AVAILABLE = False
-
-
-# =========================
 # VOICE EFFECT PROCESSOR
 # =========================
 class VoiceEffectProcessor:
@@ -582,156 +569,123 @@ class VoiceEffectProcessor:
 
 
 # =========================
-# STREAM DECK CONTROLLER
+# STREAM DECK HTTP SERVER
 # =========================
-class StreamDeckController:
-    """Elgato Stream Deck integration. Connects in background; fails gracefully if not found."""
+class StreamDeckHttpServer:
+    """HTTP server for the official Elgato Stream Deck plugin.
 
-    DEFAULT_MAPPING = {
-        0: "record_toggle",
-        1: "wake_listen_toggle",
-        2: "speak",
-        3: "stop_recording",
-        4: "lang_English",
-        5: "lang_Finnish",
-        6: "lang_Swedish",
-        7: "lang_German",
-        8: "lang_Russian",
-        9: "lang_Japanese",
-        10: "lang_French",
-        11: "lang_Spanish",
-        12: "soundboard_0",
-        13: "soundboard_1",
-        14: "soundboard_2",
-        15: "soundboard_3",
-        16: "soundboard_4",
-        17: "soundboard_5",
-        18: "soundboard_6",
-        19: "soundboard_7",
-        20: "soundboard_8",
-        21: "soundboard_9",
-        22: "soundboard_10",
-        23: "soundboard_11",
-        24: "fx_Normal",
-        25: "fx_Pitch +4",
-        26: "fx_Pitch -4",
-        27: "fx_Robot",
-        28: "fx_Deep",
-        29: "fx_Helium",
-        30: "tts_toggle",
-        31: "settings",
-    }
+    Voice Royale listens on localhost:17842.  The companion .streamDeckPlugin
+    (in streamdeck-plugin/) connects to Stream Deck software via WebSocket and
+    forwards button-press events here as HTTP POST /action/{name} requests.
+
+    Endpoints:
+      GET  /health         → {"status":"ok","app":"Voice Royale"}
+      GET  /state          → current app state (recording, lang, FX, soundboard…)
+      GET  /actions        → list of callable action names
+      POST /action/{name}  → trigger named action, returns {"ok":true}
+    """
+
+    PORT = 17842
+
+    ACTIONS = [
+        "record_toggle", "wake_listen_toggle", "speak", "stop_recording",
+        "tts_toggle", "settings",
+        "lang_Auto", "lang_English", "lang_Finnish", "lang_Swedish",
+        "lang_German", "lang_Russian", "lang_Italian", "lang_Dutch",
+        "lang_Norwegian", "lang_Danish", "lang_Romanian", "lang_Latvian",
+        "lang_Lithuanian", "lang_Japanese", "lang_Chinese", "lang_Hungarian",
+        "lang_French", "lang_Spanish", "lang_Portuguese",
+        "sb_page_next", "sb_page_prev",
+        "fx_Normal", "fx_Pitch +4", "fx_Pitch -4", "fx_Robot", "fx_Deep", "fx_Helium",
+    ]
 
     def __init__(self, status_cb):
         self._status = status_cb
-        self._deck = None
         self._app = None
-        self._mapping = dict(self.DEFAULT_MAPPING)
+        self._server = None
+        self._thread = None
 
-    def set_mapping(self, mapping: dict):
-        """Apply a custom key->action mapping. Empty dict resets to defaults."""
-        self._mapping = dict(mapping) if mapping else dict(self.DEFAULT_MAPPING)
-        if self._deck:
-            self.refresh_all()
-
-    def connect(self, app_ref):
+    def start(self, app_ref):
         self._app = app_ref
-        threading.Thread(target=self._try_connect, daemon=True).start()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
 
-    def disconnect(self):
-        if self._deck:
+    def stop(self):
+        if self._server:
             try:
-                self._deck.reset()
-                self._deck.close()
+                self._server.shutdown()
             except Exception:
                 pass
-            self._deck = None
+            self._server = None
 
-    def refresh_all(self):
-        if not self._deck or not self._app:
-            return
-        for key_idx, action in self._mapping.items():
-            try:
-                label, active = self._app._get_sd_button_state(action)
-                self._set_key(key_idx, label, active)
-            except Exception:
-                pass
+    def is_running(self):
+        return self._server is not None
 
-    def refresh_one(self, action: str):
-        if not self._deck or not self._app:
-            return
-        for key_idx, act in self._mapping.items():
-            if act == action:
-                try:
-                    label, active = self._app._get_sd_button_state(action)
-                    self._set_key(key_idx, label, active)
-                except Exception:
-                    pass
+    def _run(self):
+        import http.server
+        import urllib.parse
+        app = self._app
+        status_cb = self._status
+        server_ref = self
 
-    def _try_connect(self):
-        if not STREAMDECK_AVAILABLE:
-            return  # paketti puuttuu — ei häiritä käyttäjää jos laitetta ei ole
-        try:
-            devices = _SDDeviceManager().enumerate()
-            if not devices:
-                self._status("Stream Deck: not detected (check USB cable)")
-                return
-            self._deck = devices[0]
-            self._deck.open()
-            self._deck.set_brightness(70)
-            self._deck.set_key_callback(self._on_key)
-            self._status(f"Stream Deck: connected — {self._deck.KEY_COUNT} keys")
-            self.refresh_all()
-        except Exception as e:
-            self._status(f"Stream Deck: {e}")
+        class _Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass  # suppress access log spam
 
-    def _on_key(self, deck, key_index, state):
-        if state and self._app:
-            action = self._mapping.get(key_index)
-            if action:
-                QTimer.singleShot(0, lambda a=action: self._app._handle_sd_action(a))
+            def do_OPTIONS(self):
+                self.send_response(200)
+                self._cors()
+                self.end_headers()
 
-    def _set_key(self, key_index: int, label: str, active: bool):
-        if not self._deck:
-            return
-        try:
-            from PIL import Image, ImageDraw, ImageFont  # type: ignore
-            from StreamDeck.ImageHelpers import PILHelper  # type: ignore
-            img = PILHelper.create_key_image(self._deck, background=(50, 80, 50) if active else (30, 40, 70))
-            draw = ImageDraw.Draw(img)
-            font_paths = [
-                "C:/Windows/Fonts/arialbd.ttf",
-                "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-                "/System/Library/Fonts/Helvetica.ttc",
-            ]
-            font = ImageFont.load_default()
-            for fp in font_paths:
-                try:
-                    font = ImageFont.truetype(fp, 13)
-                    break
-                except Exception:
-                    pass
-            kw, kh = img.size
-            # Word-wrap
-            words = label.split()
-            lines, cur = [], ""
-            for w in words:
-                test = (cur + " " + w).strip()
-                bbox = draw.textbbox((0, 0), test, font=font)
-                if bbox[2] - bbox[0] > kw - 8 and cur:
-                    lines.append(cur); cur = w
+            def do_GET(self):
+                if self.path == "/health":
+                    self._json({"status": "ok", "app": "Voice Royale",
+                                "port": StreamDeckHttpServer.PORT})
+                elif self.path == "/state":
+                    self._json(app._get_sd_state())
+                elif self.path == "/actions":
+                    self._json({"actions": StreamDeckHttpServer.ACTIONS})
                 else:
-                    cur = test
-            if cur:
-                lines.append(cur)
-            text = "\n".join(lines)
-            bbox = draw.textbbox((0, 0), text, font=font)
-            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            draw.text(((kw - tw) // 2, (kh - th) // 2), text, fill=(255, 255, 255), font=font)
-            native = PILHelper.to_native_key_format(self._deck, img)
-            self._deck.set_key_image(key_index, native)
-        except Exception:
-            pass
+                    self.send_response(404)
+                    self._cors()
+                    self.end_headers()
+
+            def do_POST(self):
+                if self.path.startswith("/action/"):
+                    import urllib.parse as _up
+                    action = _up.unquote(self.path[8:].strip("/"))
+                    QTimer.singleShot(0, lambda a=action: app._handle_sd_action(a))
+                    self._json({"ok": True, "action": action})
+                else:
+                    self.send_response(404)
+                    self._cors()
+                    self.end_headers()
+
+            def _cors(self):
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+            def _json(self, data):
+                body = json.dumps(data).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self._cors()
+                self.end_headers()
+                self.wfile.write(body)
+
+        try:
+            import http.server as _hs
+            self._server = server_ref._server = _hs.HTTPServer(
+                ("127.0.0.1", self.PORT), _Handler
+            )
+            status_cb(f"Stream Deck: HTTP ready on port {self.PORT}")
+            self._server.serve_forever()
+        except OSError:
+            status_cb(f"Stream Deck: port {self.PORT} busy — plugin won't connect")
+        except Exception as e:
+            status_cb(f"Stream Deck HTTP: {e}")
 
 
 # =========================
@@ -2085,8 +2039,8 @@ class App(QWidget):
         self._sb_play_id: int = 0
         self._sb_playing_btn: "SoundboardButton | None" = None
 
-        # Stream Deck
-        self._stream_deck = StreamDeckController(self.append_status)
+        # Stream Deck HTTP server (for official Elgato plugin)
+        self._stream_deck = StreamDeckHttpServer(self.append_status)
 
         # ============ Menu bar ============
         menu_bar = QMenuBar()
@@ -2158,12 +2112,8 @@ class App(QWidget):
         # Start always-on mic monitor after devices are populated
         self._start_mic_monitor()
 
-        # Connect Stream Deck after UI is ready
-        if self.settings.get("stream_deck_enabled", True):
-            sd_mapping = self.settings.get("stream_deck_mapping", {})
-            if sd_mapping:
-                self._stream_deck.set_mapping({int(k): v for k, v in sd_mapping.items()})
-            self._stream_deck.connect(self)
+        # Start Stream Deck HTTP server (used by the Elgato plugin)
+        self._stream_deck.start(self)
 
     # ============ Card builders ============
 
@@ -2523,7 +2473,6 @@ class App(QWidget):
         for pi, page_btns in enumerate(self._soundboard_buttons):
             if sender_btn in page_btns:
                 self._save_soundboard()
-                self._stream_deck.refresh_one(f"soundboard_{slot_index}")
                 return
 
     def _sb_toggle_edit_mode(self, enabled: bool):
@@ -3227,10 +3176,6 @@ class App(QWidget):
         self.hotkey_label.setText(f"Global hotkey: {self.settings.get('hotkey', 'ctrl+alt+space')}")
         self.register_hotkey()
 
-        # Update Stream Deck mapping if changed
-        new_sd_mapping = self.settings.get("stream_deck_mapping", {})
-        self._stream_deck.set_mapping({int(k): v for k, v in new_sd_mapping.items()} if new_sd_mapping else {})
-
         # If wake listener is running, restart it with new keyword/key
         if self.wake_listener.is_running():
             self.append_status("Restarting wake-word listener with new settings...")
@@ -3658,7 +3603,6 @@ class App(QWidget):
             finally:
                 if self._sb_play_id == my_play_id:
                     QTimer.singleShot(0, lambda: btn.set_playing(False))
-                    self._stream_deck.refresh_one(f"soundboard_{slot_index}")
 
         threading.Thread(target=_play, daemon=True).start()
 
@@ -3708,7 +3652,6 @@ class App(QWidget):
         else:
             self._voice_fx.stop()
             self._fx_toggle.setText("Enable Voice FX")
-        self._stream_deck.refresh_all()
 
     def _select_fx_preset(self, preset: str):
         self._current_fx_preset = preset
@@ -3717,7 +3660,6 @@ class App(QWidget):
         self._voice_fx.set_preset(preset)
         if self._voice_fx.is_active:
             self.append_status(f"Voice FX: preset → {preset}")
-        self._stream_deck.refresh_all()
 
     # ============ Stream Deck ============
 
@@ -3759,7 +3701,28 @@ class App(QWidget):
                 self._play_soundboard_slot(self._sb_tabs.currentIndex(), int(parts[0]))
         elif action.startswith("fx_"):
             self._select_fx_preset(action[3:])
-        self._stream_deck.refresh_all()
+
+    def _get_sd_state(self) -> dict:
+        """Full app state for the Stream Deck plugin HTTP endpoint GET /state."""
+        pages = []
+        for pi, page_data in enumerate(self.settings.get("soundboard_pages", [])):
+            slots = []
+            for si, slot in enumerate(page_data.get("slots", [])):
+                slots.append({
+                    "name": slot.get("name", f"Slot {si+1}"),
+                    "has_file": bool(slot.get("file")),
+                })
+            pages.append({"name": page_data.get("name", f"Page {pi+1}"), "slots": slots})
+        return {
+            "recording": self.is_recording,
+            "listening": self.wake_listener.is_running(),
+            "language": self.langbox.currentText(),
+            "tts_backend": self.backend_combo.currentText(),
+            "fx_preset": getattr(self, "_current_fx_preset", "Normal"),
+            "fx_active": self._voice_fx.is_active,
+            "soundboard_page": self._sb_tabs.currentIndex(),
+            "soundboard_pages": pages,
+        }
 
     def _get_sd_button_state(self, action: str) -> tuple[str, bool]:
         """Return (label, is_active) for rendering a Stream Deck button."""
@@ -3820,7 +3783,7 @@ class App(QWidget):
         except Exception:
             pass
         try:
-            self._stream_deck.disconnect()
+            self._stream_deck.stop()
         except Exception:
             pass
         super().closeEvent(event)
@@ -4407,94 +4370,101 @@ def open_settings_dialog(parent_app: "App") -> None:
     # ══════════════════════════════════════════════════════════════════
     # TAB 5 — Stream Deck
     # ══════════════════════════════════════════════════════════════════
-    _SD_FX_PRESETS = ["Normal", "Pitch +4", "Pitch +8", "Pitch -4", "Pitch -8", "Robot", "Deep", "Helium"]
+    # ── Stream Deck plugin info panel ──
+    sd_port = StreamDeckHttpServer.PORT
+    sd_server_ok = parent_app._stream_deck.is_running()
 
-    def _build_sd_action_options(app):
-        """Build list of (label, action_value) pairs for Stream Deck button comboboxes."""
-        opts = [
-            ("(ei toimintoa)", ""),
-            ("Record (päälle/pois)", "record_toggle"),
-            ("Listen / Wake word", "wake_listen_toggle"),
-            ("Speak", "speak"),
-            ("Stop", "stop_recording"),
-            ("TTS vaihto", "tts_toggle"),
-            ("Asetukset", "settings"),
-            ("Soundboard: -> seuraava sivu", "sb_page_next"),
-            ("Soundboard: <- edellinen sivu", "sb_page_prev"),
-        ]
-        for lang in LANGS.keys():
-            if lang != "Auto":
-                opts.append((f"Kieli: {lang}", f"lang_{lang}"))
-        for preset in _SD_FX_PRESETS:
-            opts.append((f"FX: {preset}", f"fx_{preset}"))
-        # Soundboard pages + slots
-        sb_pages = app.settings.get("soundboard_pages", [])
-        for pi, page in enumerate(sb_pages):
-            page_name = page.get("name", f"Sivu {pi+1}")
-            for si, slot in enumerate(page.get("slots", [])):
-                slot_name = slot.get("name", f"Slot {si+1}")
-                opts.append((f"SB: {page_name} > {si+1} {slot_name}", f"soundboard_{pi}_{si}"))
-        return opts
+    sd_inner = QWidget()
+    sd_inner_lay = QVBoxLayout(sd_inner)
+    sd_inner_lay.setContentsMargins(20, 16, 20, 20)
+    sd_inner_lay.setSpacing(12)
 
-    sd_action_options = _build_sd_action_options(parent_app)
-
-    sd_enabled_cb = QCheckBox("Stream Deck käytössä")
-    sd_enabled_cb.setChecked(settings.get("stream_deck_enabled", True))
-    sd_enabled_cb.setStyleSheet("color: #C0C0E8; font-size: 13px; font-weight: 600; padding: 6px 0;")
-
-    sd_header_lbl = QLabel("Nappimappaus (32 nappia)")
-    sd_header_lbl.setStyleSheet(
-        "color: #C0C0E8; font-size: 13px; font-weight: 700; letter-spacing: 0.4px;"
-        " padding: 14px 0 6px 0; border-bottom: 1px solid #2A2A42; margin-bottom: 2px;"
+    # Status row
+    sd_status_row = QWidget()
+    sd_status_row_lay = QHBoxLayout(sd_status_row)
+    sd_status_row_lay.setContentsMargins(0, 0, 0, 0)
+    sd_status_row_lay.setSpacing(8)
+    sd_status_dot = QLabel("●")
+    sd_status_dot.setStyleSheet(f"color: {'#7fc97f' if sd_server_ok else '#ff8888'}; font-size: 18px; background: transparent;")
+    sd_status_txt = QLabel(
+        f"HTTP-palvelin käynnissä portissa {sd_port}" if sd_server_ok
+        else f"HTTP-palvelin ei käynnissä (portti {sd_port} varattuna?)"
     )
+    sd_status_txt.setStyleSheet("color: #C0C0E8; font-size: 13px; font-weight: 600; background: transparent;")
+    sd_status_row_lay.addWidget(sd_status_dot)
+    sd_status_row_lay.addWidget(sd_status_txt, 1)
+    sd_inner_lay.addWidget(sd_status_row)
 
-    current_sd_mapping = settings.get("stream_deck_mapping", {})
-    sd_default = StreamDeckController.DEFAULT_MAPPING
+    # How-it-works description
+    sd_desc = QLabel(
+        "<b>Miten se toimii:</b><br>"
+        "Voice Royale kuuntelee portissa <b>localhost:{port}</b>.<br>"
+        "Elgato-plugin lähettää napin painallukset tänne HTTP-kutsuna ja hakee tilan päivitykset."
+        .format(port=sd_port)
+    )
+    sd_desc.setWordWrap(True)
+    sd_desc.setStyleSheet("color: #9090B8; font-size: 12px; background: transparent; line-height: 160%;")
+    sd_inner_lay.addWidget(sd_desc)
 
-    sd_key_combos = {}
-    sd_grid_widget = QWidget()
-    sd_grid_layout = QVBoxLayout(sd_grid_widget)
-    sd_grid_layout.setContentsMargins(0, 0, 0, 0)
-    sd_grid_layout.setSpacing(4)
+    # Plugin install instructions
+    sd_install_hdr = QLabel("Plugin-asennus")
+    sd_install_hdr.setStyleSheet(
+        "color: #C0C0E8; font-size: 13px; font-weight: 700; border-bottom: 1px solid #2A2A42;"
+        " padding-bottom: 4px; background: transparent;"
+    )
+    sd_inner_lay.addWidget(sd_install_hdr)
 
-    for i in range(32):
+    sd_install_desc = QLabel(
+        "1. Varmista, että Elgato Stream Deck -ohjelmisto on asennettu.<br>"
+        "2. Kaksoisnapsauta <b>com.voiceroyale.streamDeckPlugin</b> tiedostoa<br>"
+        "   (löytyy <b>streamdeck-plugin/</b> kansiosta).<br>"
+        "3. Stream Deck -ohjelmisto asentaa pluginin automaattisesti.<br>"
+        "4. Vedä <b>Voice Royale</b> -toiminnot haluamillesi napeille.<br>"
+        "5. Plugin hakee tilan 2 sekunnin välein — napit päivittyvät automaattisesti."
+    )
+    sd_install_desc.setWordWrap(True)
+    sd_install_desc.setStyleSheet("color: #9090B8; font-size: 12px; background: transparent; line-height: 170%;")
+    sd_inner_lay.addWidget(sd_install_desc)
+
+    # Available actions list
+    sd_actions_hdr = QLabel("Käytettävissä olevat toiminnot")
+    sd_actions_hdr.setStyleSheet(
+        "color: #C0C0E8; font-size: 13px; font-weight: 700; border-bottom: 1px solid #2A2A42;"
+        " padding-bottom: 4px; background: transparent;"
+    )
+    sd_inner_lay.addWidget(sd_actions_hdr)
+
+    _sd_action_labels = {
+        "record_toggle": "Record (päälle/pois)",
+        "wake_listen_toggle": "Listen / Wake word",
+        "speak": "Puhu nyt",
+        "stop_recording": "Pysäytä",
+        "tts_toggle": "TTS-backend vaihto",
+        "settings": "Avaa asetukset",
+        "sb_page_next": "Soundboard: seuraava sivu",
+        "sb_page_prev": "Soundboard: edellinen sivu",
+        "lang_*": "Kieli: English, Finnish, Swedish…",
+        "soundboard_P_S": "Soundboard: sivu P, paikka S",
+        "fx_*": "Voice FX: Normal, Robot, Deep, Helium…",
+    }
+    for act_key, act_label in _sd_action_labels.items():
         row_w = QWidget()
         row_lay = QHBoxLayout(row_w)
-        row_lay.setContentsMargins(0, 0, 0, 0)
-        row_lay.setSpacing(8)
-        lbl = QLabel(f"Nappi {i}")
-        lbl.setStyleSheet("color: #9090B8; font-size: 12px; font-weight: 600; min-width: 64px;")
-        lbl.setFixedWidth(64)
-        combo = _QComboBox()
-        for label_text, action_val in sd_action_options:
-            combo.addItem(label_text, action_val)
-        # Determine current value for this key
-        current_val = current_sd_mapping.get(str(i), sd_default.get(i, ""))
-        found_idx = -1
-        for ci in range(combo.count()):
-            if combo.itemData(ci) == current_val:
-                found_idx = ci
-                break
-        if found_idx >= 0:
-            combo.setCurrentIndex(found_idx)
-        else:
-            combo.setCurrentIndex(0)
-        sd_key_combos[i] = combo
-        row_lay.addWidget(lbl)
-        row_lay.addWidget(combo, 1)
-        sd_grid_layout.addWidget(row_w)
+        row_lay.setContentsMargins(4, 0, 0, 0)
+        row_lay.setSpacing(10)
+        key_lbl = QLabel(f"<code>{act_key}</code>")
+        key_lbl.setStyleSheet("color: #7BAFF0; font-size: 11px; background: transparent; min-width: 180px;")
+        key_lbl.setFixedWidth(200)
+        val_lbl = QLabel(act_label)
+        val_lbl.setStyleSheet("color: #9090B8; font-size: 11px; background: transparent;")
+        row_lay.addWidget(key_lbl)
+        row_lay.addWidget(val_lbl, 1)
+        sd_inner_lay.addWidget(row_w)
 
-    sd_scroll_inner = QWidget()
-    sd_scroll_inner_lay = QVBoxLayout(sd_scroll_inner)
-    sd_scroll_inner_lay.setContentsMargins(20, 12, 20, 20)
-    sd_scroll_inner_lay.setSpacing(8)
-    sd_scroll_inner_lay.addWidget(sd_enabled_cb)
-    sd_scroll_inner_lay.addWidget(sd_header_lbl)
-    sd_scroll_inner_lay.addWidget(sd_grid_widget)
-    sd_scroll_inner_lay.addStretch()
+    sd_inner_lay.addStretch()
 
     sd_scroll = QScrollArea()
-    sd_scroll.setWidget(sd_scroll_inner)
+    sd_scroll.setWidget(sd_inner)
     sd_scroll.setWidgetResizable(True)
     sd_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 
@@ -4518,8 +4488,6 @@ def open_settings_dialog(parent_app: "App") -> None:
         ("pyttsx3",        "pyttsx3",         True,  "Paikallinen TTS"),
         ("edge_tts",       "edge-tts",        True,  "Edge TTS"),
         ("deep_translator","deep-translator", True,  "Google Translate"),
-        ("PIL",            "Pillow",          True,  "Stream Deck -kuvat"),
-        ("StreamDeck",     "streamdeck",      True,  "Stream Deck XL"),
         ("pvporcupine",    "pvporcupine",     False, "Wake word offline (valinnainen)"),
         ("pyrubberband",   "pyrubberband",    False, "Voice FX laatu (valinnainen)"),
         ("pydub",          "pydub",           False, "MP3/OGG soundboard (valinnainen)"),
@@ -4664,15 +4632,6 @@ def open_settings_dialog(parent_app: "App") -> None:
                 parent_app.append_status("OpenAI API key updated.")
             except Exception as e:
                 parent_app.append_status(f"Warning: could not save key to file: {e}")
-
-        # Stream Deck mapping
-        sd_mapping = {}
-        for i, combo in sd_key_combos.items():
-            val = combo.currentData()
-            if val:
-                sd_mapping[str(i)] = val
-        new_settings["stream_deck_enabled"] = sd_enabled_cb.isChecked()
-        new_settings["stream_deck_mapping"] = sd_mapping
 
         parent_app.settings.update(new_settings)
         save_settings(parent_app.settings)

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: system-ui, sans-serif; font-size: 13px; color: #ccc; background: #1e1e1e; margin: 12px; }
+  label { display: block; margin-bottom: 4px; color: #aaa; }
+  input[type=number] { width: 100%; padding: 5px 8px; background: #333; color: #eee;
+    border: 1px solid #555; border-radius: 4px; font-size: 13px; box-sizing: border-box; }
+  .row { margin-bottom: 10px; }
+  small { color: #666; font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="row">
+  <label>Soundboard Page (0-based)</label>
+  <input type="number" id="page" value="0" min="0" max="99">
+  <small>0 = first page, 1 = second page, …</small>
+</div>
+<div class="row">
+  <label>Slot Number (0-based)</label>
+  <input type="number" id="slot" value="0" min="0" max="55">
+  <small>0 = first slot in that page</small>
+</div>
+<script>
+  const pageEl = document.getElementById('page');
+  const slotEl = document.getElementById('slot');
+
+  function sendSettings() {
+    const settings = { page: parseInt(pageEl.value, 10) || 0, slot: parseInt(slotEl.value, 10) || 0 };
+    const json = JSON.stringify({ event: 'sendToPlugin', action: 'com.voiceroyale.soundboard', payload: { settings } });
+    window.opener && window.opener.postMessage(json, '*');
+  }
+  pageEl.addEventListener('change', sendSettings);
+  slotEl.addEventListener('change', sendSettings);
+
+  window.addEventListener('message', (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.event === 'sendToPropertyInspector' && msg.payload && msg.payload.settings) {
+        pageEl.value = msg.payload.settings.page !== undefined ? msg.payload.settings.page : 0;
+        slotEl.value = msg.payload.settings.slot !== undefined ? msg.payload.settings.slot : 0;
+      }
+    } catch (_) {}
+  });
+</script>
+</body>
+</html>

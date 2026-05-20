@@ -22,6 +22,9 @@ dist/
 build/
 *.spec
 
+# Stream Deck plugin binary (re-built from streamdeck-plugin/ source)
+streamdeck-plugin/*.streamDeckPlugin
+
 # OS
 Thumbs.db
 desktop.ini
