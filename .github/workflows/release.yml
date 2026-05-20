@@ -131,18 +131,28 @@ jobs:
             --windowed \
             --onedir \
             --name "Voice Royale" \
+            --osx-bundle-identifier "com.voiceroyale.app" \
             --add-data "juhalempiainensoftware.png:." \
             --add-data "iconimage.ico:." \
             --hidden-import scipy.signal \
             --hidden-import pyttsx3.drivers \
+            --hidden-import pyttsx3.drivers.nsss \
+            --hidden-import PyQt6.sip \
             --collect-all edge_tts \
             --collect-all sounddevice \
             --collect-all certifi \
+            --collect-all pyttsx3 \
             --noconfirm \
             ai_voice_app.py
 
+      - name: Add macOS Info.plist permissions
+        run: |
+          PLIST="dist/Voice Royale.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Voice Royale needs microphone access for voice recognition.'" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :NSInputMonitoringUsageDescription string 'Voice Royale needs input monitoring for global hotkeys.'" "$PLIST" || true
+
       - name: Ad-hoc sign app bundle
-        run: codesign --deep -s - "dist/Voice Royale.app" || true
+        run: codesign --deep --force -s - "dist/Voice Royale.app" || true
 
       - name: Build Stream Deck plugin package
         run: |
@@ -151,12 +161,14 @@ jobs:
 
       - name: Create DMG
         run: |
-          mkdir -p dmg_contents
-          cp -r "dist/Voice Royale.app" dmg_contents/
-          cp "streamdeck-plugin/com.voiceroyale.streamDeckPlugin" dmg_contents/
+          mkdir -p dmg_stage
+          cp -r "dist/Voice Royale.app" "dmg_stage/"
+          ln -s /Applications "dmg_stage/Applications"
+          mkdir -p "dmg_stage/Stream Deck Plugin"
+          cp "streamdeck-plugin/com.voiceroyale.streamDeckPlugin" "dmg_stage/Stream Deck Plugin/"
           hdiutil create \
             -volname "Voice Royale" \
-            -srcfolder dmg_contents \
+            -srcfolder dmg_stage \
             -ov -format UDZO \
             "Voice_Royale_${{ steps.ver.outputs.VERSION }}.dmg"
 

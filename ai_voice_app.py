@@ -284,6 +284,8 @@ DEFAULT_SETTINGS = {
     "voice_fx_output_device": None,
     "voice_fx_monitor_device": None,
     "voice_fx_hear_myself": False,
+    "start_with_windows": False,
+    "start_minimized": False,
 }
 
 
@@ -305,6 +307,47 @@ def save_settings(settings: dict) -> None:
             json.dump(settings, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"[DEBUG] Failed to save settings: {e}")
+
+
+_REG_RUN = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_REG_APP_NAME = "Voice Royale"
+
+
+def _get_autostart_state() -> tuple:
+    """Returns (start_with_windows: bool, start_minimized: bool)."""
+    if sys.platform != "win32":
+        return False, False
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_RUN, 0, winreg.KEY_READ)
+        val, _ = winreg.QueryValueEx(key, _REG_APP_NAME)
+        winreg.CloseKey(key)
+        return True, "--minimized" in val
+    except Exception:
+        return False, False
+
+
+def _apply_autostart(enabled: bool, minimized: bool) -> None:
+    """Write or remove the Windows autostart registry key."""
+    if sys.platform != "win32":
+        return
+    if not getattr(sys, "frozen", False):
+        return  # dev mode: don't touch registry
+    try:
+        import winreg
+        exe = sys.executable
+        cmd = f'"{exe}"' + (" --minimized" if (enabled and minimized) else "")
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_RUN, 0, winreg.KEY_SET_VALUE)
+        if enabled:
+            winreg.SetValueEx(key, _REG_APP_NAME, 0, winreg.REG_SZ, cmd)
+        else:
+            try:
+                winreg.DeleteValue(key, _REG_APP_NAME)
+            except FileNotFoundError:
+                pass
+        winreg.CloseKey(key)
+    except Exception as e:
+        print(f"[autostart] registry error: {e}")
 
 
 _CUSTOM_LANG_NAMES: set = set()
@@ -1643,34 +1686,43 @@ class WakeListener:
     def _run_porcupine(self):
         sample_rate = self._porcupine.sample_rate
         frame_length = self._porcupine.frame_length
-        try:
-            with sd.InputStream(
-                device=self._device_index,
-                channels=1,
-                samplerate=sample_rate,
-                blocksize=frame_length,
-                dtype="int16",
-            ) as stream:
-                self.on_status(f"👂 Porcupine listening (sr={sample_rate})")
-                while not self._stop_flag.is_set():
-                    data, _overflow = stream.read(frame_length)
-                    pcm = data[:, 0] if data.ndim > 1 else data
-                    if self._level_callback is not None:
-                        peak = float(np.max(np.abs(pcm))) / 32768.0
-                        self._level_callback(peak)
-                    result = self._porcupine.process(pcm.tolist())
-                    if result >= 0:
-                        self.on_status("✨ Wake-word detected!")
-                        self.on_wake()
-                        time.sleep(0.3)
-        except Exception as e:
-            self.on_status(f"Wake listener stopped: {e}")
+        device = self._device_index
+        for _attempt in range(2):
+            try:
+                with sd.InputStream(
+                    device=device,
+                    channels=1,
+                    samplerate=sample_rate,
+                    blocksize=frame_length,
+                    dtype="int16",
+                ) as stream:
+                    self.on_status(f"👂 Porcupine listening (sr={sample_rate})")
+                    while not self._stop_flag.is_set():
+                        data, _overflow = stream.read(frame_length)
+                        pcm = data[:, 0] if data.ndim > 1 else data
+                        if self._level_callback is not None:
+                            peak = float(np.max(np.abs(pcm))) / 32768.0
+                            self._level_callback(peak)
+                        result = self._porcupine.process(pcm.tolist())
+                        if result >= 0:
+                            self.on_status("✨ Wake-word detected!")
+                            self.on_wake()
+                            time.sleep(0.3)
+                return
+            except Exception as e:
+                if _attempt == 0 and device is not None and "out of range" in str(e).lower():
+                    self.on_status("Wake: mic not found — trying default device")
+                    device = None
+                else:
+                    self.on_status(f"Wake listener stopped: {e}")
+                    return
 
     def _run_whisper(self):
         """Streams mic continuously in 2.5s chunks, transcribes, checks for wake keyword."""
         sample_rate = 16000
         chunk_duration = 2.5
         silence_threshold = 0.008
+        device = self._device_index
 
         self.on_status(f"👂 Whisper mode listening for: '{self._keyword}'")
 
@@ -1688,7 +1740,7 @@ class WakeListener:
                     frames.append(indata.copy())
 
                 with sd.InputStream(
-                    device=self._device_index,
+                    device=device,
                     channels=1,
                     samplerate=sample_rate,
                     blocksize=1024,
@@ -1734,8 +1786,12 @@ class WakeListener:
 
             except Exception as e:
                 if not self._stop_flag.is_set():
-                    self.on_status(f"Wake listener error: {e}")
-                    time.sleep(1.0)
+                    if device is not None and "out of range" in str(e).lower():
+                        self.on_status("Wake: mic not found — using default device")
+                        device = None
+                    else:
+                        self.on_status(f"Wake listener error: {e}")
+                        time.sleep(1.0)
 
 
 # =========================
@@ -4685,6 +4741,60 @@ def open_settings_dialog(parent_app: "App") -> None:
             return False, ""
 
     f6 = _make_form()
+
+    # ---- Käynnistys ----
+    f6.addRow(_header("Käynnistys"))
+
+    wizard_btn = _QPushButton("Aja alkuasennus uudelleen (Setup Wizard)")
+
+    def _run_wizard_again():
+        global OPENAI_API_KEY, client
+        dlg.reject()
+        wiz = SetupWizard()
+        wiz.exec()
+        load_dotenv(os.path.join(BASE_PATH, "credentials.env"), override=True)
+        new_key = os.getenv("OPENAI_API_KEY", "")
+        if new_key and new_key != OPENAI_API_KEY:
+            OPENAI_API_KEY = new_key
+            client = OpenAI(api_key=new_key)
+            parent_app.append_status("OpenAI API key updated via wizard.")
+
+    wizard_btn.clicked.connect(_run_wizard_again)
+    f6.addRow(_lbl("Setup Wizard:"), wizard_btn)
+    f6.addRow("", _desc("Avaa alkuasennus uudelleen — voit vaihtaa API-avaimia ja laiteasetuksia."))
+
+    if sys.platform == "win32":
+        _is_frozen = getattr(sys, "frozen", False)
+        _autostart_on, _minimized_on = _get_autostart_state()
+
+        autostart_chk = QCheckBox("Käynnisty Windowsin mukana")
+        autostart_chk.setChecked(_autostart_on)
+        autostart_chk.setEnabled(_is_frozen)
+        autostart_chk.setStyleSheet("color: #e6edf3; background: transparent;")
+
+        minimized_chk = QCheckBox("Käynnisty pienennettynä")
+        minimized_chk.setChecked(_minimized_on)
+        minimized_chk.setEnabled(_is_frozen and _autostart_on)
+        minimized_chk.setStyleSheet("color: #e6edf3; background: transparent;")
+
+        def _on_autostart_chk(_state):
+            enabled = autostart_chk.isChecked()
+            minimized_chk.setEnabled(enabled)
+            _apply_autostart(enabled, minimized_chk.isChecked())
+
+        def _on_minimized_chk(_state):
+            _apply_autostart(autostart_chk.isChecked(), minimized_chk.isChecked())
+
+        autostart_chk.stateChanged.connect(_on_autostart_chk)
+        minimized_chk.stateChanged.connect(_on_minimized_chk)
+
+        f6.addRow(_lbl("Autostart:"), autostart_chk)
+        f6.addRow("", minimized_chk)
+        if not _is_frozen:
+            f6.addRow("", _desc("Autostart ei toimi kehitysmoodissa — rakenna ensin exe-tiedosto."))
+        else:
+            f6.addRow("", _desc("Muutos astuu voimaan heti — tallentaminen ei tarvita."))
+
     f6.addRow(_header("Python-paketit"))
 
     for import_name, pip_name, required, desc in _PKG_LIST:
@@ -5614,10 +5724,17 @@ if __name__ == "__main__":
     window = App()
     _elapsed_ms = int((time.time() - _t0) * 1000)
 
+    _start_minimized = "--minimized" in sys.argv
     if splash:
         _remaining = max(0, 4000 - _elapsed_ms)
-        QTimer.singleShot(_remaining, lambda: (splash.finish(window), window.show()))
+        if _start_minimized:
+            QTimer.singleShot(_remaining, lambda: (splash.finish(window), window.showMinimized()))
+        else:
+            QTimer.singleShot(_remaining, lambda: (splash.finish(window), window.show()))
     else:
-        window.show()
+        if _start_minimized:
+            window.showMinimized()
+        else:
+            window.show()
 
     sys.exit(app.exec())
