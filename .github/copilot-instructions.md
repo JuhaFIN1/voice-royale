@@ -7,7 +7,7 @@ All logic in one file: `ai_voice_app.py` (~6300 lines).
 
 Working directory: `E:\CLOUDS\AI-SYSTEMS\ai-voice-router\`
 GitHub: https://github.com/JuhaFIN1/voice-royale
-Current version: `APP_VERSION = "1.3.5"` (constant near top of file; CI auto-patches from git tag)
+Current version: `APP_VERSION = "1.3.6"` (constant near top of file; CI auto-patches from git tag)
 
 ---
 
@@ -77,7 +77,7 @@ Stream Deck actions: `_sd_action_queue` (Queue) + `_sd_action_timer` (50ms QTime
   - `_sb_hover_tab`, `_sb_tab_hover_timer` (singleShot QTimer) state on App
 - **Tab reorder**: `setMovable(True)` in edit mode; `tabMoved` → `_sb_tab_moved(from, to)` reorders `_soundboard_buttons`
 - **Bulk import**: drop folder/multi-files on button or right-click → "Bulk Import — tiedostot/kansio…"
-- **Image search**: right-click → "Etsi kuva netistä…" — DuckDuckGo Images via `requests.Session()` (carries cookies), vqd token from HTML, `/i.js` JSON; thumbnail grid; queue+QTimer for all network ops
+- **Image search**: right-click → "Etsi kuva netistä…" — Bing Images via `requests.Session()`; parse with `html.unescape()` then regex `"murl"` (full URL) and `"turl"` (thumbnail); thumbnail grid (5 col, 130×100); queue+QTimer for all network ops
 - `_sb_swap_handler(src_page, src_slot, dst_page, dst_slot)` on App does the swap + save
 - Edit mode OFF automatically calls `_save_soundboard()`
 - `_sb_play_id` (int) counter prevents concurrent-play crashes
@@ -101,11 +101,12 @@ On PortAudio "out of range" error (MME -9999): automatically retries with `devic
 - CI patches `APP_VERSION` in `ai_voice_app.py` from the git tag at build time
 
 ### Export / Import data
-```python
-_DATA_FILES = ["app_settings.json", "speech_history.json", "credentials.env"]
-_DATA_DIRS  = ["soundboard", "favorites_audio"]
-```
-`soundboard/` includes `audio/` and `images/` subfolders — all audio and image files are included via `os.walk`.
+Three backup modes selectable via radio dialog (`_ask_mode()`):
+- **all** — `app_settings.json`, `speech_history.json`, `credentials.env`, `soundboard/`, `favorites_audio/`
+- **settings** — `app_settings.json`, `speech_history.json`, `credentials.env` (no soundboard audio/images)
+- **soundboard** — `soundboard/` audio+images + `soundboard_pages` key from `app_settings.json` only
+
+`_BACKUP_MODES` dict drives both export and import. Soundboard import merges only `soundboard_pages` into current settings (does not overwrite other settings). `soundboard/` includes `audio/` and `images/` subfolders via `os.walk`.
 
 ### Voice FX — Hear Myself
 `VoiceEffectProcessor.set_monitor(device, enabled)` starts/stops `_monitor_stream` (second OutputStream to headphones).
@@ -116,7 +117,7 @@ _DATA_DIRS  = ["soundboard", "favorites_audio"]
 - Never commit: `.env`, `certs/`, `*.pfx`
 
 ### macOS build specifics
-PyInstaller flags needed: `--hidden-import pyttsx3.drivers.nsss`, `--hidden-import PyQt6.sip`, `--collect-all pyttsx3`, `--osx-bundle-identifier com.voiceroyale.app`
+PyInstaller flags needed: `--hidden-import pyttsx3.drivers.nsss`, `--hidden-import PyQt6.sip`, `--collect-all pyttsx3`, `--osx-bundle-identifier com.voiceroyale.app`, `--icon iconimage.ico`
 Post-build: PlistBuddy injects `NSMicrophoneUsageDescription` + `NSInputMonitoringUsageDescription` into Info.plist.
 DMG layout: `Voice Royale.app` + `/Applications` symlink (Finder shows arrow) + `Stream Deck Plugin/` folder.
 

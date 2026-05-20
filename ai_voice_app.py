@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.5"
+APP_VERSION = "1.3.6"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -5142,26 +5142,74 @@ def open_settings_dialog(parent_app: "App") -> None:
     _DATA_FILES = ["app_settings.json", "speech_history.json", "credentials.env"]
     _DATA_DIRS  = ["soundboard", "favorites_audio"]
 
-    def _export_data():
-        path, _ = QFileDialog.getSaveFileName(
-            dlg, "Vie data", "ai_voice_router_backup.zip", "ZIP-arkisto (*.zip)"
+    _BACKUP_MODES = {
+        "all": {
+            "label": "Kaikki — asetukset, historia, soundboard-äänet/-kuvat, API-avaimet",
+            "files": ["app_settings.json", "speech_history.json", "credentials.env"],
+            "dirs":  ["soundboard", "favorites_audio"],
+        },
+        "settings": {
+            "label": "Asetukset & historia — ei soundboard-ääni/kuvatiedostoja",
+            "files": ["app_settings.json", "speech_history.json", "credentials.env"],
+            "dirs":  [],
+        },
+        "soundboard": {
+            "label": "Soundboard — äänet, kuvat ja slot-asetukset",
+            "files": ["app_settings.json"],
+            "dirs":  ["soundboard"],
+        },
+    }
+
+    def _ask_mode(title: str, verb: str):
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QRadioButton, QDialogButtonBox, QLabel
+        md = QDialog(dlg)
+        md.setWindowTitle(title)
+        md.setStyleSheet(
+            "QDialog { background: #111; }"
+            "QLabel { color: #C0C0C0; font-size: 12px; background: transparent; }"
+            "QRadioButton { color: #E0E0E0; font-size: 12px; background: transparent; }"
         )
+        vlay = QVBoxLayout(md)
+        vlay.setSpacing(10)
+        vlay.setContentsMargins(20, 16, 20, 16)
+        vlay.addWidget(QLabel(f"Mitä tietoja {verb}?"))
+        radios = {}
+        for key, cfg in _BACKUP_MODES.items():
+            rb = QRadioButton(cfg["label"])
+            vlay.addWidget(rb)
+            radios[key] = rb
+        radios["all"].setChecked(True)
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        btns.button(QDialogButtonBox.StandardButton.Ok).setText(verb.capitalize())
+        btns.accepted.connect(md.accept)
+        btns.rejected.connect(md.reject)
+        vlay.addWidget(btns)
+        if md.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return next(k for k, rb in radios.items() if rb.isChecked())
+
+    def _export_data():
+        mode = _ask_mode("Vie data", "viedä")
+        if mode is None:
+            return
+        cfg = _BACKUP_MODES[mode]
+        default_name = f"VoiceRoyale_backup_{mode}.zip"
+        path, _ = QFileDialog.getSaveFileName(dlg, "Vie data", default_name, "ZIP-arkisto (*.zip)")
         if not path:
             return
         try:
             with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
-                for fname in _DATA_FILES:
+                for fname in cfg["files"]:
                     fp = os.path.join(BASE_PATH, fname)
                     if os.path.exists(fp):
                         zf.write(fp, fname)
-                for dname in _DATA_DIRS:
+                for dname in cfg["dirs"]:
                     dp = os.path.join(BASE_PATH, dname)
                     if os.path.isdir(dp):
                         for root_dir, _, files in os.walk(dp):
                             for f in files:
                                 full = os.path.join(root_dir, f)
-                                arcname = os.path.relpath(full, BASE_PATH)
-                                zf.write(full, arcname)
+                                zf.write(full, os.path.relpath(full, BASE_PATH))
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.information(dlg, "Valmis", f"Data viety:\n{path}")
         except Exception as e:
@@ -5169,40 +5217,68 @@ def open_settings_dialog(parent_app: "App") -> None:
             QMessageBox.critical(dlg, "Virhe", str(e))
 
     def _import_data():
-        path, _ = QFileDialog.getOpenFileName(
-            dlg, "Tuo data", "", "ZIP-arkisto (*.zip)"
-        )
+        path, _ = QFileDialog.getOpenFileName(dlg, "Tuo data", "", "ZIP-arkisto (*.zip)")
         if not path:
             return
+        mode = _ask_mode("Tuo data", "tuoda")
+        if mode is None:
+            return
         from PyQt6.QtWidgets import QMessageBox
+        warnings = {
+            "all":       "Korvaa kaikki asetukset, historian, API-avaimet ja soundboard-tiedostot.",
+            "settings":  "Korvaa asetukset, historian ja API-avaimet. Soundboard-tiedostoja ei kosketa.",
+            "soundboard":"Korvaa soundboard-äänet/-kuvat ja päivittää slot-asetukset.\n"
+                         "Muut asetukset säilyvät ennallaan.",
+        }
         ans = QMessageBox.question(
             dlg, "Korvaa data?",
-            "Tämä korvaa nykyiset asetukset, historian ja soundboard-tiedostot.\nJatketaanko?",
+            f"{warnings[mode]}\n\nJatketaanko?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if ans != QMessageBox.StandardButton.Yes:
             return
         try:
             with zipfile.ZipFile(path, "r") as zf:
-                for member in zf.namelist():
+                members = zf.namelist()
+                if mode == "settings":
+                    # Only extract non-soundboard files
+                    members = [m for m in members if not m.startswith("soundboard") and not m.startswith("favorites_audio")]
+                elif mode == "soundboard":
+                    # Extract soundboard/ files, then merge soundboard_pages from archived settings
+                    sb_members = [m for m in members if m.startswith("soundboard")]
+                    for member in sb_members:
+                        dest = os.path.join(BASE_PATH, member)
+                        os.makedirs(os.path.dirname(dest), exist_ok=True)
+                        with zf.open(member) as src, open(dest, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                    if "app_settings.json" in members:
+                        with zf.open("app_settings.json") as f:
+                            arc_settings = json.load(f)
+                        cur_settings = {}
+                        if os.path.exists(SETTINGS_FILE):
+                            with open(SETTINGS_FILE, encoding="utf-8") as f:
+                                cur_settings = json.load(f)
+                        cur_settings["soundboard_pages"] = arc_settings.get("soundboard_pages", [])
+                        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+                            json.dump(cur_settings, f, ensure_ascii=False, indent=2)
+                    QMessageBox.information(dlg, "Tuotu", "Soundboard tuotu. Käynnistä sovellus uudelleen.")
+                    return
+                for member in members:
                     dest = os.path.join(BASE_PATH, member)
                     os.makedirs(os.path.dirname(dest), exist_ok=True)
                     with zf.open(member) as src, open(dest, "wb") as dst:
                         shutil.copyfileobj(src, dst)
-            QMessageBox.information(
-                dlg, "Tuotu",
-                "Data tuotu. Käynnistä sovellus uudelleen jotta muutokset astuvat voimaan."
-            )
+            QMessageBox.information(dlg, "Tuotu", "Data tuotu. Käynnistä sovellus uudelleen.")
         except Exception as e:
             QMessageBox.critical(dlg, "Virhe", str(e))
 
     _io_row = _QHBoxLayout()
     _io_row.setSpacing(10)
     export_btn = _QPushButton("Vie data…")
-    export_btn.setToolTip("Pakkaa kaikki asetukset, historia ja soundboard-tiedostot ZIP-arkistoon")
+    export_btn.setToolTip("Vie valitsemasi data ZIP-arkistoon")
     export_btn.clicked.connect(_export_data)
     import_btn = _QPushButton("Tuo data…")
-    import_btn.setToolTip("Palauttaa aiemmin viedyn ZIP-varmuuskopion")
+    import_btn.setToolTip("Tuo aiemmin viety ZIP-varmuuskopio")
     import_btn.clicked.connect(_import_data)
     _io_row.addWidget(export_btn)
     _io_row.addWidget(import_btn)
@@ -5211,8 +5287,8 @@ def open_settings_dialog(parent_app: "App") -> None:
     _io_widget.setLayout(_io_row)
     f4.addRow("", _io_widget)
     f4.addRow("", _desc(
-        "Vie data — pakkaa asetukset, historia, soundboard-äänet/-kuvat ja API-avaimet ZIP-tiedostoon.\n"
-        "Tuo data — palauttaa ZIP-varmuuskopiosta. Vaatii sovelluksen uudelleenkäynnistyksen."
+        "Vie data — valitse: Kaikki / Asetukset & historia / Soundboard.\n"
+        "Tuo data — valitse mitä tuodaan. Soundboard-tuonti ei korvaa muita asetuksia."
     ))
 
     # ══════════════════════════════════════════════════════════════════

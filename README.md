@@ -9,8 +9,8 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 
 | Platform | Link |
 |---|---|
-| **Windows** | [Voice_Royale_Setup_1.3.5.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
-| **macOS** | [Voice_Royale_1.3.5.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
+| **Windows** | [Voice_Royale_Setup_1.3.6.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
+| **macOS** | [Voice_Royale_1.3.6.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
 
 > **Windows SmartScreen warning?** Click **"More info"** → **"Run anyway"**.
 > This appears because the installer uses a self-signed certificate. The app is safe.
@@ -46,7 +46,7 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 
 ## Installation (Windows)
 
-1. Download `Voice_Royale_Setup_1.3.5.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
+1. Download `Voice_Royale_Setup_1.3.6.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
 2. Run the installer — it creates Start Menu shortcuts and an optional desktop icon
 3. On first launch the **Setup Wizard** opens automatically:
    - **Step 1/4** — get an OpenAI API key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) (free tier available)
@@ -59,7 +59,7 @@ Upgrading: just run the new installer over the old one. Your API key, settings, 
 
 ## Installation (macOS)
 
-1. Download `Voice_Royale_1.3.5.dmg` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
+1. Download `Voice_Royale_1.3.6.dmg` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
 2. Open the DMG and drag **Voice Royale** to Applications
 3. First launch: right-click → **Open** to bypass Gatekeeper (app is ad-hoc signed, not notarized)
 4. Grant microphone and accessibility permissions when prompted
