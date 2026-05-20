@@ -5040,10 +5040,17 @@ def open_settings_dialog(parent_app: "App") -> None:
 
     def _pkg_status(import_name, pip_name):
         if getattr(sys, "frozen", False):
-            # In frozen exe importlib.import_module can crash for native optional libs
-            # Check sys.modules instead (already imported at startup) and skip re-import
-            in_modules = import_name in sys.modules
-            return in_modules, ("bundled" if in_modules else "")
+            # pvporcupine/pyrubberband are native optional libs that can crash on import error
+            # in frozen mode — use sys.modules only for those.
+            # All other bundled packages are safe to import normally.
+            if import_name in ("pvporcupine", "pyrubberband"):
+                in_modules = import_name in sys.modules
+                return in_modules, ("bundled" if in_modules else "")
+            try:
+                importlib.import_module(import_name)
+                return True, "bundled"
+            except Exception:
+                return False, ""
         try:
             importlib.import_module(import_name)
             try:
