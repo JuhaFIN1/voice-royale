@@ -2113,6 +2113,10 @@ class App(QWidget):
         self._start_mic_monitor()
 
         # Start Stream Deck HTTP server (used by the Elgato plugin)
+        self._sd_state: dict = {}
+        self._sd_state_timer = QTimer(self)
+        self._sd_state_timer.timeout.connect(self._refresh_sd_state)
+        self._sd_state_timer.start(1500)
         self._stream_deck.start(self)
 
     # ============ Card builders ============
@@ -3702,27 +3706,36 @@ class App(QWidget):
         elif action.startswith("fx_"):
             self._select_fx_preset(action[3:])
 
+    def _refresh_sd_state(self):
+        """Update state cache from the main thread (called by QTimer every 1.5s).
+        The HTTP server background thread reads _sd_state; Qt widgets must only
+        be accessed here on the main thread to avoid crashes."""
+        try:
+            pages = []
+            for pi, page_data in enumerate(self.settings.get("soundboard_pages", [])):
+                slots = []
+                for si, slot in enumerate(page_data.get("slots", [])):
+                    slots.append({
+                        "name": slot.get("name", f"Slot {si+1}"),
+                        "has_file": bool(slot.get("file")),
+                    })
+                pages.append({"name": page_data.get("name", f"Page {pi+1}"), "slots": slots})
+            self._sd_state = {
+                "recording": self.is_recording,
+                "listening": self.wake_listener.is_running(),
+                "language": self.langbox.currentText(),
+                "tts_backend": self.backend_combo.currentText(),
+                "fx_preset": getattr(self, "_current_fx_preset", "Normal"),
+                "fx_active": self._voice_fx.is_active,
+                "soundboard_page": self._sb_tabs.currentIndex(),
+                "soundboard_pages": pages,
+            }
+        except Exception:
+            pass
+
     def _get_sd_state(self) -> dict:
-        """Full app state for the Stream Deck plugin HTTP endpoint GET /state."""
-        pages = []
-        for pi, page_data in enumerate(self.settings.get("soundboard_pages", [])):
-            slots = []
-            for si, slot in enumerate(page_data.get("slots", [])):
-                slots.append({
-                    "name": slot.get("name", f"Slot {si+1}"),
-                    "has_file": bool(slot.get("file")),
-                })
-            pages.append({"name": page_data.get("name", f"Page {pi+1}"), "slots": slots})
-        return {
-            "recording": self.is_recording,
-            "listening": self.wake_listener.is_running(),
-            "language": self.langbox.currentText(),
-            "tts_backend": self.backend_combo.currentText(),
-            "fx_preset": getattr(self, "_current_fx_preset", "Normal"),
-            "fx_active": self._voice_fx.is_active,
-            "soundboard_page": self._sb_tabs.currentIndex(),
-            "soundboard_pages": pages,
-        }
+        """Return cached state — safe to call from any thread."""
+        return dict(self._sd_state)
 
     def _get_sd_button_state(self, action: str) -> tuple[str, bool]:
         """Return (label, is_active) for rendering a Stream Deck button."""
@@ -3780,6 +3793,10 @@ class App(QWidget):
         try:
             if self._voice_fx.is_active:
                 self._voice_fx.stop()
+        except Exception:
+            pass
+        try:
+            self._sd_state_timer.stop()
         except Exception:
             pass
         try:
