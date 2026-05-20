@@ -76,3 +76,31 @@ Tallennetaan `app_settings.json`:
 2. WakeListener korjattu — Whisper VAD fallback lisätty
 3. Lisätty 9 uutta kieltä: Dutch, Norwegian, Danish, Romanian, Latvian, Lithuanian, Japanese, Chinese, Hungarian
 4. Korjattu lippuikonit (JP/CN käyttivät setBrush/drawEllipse → korjattu fillRect:ksi)
+
+## Code Signing Setup (Windows EXE Signing)
+
+Project uses Windows Code Signing with a locally generated self-signed certificate for development/testing.
+
+### Certificate location
+- PFX file: `certs/juha-signing.pfx`
+
+### Environment variables (.env)
+- SIGN_CERT_PATH=certs/juha-signing.pfx
+- SIGN_CERT_PASSWORD=The password used when exporting the PFX certificate
+
+### Important rules
+- NEVER commit `.env`, `.pfx` files, or the `certs/` folder to GitHub
+- Signing certificate and password are local-only secrets
+- If either the PFX or password changes, both must be updated together
+- The certificate is used only for development/testing signing (not trusted by Windows SmartScreen globally)
+
+### Build / Signing workflow (manual for now)
+1. Build the application (no automation yet)
+2. Load environment variables from `.env`
+3. Use `signtool.exe` to sign the generated `.exe` using:
+   - Certificate from `SIGN_CERT_PATH`
+   - Password from `SIGN_CERT_PASSWORD`
+4. Output is a signed executable ready for distribution/testing
+
+### Security note
+This setup is temporary and intended for development. For production releases, a trusted Code Signing Certificate (or EV Code Signing Certificate) is required to reduce Windows SmartScreen warnings.

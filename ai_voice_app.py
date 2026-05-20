@@ -23,7 +23,8 @@ REQUIRED = {
     "keyboard": "keyboard",
     "openai": "openai",
     "pyttsx3": "pyttsx3",
-    "edge_tts": "edge-tts"
+    "edge_tts": "edge-tts",
+    "deep_translator": "deep-translator",
 }
 
 
@@ -60,8 +61,8 @@ import requests
 import sounddevice as sd
 from dotenv import load_dotenv
 from openai import OpenAI
-from PyQt6.QtCore import QEvent, QObject, QSize, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
+from PyQt6.QtCore import QEvent, QObject, QRectF, QSize, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -192,6 +193,12 @@ LANGS = {
     "Belarusian": "Belarusian",
     "Spanish": "Spanish",
     "French": "French",
+    "Turkish": "Turkish",
+    "Hindi": "Hindi",
+    "Hebrew": "Hebrew",
+    "Greek": "Greek",
+    "Croatian": "Croatian",
+    "Arabic": "Arabic",
 }
 
 LANG_FLAG_CODES = {
@@ -216,6 +223,12 @@ LANG_FLAG_CODES = {
     "Belarusian": "by",
     "Spanish": "es",
     "French": "fr",
+    "Turkish": "tr",
+    "Hindi": "in",
+    "Hebrew": "il",
+    "Greek": "gr",
+    "Croatian": "hr",
+    "Arabic": "sa",
 }
 
 # Edge TTS voices mapping
@@ -241,6 +254,12 @@ EDGE_VOICES = {
     "Belarusian": "ru-RU-SvetlanaNeural",
     "Spanish": "es-ES-ElviraNeural",
     "French": "fr-FR-DeniseNeural",
+    "Turkish": "tr-TR-EmelNeural",
+    "Hindi": "hi-IN-SwaraNeural",
+    "Hebrew": "he-IL-HilaNeural",
+    "Greek": "el-GR-AthinaNeural",
+    "Croatian": "hr-HR-GabrijelaNeural",
+    "Arabic": "ar-SA-ZariyahNeural",
 }
 
 # =========================
@@ -255,6 +274,8 @@ DEFAULT_SETTINGS = {
     "hotkey": "ctrl+alt+space",
     "default_target_lang": "Auto",
     "default_tts_backend": DEFAULT_TTS_BACKEND,
+    "translation_backend": "Google (free)",
+    "deepl_api_key": "",
     "wake_command_seconds": 6.0,
     "custom_languages": [],
     "soundboard_pages": [
@@ -791,22 +812,32 @@ class SoundboardButton(QWidget):
     clicked_play = pyqtSignal(int)
     data_changed = pyqtSignal(int)
 
+    _edit_mode: bool = False
+
+    @classmethod
+    def set_edit_mode(cls, enabled: bool):
+        cls._edit_mode = enabled
+
     _STYLE_IDLE = (
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-        " stop:0 #1E1E1E, stop:1 #161616);"
-        " border: 1px solid #2a2a2a; border-radius: 8px;"
-        " color: #888888; font-size: 9px; font-weight: 700;"
-        " padding-bottom: 3px; }"
+        " stop:0 #222228, stop:1 #14141A);"
+        " border: 2px solid #333344; border-radius: 10px;"
+        " color: #7A7A9A; font-size: 8px; font-weight: 700;"
+        " padding-bottom: 2px; }"
         "QToolButton:hover { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-        " stop:0 #252525, stop:1 #1E1E1E);"
-        " border-color: #9A4DFF; color: #E0E0E0; }"
-        "QToolButton:pressed { background: #0e0e0e; border-color: #3A7BFF; }"
+        " stop:0 #2A2A38, stop:1 #1C1C26);"
+        " border: 2px solid #9A4DFF; color: #E0E0FF; }"
+        "QToolButton:pressed { background: #0e0e18; border: 2px solid #3A7BFF; }"
     )
     _STYLE_PLAY = (
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-        " stop:0 #0a2010, stop:1 #061508);"
-        " border: 2px solid #00FF6A; border-radius: 8px;"
-        " color: #00FF6A; font-size: 9px; font-weight: 700; padding-bottom: 3px; }"
+        " stop:0 #0a2818, stop:1 #06160C);"
+        " border: 2px solid #00FF6A; border-radius: 10px;"
+        " color: #00FF6A; font-size: 8px; font-weight: 700; padding-bottom: 2px; }"
+    )
+    _STYLE_DRAG = (
+        "QToolButton { background: #080C1A; border: 2px dashed #3A7BFF; border-radius: 10px;"
+        " color: #3A7BFF; font-size: 8px; font-weight: 700; padding-bottom: 2px; }"
     )
 
     def __init__(self, page_index: int, slot_index: int, parent=None):
@@ -814,19 +845,21 @@ class SoundboardButton(QWidget):
         self.page_index = page_index
         self.slot_index = slot_index
         self._data = {"name": f"Slot {slot_index + 1}", "file": "", "image": ""}
-        self.setFixedSize(66, 62)
+        self.setFixedSize(72, 68)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
 
         self._btn = QToolButton()
-        self._btn.setFixedSize(66, 62)
+        self._btn.setFixedSize(72, 68)
         self._btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-        self._btn.setIconSize(QSize(34, 34))
+        self._btn.setIconSize(QSize(46, 42))
         self._btn.setStyleSheet(self._STYLE_IDLE)
         self._btn.clicked.connect(lambda: self.clicked_play.emit(self.slot_index))
         self._btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._btn.customContextMenuRequested.connect(self._ctx_menu)
+        self._btn.setAcceptDrops(True)
+        self._btn.installEventFilter(self)
         lay.addWidget(self._btn)
 
         self._refresh()
@@ -841,26 +874,135 @@ class SoundboardButton(QWidget):
     def set_playing(self, playing: bool):
         self._btn.setStyleSheet(self._STYLE_PLAY if playing else self._STYLE_IDLE)
 
+    # ---- drag-and-drop (only active in edit mode) ----
+
+    _IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'}
+    _AUDIO_EXTS = {'.wav', '.mp3', '.ogg', '.flac', '.aiff', '.aif'}
+
+    def eventFilter(self, obj, event):
+        if obj is self._btn:
+            t = event.type()
+            if t == QEvent.Type.DragEnter:
+                self._on_drag_enter(event)
+                return True
+            if t == QEvent.Type.DragMove:
+                if SoundboardButton._edit_mode and event.mimeData().hasUrls():
+                    event.acceptProposedAction()
+                else:
+                    event.ignore()
+                return True
+            if t == QEvent.Type.DragLeave:
+                self._btn.setStyleSheet(self._STYLE_IDLE)
+                return True
+            if t == QEvent.Type.Drop:
+                self._on_drop(event)
+                return True
+        return super().eventFilter(obj, event)
+
+    def _on_drag_enter(self, event):
+        if not SoundboardButton._edit_mode:
+            event.ignore()
+            return
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                ext = os.path.splitext(url.toLocalFile())[1].lower()
+                if ext in self._IMAGE_EXTS or ext in self._AUDIO_EXTS:
+                    event.acceptProposedAction()
+                    self._btn.setStyleSheet(self._STYLE_DRAG)
+                    return
+        event.ignore()
+
+    def _on_drop(self, event):
+        self._btn.setStyleSheet(self._STYLE_IDLE)
+        if not SoundboardButton._edit_mode or not event.mimeData().hasUrls():
+            event.ignore()
+            return
+        for url in event.mimeData().urls():
+            path = url.toLocalFile()
+            ext = os.path.splitext(path)[1].lower()
+            if ext in self._IMAGE_EXTS:
+                self._drop_image(path)
+            elif ext in self._AUDIO_EXTS:
+                self._drop_sound(path)
+        event.acceptProposedAction()
+
+    def _drop_image(self, path: str):
+        try:
+            dest, _, _ = _sb_import_image(path, self.page_index, self.slot_index)
+            self._data["image"] = dest
+            self._notify_status(f"Soundboard {self.slot_index+1}: kuva pudotettu")
+        except Exception:
+            self._data["image"] = path
+        self._refresh()
+        self.data_changed.emit(self.slot_index)
+
+    def _drop_sound(self, path: str):
+        try:
+            dest, _, _ = _sb_import_audio(path, self.page_index, self.slot_index)
+            self._data["file"] = dest
+            self._notify_status(f"Soundboard {self.slot_index+1}: ääni pudotettu")
+        except Exception:
+            self._data["file"] = path
+        if not self._data.get("name") or self._data["name"].startswith("Slot "):
+            self._data["name"] = os.path.splitext(os.path.basename(path))[0]
+        self._refresh()
+        self.data_changed.emit(self.slot_index)
+
+    def _make_icon_pixmap(self, size: int) -> QPixmap:
+        img_path = self._data.get("image", "")
+        px = QPixmap(size, size)
+        px.fill(Qt.GlobalColor.transparent)
+        p = QPainter(px)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = 8  # corner radius
+        inner = QRectF(2, 2, size - 4, size - 4)
+        has_img = bool(img_path and os.path.exists(img_path))
+        if has_img:
+            src = QPixmap(img_path)
+            has_img = not src.isNull()
+        if has_img:
+            scaled = src.scaled(size - 4, size - 4,
+                                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                Qt.TransformationMode.SmoothTransformation)
+            ox = (scaled.width() - (size - 4)) // 2
+            oy = (scaled.height() - (size - 4)) // 2
+            cropped = scaled.copy(ox, oy, size - 4, size - 4)
+            clip = QPainterPath()
+            clip.addRoundedRect(inner, r, r)
+            p.setClipPath(clip)
+            p.drawPixmap(2, 2, cropped)
+            p.setClipping(False)
+            pen = QPen(QColor("#7040C8"))
+            pen.setWidthF(1.5)
+            p.setPen(pen)
+            p.drawRoundedRect(inner, r, r)
+        else:
+            clip = QPainterPath()
+            clip.addRoundedRect(inner, r, r)
+            p.setClipPath(clip)
+            p.fillRect(inner.toRect(), QColor("#14141E"))
+            p.setClipping(False)
+            p.setPen(QColor("#3A7BFF"))
+            p.setFont(QFont("Segoe UI", size // 3))
+            p.drawText(QRectF(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, "♪")
+            pen = QPen(QColor("#2A3060"))
+            pen.setWidthF(1.5)
+            p.setPen(pen)
+            p.drawRoundedRect(inner, r, r)
+        p.end()
+        return px
+
     def _refresh(self):
         name = self._data.get("name") or f"Slot {self.slot_index + 1}"
-        img_path = self._data.get("image", "")
-        if img_path and os.path.exists(img_path):
-            px = QPixmap(img_path).scaled(34, 34, Qt.AspectRatioMode.KeepAspectRatio,
-                                          Qt.TransformationMode.SmoothTransformation)
-        else:
-            px = QPixmap(34, 34)
-            px.fill(QColor("#1A1A1A"))
-            p = QPainter(px)
-            p.setPen(QColor("#3A7BFF"))
-            p.setFont(QFont("Segoe UI", 14))
-            p.drawText(px.rect(), Qt.AlignmentFlag.AlignCenter, "♪")
-            p.end()
+        px = self._make_icon_pixmap(46)
         self._btn.setIcon(QIcon(px))
         display = name if len(name) <= 9 else name[:8] + "…"
         self._btn.setText(display)
         self._btn.setToolTip(name + ("\n" + self._data["file"] if self._data.get("file") else ""))
 
     def _ctx_menu(self, pos):
+        if not SoundboardButton._edit_mode:
+            return
         menu = QMenu(self)
         menu.addAction("Assign Sound…", self._assign_sound)
         menu.addAction("Assign Image…", self._assign_image)
@@ -1074,10 +1216,56 @@ def save_history_data(data):
 
 
 # =========================
-# OPENAI TRANSLATION
+# TRANSLATION (multi-backend)
 # =========================
 
-def translate_text(text: str, lang: str) -> str:
+_GOOGLE_LANG_MAP = {
+    "auto": "en", "English": "en", "German": "de", "Swedish": "sv",
+    "Finnish": "fi", "Russian": "ru", "Italian": "it", "Dutch": "nl",
+    "Norwegian": "no", "Danish": "da", "Romanian": "ro", "Latvian": "lv",
+    "Lithuanian": "lt", "Japanese": "ja", "Chinese": "zh-CN", "Hungarian": "hu",
+    "Polish": "pl", "Czech": "cs", "Catalan": "ca", "Belarusian": "be",
+    "Spanish": "es", "French": "fr",
+    "Turkish": "tr", "Hindi": "hi", "Hebrew": "iw",
+    "Greek": "el", "Croatian": "hr", "Arabic": "ar",
+}
+
+_DEEPL_LANG_MAP = {
+    "auto": "EN-US", "English": "EN-US", "German": "DE", "Swedish": "SV",
+    "Finnish": "FI", "Russian": "RU", "Italian": "IT", "Dutch": "NL",
+    "Norwegian": "NB", "Danish": "DA", "Romanian": "RO", "Latvian": "LV",
+    "Lithuanian": "LT", "Japanese": "JA", "Chinese": "ZH", "Hungarian": "HU",
+    "Polish": "PL", "Czech": "CS", "Spanish": "ES", "French": "FR",
+    "Turkish": "TR", "Greek": "EL", "Arabic": "AR",
+    # DeepL ei tue: Hindi, Hebrew, Croatian
+}
+
+
+def translate_text(text: str, lang: str,
+                   backend: str = "Google (free)", deepl_key: str = "") -> str:
+    if backend == "Google (free)":
+        from deep_translator import GoogleTranslator
+        target = _GOOGLE_LANG_MAP.get(lang, lang.lower())
+        try:
+            return GoogleTranslator(source="auto", target=target).translate(text) or ""
+        except Exception as e:
+            raise RuntimeError(f"Google Translate error: {e}") from e
+
+    if backend == "DeepL":
+        if not deepl_key:
+            raise RuntimeError("DeepL API-avain puuttuu. Lisää se Asetuksiin.")
+        target = _DEEPL_LANG_MAP.get(lang)
+        if not target:
+            raise RuntimeError(f"DeepL ei tue kieltä '{lang}'. Käytä Google (free) tai OpenAI.")
+        from deep_translator import DeepLTranslator
+        try:
+            return DeepLTranslator(api_key=deepl_key, source="auto", target=target).translate(text) or ""
+        except Exception as e:
+            raise RuntimeError(f"DeepL error: {e}") from e
+
+    # OpenAI (default fallback)
+    if not client:
+        raise RuntimeError("OpenAI API-avain puuttuu. Lisää se Asetuksiin tai vaihda käännösmoottori.")
     if lang == "auto":
         prompt = (
             "Detect the language of the following text and translate it to natural English. "
@@ -1090,19 +1278,15 @@ def translate_text(text: str, lang: str) -> str:
             "Output ONLY the translated text.\n\n"
             f"{text}"
         )
-
     response = client.responses.create(model="gpt-4.1-mini", input=prompt)
-
     translated = getattr(response, "output_text", None)
     if translated:
         return translated.strip()
-
     output = getattr(response, "output", None)
     if output and len(output) > 0:
         content_items = output[0].get("content", [])
         if content_items and len(content_items) > 0:
             return content_items[0].get("text", "").strip()
-
     return ""
 
 
@@ -1618,6 +1802,45 @@ class App(QWidget):
             painter.fillRect(0, 0, 7, 14, Qt.GlobalColor.blue)
             painter.fillRect(7, 0, 6, 14, Qt.GlobalColor.white)
             painter.fillRect(13, 0, 7, 14, Qt.GlobalColor.red)
+        elif country_code == "tr":
+            painter.fillRect(0, 0, 20, 14, Qt.GlobalColor.red)
+            painter.fillRect(5, 2, 6, 10, Qt.GlobalColor.white)   # crescent outer
+            painter.fillRect(7, 3, 6, 8, Qt.GlobalColor.red)      # crescent inner cutout
+            painter.fillRect(13, 5, 2, 4, Qt.GlobalColor.white)   # star
+        elif country_code == "in":
+            painter.fillRect(0, 0, 20, 5, QColor(255, 153, 51))   # saffron
+            painter.fillRect(0, 5, 20, 4, Qt.GlobalColor.white)
+            painter.fillRect(0, 9, 20, 5, QColor(19, 136, 8))     # green
+            painter.fillRect(8, 6, 4, 2, QColor(0, 0, 128))       # Ashoka Chakra (simplified)
+        elif country_code == "il":
+            painter.fillRect(0, 0, 20, 14, Qt.GlobalColor.white)
+            painter.fillRect(0, 1, 20, 2, QColor(0, 56, 184))     # blue stripe top
+            painter.fillRect(0, 11, 20, 2, QColor(0, 56, 184))    # blue stripe bottom
+            painter.fillRect(7, 4, 2, 6, QColor(0, 56, 184))      # Star of David left edge
+            painter.fillRect(11, 4, 2, 6, QColor(0, 56, 184))     # right edge
+            painter.fillRect(7, 4, 6, 2, QColor(0, 56, 184))      # top edge
+            painter.fillRect(7, 8, 6, 2, QColor(0, 56, 184))      # bottom edge
+        elif country_code == "gr":
+            painter.fillRect(0, 0, 20, 14, QColor(0, 80, 160))    # blue
+            painter.fillRect(0, 2, 20, 2, Qt.GlobalColor.white)
+            painter.fillRect(0, 6, 20, 2, Qt.GlobalColor.white)
+            painter.fillRect(0, 10, 20, 2, Qt.GlobalColor.white)
+            painter.fillRect(0, 0, 8, 6, QColor(0, 80, 160))      # canton
+            painter.fillRect(3, 0, 2, 6, Qt.GlobalColor.white)    # vertical cross
+            painter.fillRect(0, 2, 8, 2, Qt.GlobalColor.white)    # horizontal cross
+        elif country_code == "hr":
+            painter.fillRect(0, 0, 7, 14, Qt.GlobalColor.red)
+            painter.fillRect(7, 0, 6, 14, Qt.GlobalColor.white)
+            painter.fillRect(13, 0, 7, 14, Qt.GlobalColor.blue)
+            painter.fillRect(7, 3, 3, 3, Qt.GlobalColor.red)      # checkerboard
+            painter.fillRect(10, 3, 3, 3, Qt.GlobalColor.white)
+            painter.fillRect(7, 6, 3, 3, Qt.GlobalColor.white)
+            painter.fillRect(10, 6, 3, 3, Qt.GlobalColor.red)
+        elif country_code == "sa":
+            painter.fillRect(0, 0, 20, 14, QColor(0, 106, 78))    # dark green
+            painter.fillRect(3, 5, 12, 2, Qt.GlobalColor.white)   # sword blade
+            painter.fillRect(3, 7, 2, 3, Qt.GlobalColor.white)    # sword handle
+            painter.fillRect(3, 9, 5, 1, Qt.GlobalColor.white)    # crossguard
         else:
             painter.fillRect(0, 0, 20, 14, Qt.GlobalColor.lightGray)
 
@@ -1646,7 +1869,7 @@ class App(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Voice Royale")
-        self.setGeometry(100, 100, 1320, 637)
+        self.setGeometry(100, 100, 1320, 820)
         icon_path = os.path.join(ASSETS_PATH, "iconimage.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
@@ -1839,6 +2062,8 @@ class App(QWidget):
         self._soundboard_buttons: list[list[SoundboardButton]] = []
         self._fx_preset_buttons: dict[str, QPushButton] = {}
         self._mb_bars: dict[int, tuple] = {}  # device_index -> (bar, db_lbl)
+        self._sb_play_id: int = 0
+        self._sb_playing_btn: "SoundboardButton | None" = None
 
         # Stream Deck
         self._stream_deck = StreamDeckController(self.append_status)
@@ -1879,7 +2104,7 @@ class App(QWidget):
         root.setContentsMargins(8, 4, 8, 8)
         root.setSpacing(6)
         root.setMenuBar(menu_bar)
-        root.addLayout(top_row, 2)
+        root.addLayout(top_row, 1)
         root.addWidget(self._bottom_tabs, 1)
         root.addWidget(self._build_meters_bar())
         self.setLayout(root)
@@ -2126,8 +2351,8 @@ class App(QWidget):
         self._sb_tabs.setTabsClosable(False)
         self._sb_tabs.setStyleSheet(
             "QTabWidget::pane { border: 1px solid #2a2a2a; border-radius: 8px; background: #121212; }"
-            "QTabBar { margin-right: 36px; }"
-            "QTabBar::tab { background: #1E1E1E; color: #666666; padding: 5px 14px;"
+            "QTabBar { margin-right: 84px; }"
+            "QTabBar::tab { background: #1E1E1E; color: #666666; padding: 7px 14px;"
             " font-size: 11px; font-weight: 700; letter-spacing: 0.5px;"
             " border: 1px solid #2a2a2a; border-bottom: none; border-radius: 4px 4px 0 0; margin-right: 2px; }"
             "QTabBar::tab:selected { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);"
@@ -2139,12 +2364,28 @@ class App(QWidget):
         self._sb_tabs.tabBar().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._sb_tabs.tabBar().customContextMenuRequested.connect(self._sb_tab_ctx_menu)
 
-        # "+" corner button — wrapped with left margin so it sits flush inside the bar
+        # Corner buttons — height locked to tab bar height so they don't overflow
         _corner_wrap = QWidget()
+        _corner_wrap.setFixedHeight(28)
         _corner_lay = QHBoxLayout(_corner_wrap)
-        _corner_lay.setContentsMargins(2, 2, 2, 2)
+        _corner_lay.setContentsMargins(0, 2, 4, 2)
+        _corner_lay.setSpacing(4)
+
+        self._sb_edit_btn = QPushButton("Edit")
+        self._sb_edit_btn.setCheckable(True)
+        self._sb_edit_btn.setFixedWidth(46)
+        self._sb_edit_btn.setToolTip("Muokkaustila: vedä kuva/ääni napin päälle tai oikeaklikkaa")
+        self._sb_edit_btn.setStyleSheet(
+            "QPushButton { background: #1E1E2A; color: #666688; border: 1px solid #333344;"
+            " border-radius: 4px; font-size: 10px; font-weight: 700; }"
+            "QPushButton:hover:!checked { background: #252535; border-color: #9A4DFF; color: #AAAACC; }"
+            "QPushButton:checked { background: #1A0E00; color: #FF9A00; border: 2px solid #FF9A00; }"
+        )
+        self._sb_edit_btn.toggled.connect(self._sb_toggle_edit_mode)
+        _corner_lay.addWidget(self._sb_edit_btn)
+
         add_page_btn = QPushButton("+")
-        add_page_btn.setFixedSize(26, 22)
+        add_page_btn.setFixedWidth(26)
         add_page_btn.setToolTip("Lisää sivu (max 10)")
         add_page_btn.setStyleSheet(
             "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);"
@@ -2251,6 +2492,13 @@ class App(QWidget):
                 self._save_soundboard()
                 self._stream_deck.refresh_one(f"soundboard_{slot_index}")
                 return
+
+    def _sb_toggle_edit_mode(self, enabled: bool):
+        SoundboardButton.set_edit_mode(enabled)
+        if enabled:
+            self.append_status("Soundboard muokkaustila ON — vedä kuva/ääni napin päälle tai oikeaklikkaa")
+        else:
+            self.append_status("Soundboard muokkaustila OFF")
 
     def _build_voice_fx_card(self) -> QWidget:
         frame, layout = self._make_card("Voice FX — real-time voice morphing via virtual output")
@@ -2725,7 +2973,11 @@ class App(QWidget):
         lang_code = entry.get("language", "auto")
         display_lang = entry.get("display_lang", "Auto")
         try:
-            translated = translate_text(text, lang_code)
+            translated = translate_text(
+                text, lang_code,
+                backend=self.settings.get("translation_backend", "Google (free)"),
+                deepl_key=self.settings.get("deepl_api_key", ""),
+            )
             if not translated:
                 return
             tts_backend = self.backend_combo.currentText()
@@ -3333,18 +3585,30 @@ class App(QWidget):
             self.append_status(f"Soundboard p{page_index+1} slot {slot_index+1}: ei ääntä (oikeaklikkaa)")
             return
 
+        # Stop any currently playing soundboard sound
+        self._sb_play_id += 1
+        my_play_id = self._sb_play_id
+        sd.stop()
+        if self._sb_playing_btn and self._sb_playing_btn is not btn:
+            old_btn = self._sb_playing_btn
+            QTimer.singleShot(0, lambda: old_btn.set_playing(False))
+        self._sb_playing_btn = btn
+
         def _play():
             try:
                 QTimer.singleShot(0, lambda: btn.set_playing(True))
                 wav = self._load_audio_as_wav(path)
-                play_wav_bytes(wav, device_indices=self.get_selected_devices(),
-                               level_callback=self.update_output_level)
+                if self._sb_play_id == my_play_id:
+                    play_wav_bytes(wav, device_indices=self.get_selected_devices(),
+                                   level_callback=self.update_output_level)
                 self.update_output_level(0.0)
             except Exception as e:
-                self.append_status(f"Soundboard error: {e}")
+                if self._sb_play_id == my_play_id:
+                    self.append_status(f"Soundboard error: {e}")
             finally:
-                QTimer.singleShot(0, lambda: btn.set_playing(False))
-                self._stream_deck.refresh_one(f"soundboard_{slot_index}")
+                if self._sb_play_id == my_play_id:
+                    QTimer.singleShot(0, lambda: btn.set_playing(False))
+                    self._stream_deck.refresh_one(f"soundboard_{slot_index}")
 
         threading.Thread(target=_play, daemon=True).start()
 
@@ -3589,9 +3853,13 @@ class App(QWidget):
         try:
             lang = LANGS[self.langbox.currentText()]
             self.append_status("Translating text...")
-            translated = translate_text(text, lang)
+            translated = translate_text(
+                text, lang,
+                backend=self.settings.get("translation_backend", "Google (free)"),
+                deepl_key=self.settings.get("deepl_api_key", ""),
+            )
             if not translated or not translated.strip():
-                raise RuntimeError("Translation returned empty output. Check your OpenAI API key and input text.")
+                raise RuntimeError("Käännös palautti tyhjän tuloksen. Tarkista asetukset.")
 
             self.update_translated(translated)
             self.append_status("Generating speech audio...")
@@ -3656,49 +3924,172 @@ def open_settings_dialog(parent_app: "App") -> None:
     )
 
     dlg = QDialog(parent_app)
-    dlg.setWindowTitle("Settings")
-    dlg.setMinimumWidth(600)
-    dlg.setMinimumHeight(500)
-    dlg.setStyleSheet(parent_app.styleSheet())
+    dlg.setWindowTitle("Voice Royale — Asetukset")
+    dlg.resize(860, 660)
+    dlg.setMinimumSize(700, 520)
+    dlg.setStyleSheet(parent_app.styleSheet() + """
+        QTabWidget::pane { border: 1px solid #2a2a3a; border-radius: 0 8px 8px 8px;
+            background: #111118; padding: 4px; }
+        QTabBar::tab { background: #1A1A26; color: #666680; padding: 9px 22px;
+            font-size: 12px; font-weight: 700; letter-spacing: 0.4px;
+            border: 1px solid #2a2a3a; border-bottom: none;
+            border-radius: 6px 6px 0 0; margin-right: 3px; }
+        QTabBar::tab:selected { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,
+            stop:0 #3A7BFF, stop:1 #9A4DFF); color: #fff; border-color: #3A7BFF; }
+        QTabBar::tab:hover:!selected { background: #222232; color: #C0C0E0;
+            border-color: #9A4DFF; }
+        QScrollArea { border: none; background: transparent; }
+        QLineEdit { background: #18182A; border: 1px solid #2E2E48;
+            border-radius: 7px; color: #E0E0F0; padding: 7px 12px;
+            font-size: 13px; min-height: 18px; }
+        QLineEdit:focus { border-color: #7A4DFF; background: #1C1C32; }
+        QLineEdit:disabled { color: #444455; background: #141420; }
+        QComboBox { background: #18182A; border: 1px solid #2E2E48; border-radius: 7px;
+            color: #E0E0F0; padding: 7px 12px; font-size: 13px; min-height: 18px; }
+        QComboBox:focus { border-color: #7A4DFF; }
+        QComboBox::drop-down { border: none; width: 22px; }
+        QComboBox QAbstractItemView { background: #1A1A2A; border: 1px solid #2E2E48;
+            color: #E0E0F0; selection-background-color: #3A7BFF; padding: 4px; }
+        QPushButton { background: #1E1E30; border: 1px solid #2E2E48; border-radius: 7px;
+            color: #A0A0C0; padding: 7px 16px; font-size: 12px; font-weight: 600; }
+        QPushButton:hover { background: #272740; border-color: #9A4DFF; color: #E0E0FF; }
+        QPushButton:pressed { background: #0e0e1e; border-color: #3A7BFF; }
+        QListWidget { background: #18182A; border: 1px solid #2E2E48; border-radius: 7px;
+            color: #E0E0F0; font-size: 12px; padding: 4px; }
+        QListWidget::item:selected { background: #3A7BFF; color: #fff; border-radius: 4px; }
+        QDialogButtonBox QPushButton { min-width: 90px; padding: 8px 20px; font-size: 13px; }
+    """)
 
     settings = dict(parent_app.settings)
-    form = QFormLayout()
-    form.setVerticalSpacing(2)
-    form.setContentsMargins(8, 8, 8, 8)
 
-    DESC = "color: #7a8fbb; font-size: 11px; padding-bottom: 6px;"
+    # ── shared helpers ────────────────────────────────────────────────
+    LABEL_STYLE = "color: #9090B8; font-size: 12px; font-weight: 600;"
+    DESC_STYLE  = "color: #5A6A8A; font-size: 11px; padding: 2px 0 10px 0; line-height: 150%;"
 
     def _desc(text: str) -> QLabel:
         lbl = QLabel(text)
-        lbl.setStyleSheet(DESC)
+        lbl.setStyleSheet(DESC_STYLE)
         lbl.setWordWrap(True)
         return lbl
 
-    # ── OpenAI API key ────────────────────────────────────────────────
-    api_key_row = _QHBoxLayout()
-    api_key_edit = QLineEdit(OPENAI_API_KEY)
-    api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-    api_key_edit.setPlaceholderText("sk-...")
-    show_key_btn = _QPushButton("Show")
-    show_key_btn.setFixedWidth(54)
-    show_key_btn.setCheckable(True)
-    def _toggle_key_visibility(checked):
-        api_key_edit.setEchoMode(QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password)
-        show_key_btn.setText("Hide" if checked else "Show")
-    show_key_btn.toggled.connect(_toggle_key_visibility)
-    api_key_row.addWidget(api_key_edit, 1)
-    api_key_row.addWidget(show_key_btn)
-    api_key_widget = QWidget()
-    api_key_widget.setLayout(api_key_row)
-    form.addRow("OpenAI API key:", api_key_widget)
-    form.addRow("", _desc(
-        "Your OpenAI API key — required for speech recognition (Whisper) and translation (GPT-4.1-mini). "
-        "Starts with sk-. Get one free at platform.openai.com/api-keys. "
-        "Saved to credentials.env in the installation folder."
+    def _header(text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setStyleSheet(
+            "color: #C0C0E8; font-size: 13px; font-weight: 700; letter-spacing: 0.4px;"
+            " padding: 14px 0 6px 0; border-bottom: 1px solid #2A2A42; margin-bottom: 2px;"
+        )
+        return lbl
+
+    def _make_form() -> QFormLayout:
+        f = QFormLayout()
+        f.setVerticalSpacing(6)
+        f.setHorizontalSpacing(16)
+        f.setContentsMargins(20, 12, 20, 20)
+        f.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        f.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        return f
+
+    def _scroll_tab(form: QFormLayout) -> QWidget:
+        inner = QWidget()
+        inner.setLayout(form)
+        scroll = QScrollArea()
+        scroll.setWidget(inner)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        return scroll
+
+    def _lbl(text: str) -> QLabel:
+        l = QLabel(text)
+        l.setStyleSheet(LABEL_STYLE)
+        return l
+
+    def _secret_row(value: str, placeholder: str):
+        row = _QHBoxLayout()
+        row.setSpacing(6)
+        edit = QLineEdit(value)
+        edit.setEchoMode(QLineEdit.EchoMode.Password)
+        edit.setPlaceholderText(placeholder)
+        btn = _QPushButton("Näytä")
+        btn.setFixedWidth(64)
+        btn.setCheckable(True)
+        def _toggle(checked, e=edit, b=btn):
+            e.setEchoMode(QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password)
+            b.setText("Piilota" if checked else "Näytä")
+        btn.toggled.connect(_toggle)
+        row.addWidget(edit, 1)
+        row.addWidget(btn)
+        w = QWidget()
+        w.setLayout(row)
+        return w, edit
+
+    # ══════════════════════════════════════════════════════════════════
+    # TAB 1 — Käännös & Ääni
+    # ══════════════════════════════════════════════════════════════════
+    f1 = _make_form()
+    f1.addRow(_header("Käännösmoottori"))
+
+    trans_backend_combo = _QComboBox()
+    for b in ("Google (free)", "DeepL", "OpenAI"):
+        trans_backend_combo.addItem(b)
+    trans_backend_combo.setCurrentText(settings.get("translation_backend", "Google (free)"))
+    f1.addRow(_lbl("Käännösmoottori:"), trans_backend_combo)
+    f1.addRow("", _desc(
+        "Google (free) — ei tarvitse API-avainta, toimii heti.\n"
+        "DeepL — laadukas käännös, vaatii ilmaisen avaimen (deepl.com).\n"
+        "OpenAI — GPT-4.1-mini, vaatii maksullisen OpenAI-avaimen."
     ))
 
-    # ── Wake keyword ──────────────────────────────────────────────────
-    # Common built-in Porcupine words — also work as Whisper wake words
+    api_key_widget, api_key_edit = _secret_row(OPENAI_API_KEY, "sk-...")
+    f1.addRow(_lbl("OpenAI API-avain:"), api_key_widget)
+    f1.addRow("", _desc(
+        "Tarvitaan puheentunnistukseen (Whisper) ja käännökseen kun moottori = OpenAI.\n"
+        "Hae avain: platform.openai.com/api-keys  •  Tallennetaan credentials.env-tiedostoon."
+    ))
+
+    deepl_key_widget, deepl_key_edit = _secret_row(
+        settings.get("deepl_api_key", ""), "DeepL API-avain — päättyy :fx (ilmainen)"
+    )
+    f1.addRow(_lbl("DeepL API-avain:"), deepl_key_widget)
+    f1.addRow("", _desc(
+        "Ilmainen avain: rekisteröidy osoitteessa deepl.com/pro#developer → Authentication Key.\n"
+        "Ilmainen tili: 500 000 merkkiä/kk. Avain päättyy :fx."
+    ))
+
+    def _update_deepl_visibility():
+        is_deepl = trans_backend_combo.currentText() == "DeepL"
+        deepl_key_widget.setVisible(is_deepl)
+    trans_backend_combo.currentTextChanged.connect(lambda _: _update_deepl_visibility())
+    _update_deepl_visibility()
+
+    f1.addRow(_header("Puhesynteesi (TTS)"))
+
+    backend_combo = _QComboBox()
+    for b in ("Edge TTS (free)", "ElevenLabs"):
+        backend_combo.addItem(b)
+    backend_combo.setCurrentText(settings.get("default_tts_backend", DEFAULT_TTS_BACKEND))
+    f1.addRow(_lbl("TTS-moottori:"), backend_combo)
+    f1.addRow("", _desc(
+        "Edge TTS (free) — Microsoftin neuraaliäänet, ei tiliä tarvita, hyvä laatu.\n"
+        "ElevenLabs — erittäin realistinen AI-ääni, vaatii maksullisen tilin ja API-avaimen."
+    ))
+
+    lang_combo = _QComboBox()
+    for lang in LANGS.keys():
+        lang_combo.addItem(lang)
+    lang_combo.setCurrentText(settings.get("default_target_lang", "Auto"))
+    f1.addRow(_lbl("Oletuskohde­kieli:"), lang_combo)
+    f1.addRow("", _desc(
+        "Kieli, jolle teksti tai puhe käännetään oletuksena. "
+        "'Auto' tunnistaa puhutun kielen ja kääntää englanniksi. "
+        "Voit vaihtaa kielen myös pääikkunassa lennossa."
+    ))
+
+    # ══════════════════════════════════════════════════════════════════
+    # TAB 2 — Wake Word
+    # ══════════════════════════════════════════════════════════════════
+    f2 = _make_form()
+    f2.addRow(_header("Aktivointisana"))
+
     _BUILTIN_KEYWORDS = [
         "jarvis", "alexa", "computer", "hey google", "hey siri",
         "ok google", "terminator", "picovoice", "porcupine",
@@ -3722,121 +4113,94 @@ def open_settings_dialog(parent_app: "App") -> None:
     def _get_keyword():
         return keyword_combo.currentText().strip().lower() or "jarvis"
 
-    form.addRow("Wake keyword:", keyword_combo)
-    form.addRow("", _desc(
-        "The word or phrase you say to activate hands-free recording.\n"
-        "Choose from the list or type any word — Finnish words work too (e.g. 'hei tietokone').\n"
-        "Without a Picovoice key the app uses Whisper to detect the word (slight delay, works offline).\n"
-        "With a Picovoice key (free) Porcupine detects it instantly and uses no CPU."
+    f2.addRow(_lbl("Wake-sana:"), keyword_combo)
+    f2.addRow("", _desc(
+        "Sana, jonka sanominen käynnistää hands-free-äänityksen.\n"
+        "Valitse listasta tai kirjoita oma — suomen kielen sanat toimivat myös (esim. 'hei tietokone').\n"
+        "Ilman Picovoice-avainta käytetään Whisperia tunnistukseen (pieni viive, toimii offline).\n"
+        "Picovoice-avaimella (ilmainen) Porcupine tunnistaa sanan välittömästi ilman CPU-kuormaa."
     ))
 
-    # ── Picovoice access key ──────────────────────────────────────────
+    seconds_edit = QLineEdit(str(settings.get("wake_command_seconds", 6.0)))
+    seconds_edit.setPlaceholderText("esim. 6.0")
+    seconds_edit.setMaximumWidth(120)
+    f2.addRow(_lbl("Tallennusaika (s):"), seconds_edit)
+    f2.addRow("", _desc(
+        "Kuinka monta sekuntia äänitetään wake-sanan jälkeen. "
+        "Kasvata (esim. 10 s) pitkille lauseille tai hitaalle puheelle. "
+        "Laske (esim. 3 s) nopeiden yksisanaisten komentojen käyttöön."
+    ))
+
+    f2.addRow(_header("Picovoice (valinnainen — ilmainen)"))
+
     access_key_edit = QLineEdit(settings.get("picovoice_access_key", ""))
-    access_key_edit.setPlaceholderText("Paste your free key from console.picovoice.ai")
-    form.addRow("Picovoice AccessKey:", access_key_edit)
-    form.addRow("", _desc(
-        "Free personal-use key from console.picovoice.ai (no credit card needed).\n"
-        "Enables Porcupine offline wake-word detection — instant response, no internet required.\n"
-        "Leave empty to use Whisper-based detection instead."
+    access_key_edit.setPlaceholderText("Liitä ilmainen avain osoitteesta console.picovoice.ai")
+    f2.addRow(_lbl("Picovoice AccessKey:"), access_key_edit)
+    f2.addRow("", _desc(
+        "Ilmainen henkilökohtainen avain — console.picovoice.ai (ei luottokorttia tarvita).\n"
+        "Mahdollistaa Porcupine offline -aktivointisanatunnistuksen: välitön vaste, ei nettiä tarvita.\n"
+        "Jätä tyhjäksi käyttääksesi Whisper-pohjaista tunnistusta."
     ))
 
-    # ── Custom .ppn wake-word file ────────────────────────────────────
-    custom_row = _QHBoxLayout()
+    ppn_row = _QHBoxLayout()
+    ppn_row.setSpacing(6)
     custom_path_edit = QLineEdit(settings.get("wake_custom_ppn_path", ""))
-    custom_path_edit.setPlaceholderText("Optional — path to your .ppn file")
-    browse_btn = _QPushButton("Browse...")
+    custom_path_edit.setPlaceholderText("Valinnainen — polku .ppn-tiedostoon")
+    browse_btn = _QPushButton("Selaa…")
+    browse_btn.setFixedWidth(80)
     def _browse():
-        path, _ = QFileDialog.getOpenFileName(dlg, "Select .ppn wake-word file", "", "Porcupine PPN (*.ppn)")
+        path, _ = QFileDialog.getOpenFileName(dlg, "Valitse .ppn-tiedosto", "", "Porcupine PPN (*.ppn)")
         if path:
             custom_path_edit.setText(path)
     browse_btn.clicked.connect(_browse)
-    custom_row.addWidget(custom_path_edit, 1)
-    custom_row.addWidget(browse_btn)
+    ppn_row.addWidget(custom_path_edit, 1)
+    ppn_row.addWidget(browse_btn)
     custom_widget = QWidget()
-    custom_widget.setLayout(custom_row)
-    form.addRow("Custom wake .ppn:", custom_widget)
-    form.addRow("", _desc(
-        "HOW TO MAKE YOUR OWN WAKE WORD (.ppn):\n"
-        "1. Go to console.picovoice.ai and create a free account\n"
-        "2. Click 'Porcupine' → 'Train a custom model'\n"
-        "3. Type your wake phrase (e.g. 'hey router', 'käynnistä', anything you like)\n"
-        "4. Select platform: Windows\n"
-        "5. Click Train — download the .ppn file when ready\n"
-        "6. Come back here: paste your Picovoice AccessKey above, browse to the .ppn file\n"
-        "7. Save Settings and press Start Listening\n"
-        "Requires a Picovoice AccessKey (free). Without it, the .ppn file is ignored."
+    custom_widget.setLayout(ppn_row)
+    f2.addRow(_lbl("Oma .ppn-tiedosto:"), custom_widget)
+    f2.addRow("", _desc(
+        "OMA AKTIVOINTISANA (.ppn):\n"
+        "1. Luo ilmainen tili: console.picovoice.ai\n"
+        "2. Porcupine → Train a custom model\n"
+        "3. Kirjoita haluamasi aktivointifraasi (esim. 'hey router', 'aloita')\n"
+        "4. Valitse alusta: Windows → Train → lataa .ppn-tiedosto\n"
+        "5. Liitä Picovoice AccessKey yllä, selaa .ppn-tiedosto tähän\n"
+        "6. Tallenna asetukset ja paina Start Listening"
     ))
 
-    # ── Global hotkey ─────────────────────────────────────────────────
-    hotkey_edit = QLineEdit(settings.get("hotkey", "ctrl+alt+space"))
-    hotkey_edit.setPlaceholderText("e.g. ctrl+alt+space")
-    form.addRow("Global hotkey:", hotkey_edit)
-    form.addRow("", _desc(
-        "Keyboard shortcut to speak the text currently in the text box — works even when the app is in the background. "
-        "Use key names like ctrl, alt, shift, space, f1–f12. Combine with + (e.g. ctrl+alt+space). "
-        "Avoid shortcuts already used by your OS or game."
+    # ══════════════════════════════════════════════════════════════════
+    # TAB 3 — Kielet
+    # ══════════════════════════════════════════════════════════════════
+    f3 = _make_form()
+    f3.addRow(_header("Mukautetut kielet"))
+    f3.addRow("", _desc(
+        "Lisää kieliä, jotka eivät ole vakiolistassa. Nimi näkyy Kohde-valikossa. "
+        "Koodi = 2-kirjaiminen maakoodi lipulle (esim. pt, br, ar). "
+        "Edge TTS -ääni: tarkka ääni-ID osoitteesta learn.microsoft.com  "
+        "(esim. pt-PT-RaquelNeural). Jätä tyhjäksi → käytetään englannin ääntä."
     ))
 
-    # ── Default target language ───────────────────────────────────────
-    lang_combo = _QComboBox()
-    for lang in LANGS.keys():
-        lang_combo.addItem(lang)
-    lang_combo.setCurrentText(settings.get("default_target_lang", "Auto"))
-    form.addRow("Default target language:", lang_combo)
-    form.addRow("", _desc(
-        "The language your text or speech is translated into when you press Speak or record. "
-        "'Auto' detects the spoken language and translates to English. "
-        "You can override this per-session from the main window's Target dropdown."
-    ))
-
-    # ── Default TTS backend ───────────────────────────────────────────
-    backend_combo = _QComboBox()
-    for b in ("ElevenLabs", "Edge TTS (free)"):
-        backend_combo.addItem(b)
-    backend_combo.setCurrentText(settings.get("default_tts_backend", DEFAULT_TTS_BACKEND))
-    form.addRow("Default TTS backend:", backend_combo)
-    form.addRow("", _desc(
-        "Edge TTS (free): Microsoft neural voices, no account needed, good quality. "
-        "ElevenLabs: very realistic AI voices, requires a paid account and API key in credentials.env. "
-        "You can switch between them per-session in the main window."
-    ))
-
-    # ── Wake command capture seconds ──────────────────────────────────
-    seconds_edit = QLineEdit(str(settings.get("wake_command_seconds", 6.0)))
-    seconds_edit.setPlaceholderText("e.g. 6.0")
-    form.addRow("Command capture (s):", seconds_edit)
-    form.addRow("", _desc(
-        "How many seconds the app records after it hears the wake word. "
-        "Increase (e.g. 10) if your sentences are long or you speak slowly. "
-        "Decrease (e.g. 3) for faster single-word commands. Default: 6 seconds."
-    ))
-
-    # ── Custom languages ──────────────────────────────────────────────
     custom_langs = [dict(e) for e in settings.get("custom_languages", [])]
     custom_list = _QListWidget()
-    custom_list.setMaximumHeight(100)
+    custom_list.setMinimumHeight(140)
     for entry in custom_langs:
         n, c, v = entry.get("name", ""), entry.get("country_code", ""), entry.get("edge_voice", "")
         custom_list.addItem(f"{n}  |  {c}  |  {v}" if v else f"{n}  |  {c}")
-    form.addRow("Custom languages:", custom_list)
-    form.addRow("", _desc(
-        "Add languages not in the built-in list. Select an entry and click Remove to delete it. "
-        "Name: display name shown in the Target dropdown (e.g. Portuguese). "
-        "Code: 2-letter country code for the flag (e.g. pt, br, ar). "
-        "Edge TTS voice: exact voice ID from learn.microsoft.com/azure/ai-services/speech-service/language-support "
-        "(e.g. pt-PT-RaquelNeural). Leave voice empty to fall back to English voice."
-    ))
+    f3.addRow("", custom_list)
 
     add_row = _QHBoxLayout()
+    add_row.setSpacing(6)
     new_name_edit = QLineEdit()
-    new_name_edit.setPlaceholderText("Name (e.g. Portuguese)")
+    new_name_edit.setPlaceholderText("Nimi (esim. Portuguese)")
     new_code_edit = QLineEdit()
-    new_code_edit.setPlaceholderText("Code (pt)")
-    new_code_edit.setMaximumWidth(60)
+    new_code_edit.setPlaceholderText("Koodi (pt)")
+    new_code_edit.setMaximumWidth(70)
     new_voice_edit = QLineEdit()
-    new_voice_edit.setPlaceholderText("Edge TTS voice (e.g. pt-PT-RaquelNeural)")
-    add_btn = _QPushButton("Add")
-    remove_btn = _QPushButton("Remove")
+    new_voice_edit.setPlaceholderText("Edge TTS ääni (esim. pt-PT-RaquelNeural)")
+    add_btn = _QPushButton("Lisää")
+    remove_btn = _QPushButton("Poista")
+    add_btn.setFixedWidth(70)
+    remove_btn.setFixedWidth(70)
 
     def _add_custom_lang():
         name = new_name_edit.text().strip()
@@ -3866,45 +4230,65 @@ def open_settings_dialog(parent_app: "App") -> None:
     add_row.addWidget(remove_btn)
     add_widget = QWidget()
     add_widget.setLayout(add_row)
-    form.addRow("", add_widget)
+    f3.addRow("", add_widget)
 
-    # ── VB-Cable virtual audio device ─────────────────────────────────
-    _vbc_installed = _is_vbcable_installed()
-    vbc_status_lbl = QLabel("VB-Cable: ✅ Installed" if _vbc_installed else "VB-Cable: ❌ Not installed")
-    vbc_status_lbl.setStyleSheet("color: #7fc97f;" if _vbc_installed else "color: #ff8888;")
-    form.addRow("Virtual mic:", vbc_status_lbl)
-    form.addRow("", _desc(
-        "Installs VB-Audio Virtual Cable — a free virtual audio device that lets this app's translated speech "
-        "appear as a microphone in games and voice chat (Discord, TeamSpeak, in-game VOIP). "
-        "After install: set output device to 'CABLE Input' in this app, "
-        "and set microphone to 'CABLE Output' in your game or Discord."
+    # ══════════════════════════════════════════════════════════════════
+    # TAB 4 — Pikavalinnat & Data
+    # ══════════════════════════════════════════════════════════════════
+    f4 = _make_form()
+    f4.addRow(_header("Pikanäppäin"))
+
+    hotkey_edit = QLineEdit(settings.get("hotkey", "ctrl+alt+space"))
+    hotkey_edit.setPlaceholderText("esim. ctrl+alt+space")
+    hotkey_edit.setMaximumWidth(220)
+    f4.addRow(_lbl("Global hotkey:"), hotkey_edit)
+    f4.addRow("", _desc(
+        "Pikanäppäin, joka toistaa tekstiruudun sisällön vaikka ikkuna on taustalla. "
+        "Käytä nimiä: ctrl, alt, shift, space, f1–f12. Yhdistä +-merkillä (esim. ctrl+alt+space). "
+        "Vältä OS:n tai pelin omia pikanäppäimiä."
     ))
 
-    vbc_install_btn = _QPushButton("Install VB-Cable (Virtual Mic)" if not _vbc_installed else "VB-Cable already installed")
+    f4.addRow(_header("Virtuaalimikrofoni"))
+
+    _vbc_installed = _is_vbcable_installed()
+    vbc_status_lbl = QLabel("VB-Cable: ✅ Asennettu" if _vbc_installed else "VB-Cable: ❌ Ei asennettu")
+    vbc_status_lbl.setStyleSheet("color: #7fc97f; font-size: 13px;" if _vbc_installed else "color: #ff8888; font-size: 13px;")
+    f4.addRow(_lbl("Tila:"), vbc_status_lbl)
+    f4.addRow("", _desc(
+        "VB-Audio Virtual Cable — ilmainen virtuaaliäänilaite, jolla tämän sovelluksen "
+        "käännetty puhe näkyy mikrofonina peleissä ja Discord/TeamSpeak-sovelluksissa.\n"
+        "Asennuksen jälkeen: aseta lähtölaite → 'CABLE Input' tässä appissa, "
+        "ja mikrofoni → 'CABLE Output' pelissä tai Discordissa."
+    ))
+
+    vbc_install_btn = _QPushButton(
+        "VB-Cable on jo asennettu" if _vbc_installed else "Asenna VB-Cable (Virtuaalimikrofoni)"
+    )
     vbc_install_btn.setEnabled(not _vbc_installed)
 
     def _do_vbc_install():
         vbc_install_btn.setEnabled(False)
-        vbc_install_btn.setText("Working...")
+        vbc_install_btn.setText("Asennetaan...")
 
         def _status(msg):
             def _apply():
                 vbc_status_lbl.setText(msg)
-                vbc_status_lbl.setStyleSheet("color: #7fc97f;" if "✅" in msg else "color: #ff8888;")
+                vbc_status_lbl.setStyleSheet("color: #7fc97f; font-size: 13px;" if "✅" in msg else "color: #ff8888; font-size: 13px;")
                 if "✅" in msg:
-                    vbc_install_btn.setText("VB-Cable already installed")
+                    vbc_install_btn.setText("VB-Cable on jo asennettu")
                     QTimer.singleShot(800, parent_app.populate_output_devices)
                 else:
                     vbc_install_btn.setEnabled(True)
-                    vbc_install_btn.setText("Retry Install")
+                    vbc_install_btn.setText("Yritä uudelleen")
             QTimer.singleShot(0, _apply)
 
         threading.Thread(target=_install_vbcable, args=(_status,), daemon=True).start()
 
     vbc_install_btn.clicked.connect(_do_vbc_install)
-    form.addRow("", vbc_install_btn)
+    f4.addRow("", vbc_install_btn)
 
-    # ── Data Import / Export ──────────────────────────────────────────
+    f4.addRow(_header("Varmuuskopio"))
+
     _DATA_FILES = ["app_settings.json", "speech_history.json", "credentials.env"]
     _DATA_DIRS  = ["soundboard", "favorites_audio"]
 
@@ -3963,8 +4347,9 @@ def open_settings_dialog(parent_app: "App") -> None:
             QMessageBox.critical(dlg, "Virhe", str(e))
 
     _io_row = _QHBoxLayout()
+    _io_row.setSpacing(10)
     export_btn = _QPushButton("Vie data…")
-    export_btn.setToolTip("Tallentaa kaikki asetukset, historian ja soundboard-tiedostot ZIP-arkistoon")
+    export_btn.setToolTip("Pakkaa kaikki asetukset, historia ja soundboard-tiedostot ZIP-arkistoon")
     export_btn.clicked.connect(_export_data)
     import_btn = _QPushButton("Tuo data…")
     import_btn.setToolTip("Palauttaa aiemmin viedyn ZIP-varmuuskopion")
@@ -3974,28 +4359,30 @@ def open_settings_dialog(parent_app: "App") -> None:
     _io_row.addStretch()
     _io_widget = QWidget()
     _io_widget.setLayout(_io_row)
-    form.addRow("Data backup:", _io_widget)
-    form.addRow("", _desc(
-        "Vie data — pakkaa kaikki omat tiedot (asetukset, historia, soundboard-äänet ja -kuvat, "
-        "suosikit, API-avaimet) yhteen ZIP-tiedostoon. "
+    f4.addRow("", _io_widget)
+    f4.addRow("", _desc(
+        "Vie data — pakkaa asetukset, historia, soundboard-äänet/-kuvat ja API-avaimet ZIP-tiedostoon.\n"
         "Tuo data — palauttaa ZIP-varmuuskopiosta. Vaatii sovelluksen uudelleenkäynnistyksen."
     ))
 
+    # ── Tabs ──────────────────────────────────────────────────────────
+    tabs = QTabWidget()
+    tabs.addTab(_scroll_tab(f1), "  Käännös & Ääni  ")
+    tabs.addTab(_scroll_tab(f2), "  Wake Word  ")
+    tabs.addTab(_scroll_tab(f3), "  Kielet  ")
+    tabs.addTab(_scroll_tab(f4), "  Pikavalinnat & Data  ")
+
     # ── Buttons ───────────────────────────────────────────────────────
     btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+    btns.button(QDialogButtonBox.StandardButton.Save).setText("Tallenna")
+    btns.button(QDialogButtonBox.StandardButton.Cancel).setText("Peruuta")
     btns.accepted.connect(dlg.accept)
     btns.rejected.connect(dlg.reject)
 
-    # Wrap form in a scroll area so the dialog stays manageable
-    scroll_content = QWidget()
-    scroll_content.setLayout(form)
-    scroll = QScrollArea()
-    scroll.setWidget(scroll_content)
-    scroll.setWidgetResizable(True)
-    scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-
     root = QVBoxLayout()
-    root.addWidget(scroll, 1)
+    root.setContentsMargins(10, 10, 10, 10)
+    root.setSpacing(8)
+    root.addWidget(tabs, 1)
     root.addWidget(btns)
     dlg.setLayout(root)
 
@@ -4007,6 +4394,8 @@ def open_settings_dialog(parent_app: "App") -> None:
             "hotkey": hotkey_edit.text().strip() or "ctrl+alt+space",
             "default_target_lang": lang_combo.currentText(),
             "default_tts_backend": backend_combo.currentText(),
+            "translation_backend": trans_backend_combo.currentText(),
+            "deepl_api_key": deepl_key_edit.text().strip(),
         }
         try:
             new_settings["wake_command_seconds"] = float(seconds_edit.text())

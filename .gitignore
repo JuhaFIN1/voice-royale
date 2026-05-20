@@ -29,8 +29,8 @@ desktop.ini
 # Claude Code internal files
 .claude/
 
-# GitHub Copilot instructions (internal dev tooling)
-.github/
+# Internal dev tooling — not for distribution
+.github/copilot-instructions.md
 copilot-instructions.md
 
 # Runtime data (user-specific)
@@ -40,3 +40,8 @@ ruvector.db
 soundboard/
 installer_output/
 *.swarm/
+
+# Oma certi jolla ohjelma allekirjoitettu
+certs/
+*.pfx
+.env

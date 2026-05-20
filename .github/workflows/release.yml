@@ -1,0 +1,152 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Extract version
+        id: ver
+        run: |
+          $v = "${{ github.ref_name }}" -replace '^v', ''
+          echo "VERSION=$v" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install PyQt6 requests python-dotenv sounddevice numpy keyboard openai pyttsx3 edge-tts scipy deep-translator
+          pip install pvporcupine || true
+        shell: pwsh
+
+      - name: Build with PyInstaller
+        run: |
+          python -m PyInstaller `
+            --noconsole `
+            --onedir `
+            --name "Voice Royale" `
+            --icon "iconimage.ico" `
+            --add-data "juhalempiainensoftware.png;." `
+            --add-data "iconimage.ico;." `
+            --hidden-import scipy.signal `
+            --hidden-import pyttsx3.drivers `
+            --hidden-import pyttsx3.drivers.sapi5 `
+            --hidden-import comtypes.stream `
+            --collect-all edge_tts `
+            --collect-all sounddevice `
+            --collect-all certifi `
+            --noconfirm `
+            ai_voice_app.py
+        shell: pwsh
+
+      - name: Install Inno Setup
+        run: |
+          $url = "https://files.jrsoftware.org/is/6/innosetup-6.3.3.exe"
+          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\innosetup.exe"
+          Start-Process -FilePath "$env:TEMP\innosetup.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+        shell: pwsh
+
+      - name: Patch installer version
+        run: |
+          $v = "${{ steps.ver.outputs.VERSION }}"
+          (Get-Content installer.iss) `
+            -replace 'AppVersion=.*', "AppVersion=$v" `
+            -replace 'OutputBaseFilename=.*', "OutputBaseFilename=Voice_Royale_Setup_$v" |
+            Set-Content installer.iss
+        shell: pwsh
+
+      - name: Build installer
+        run: |
+          New-Item -ItemType Directory -Force installer_output | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+        shell: pwsh
+
+      - name: Sign installer
+        continue-on-error: true
+        env:
+          SIGN_CERT_BASE64: ${{ secrets.SIGN_CERT_BASE64 }}
+          SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
+        run: |
+          if (-not $env:SIGN_CERT_BASE64) { Write-Host "No signing cert secret — skipping"; exit 0 }
+          $bytes = [Convert]::FromBase64String($env:SIGN_CERT_BASE64)
+          [IO.File]::WriteAllBytes("signing.pfx", $bytes)
+          signtool sign /f signing.pfx /p $env:SIGN_CERT_PASSWORD /td sha256 /fd sha256 "installer_output\Voice_Royale_Setup_${{ steps.ver.outputs.VERSION }}.exe"
+          Remove-Item signing.pfx
+        shell: pwsh
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer_output/Voice_Royale_Setup_${{ steps.ver.outputs.VERSION }}.exe
+          generate_release_notes: true
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Extract version
+        id: ver
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Install system dependencies
+        run: brew install portaudio
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip pillow
+          pip install pyinstaller
+          pip install PyQt6 requests python-dotenv sounddevice numpy keyboard openai pyttsx3 edge-tts scipy deep-translator
+          pip install pvporcupine || true
+
+      - name: Build with PyInstaller
+        run: |
+          python -m PyInstaller \
+            --windowed \
+            --onedir \
+            --name "Voice Royale" \
+            --add-data "juhalempiainensoftware.png:." \
+            --add-data "iconimage.ico:." \
+            --hidden-import scipy.signal \
+            --hidden-import pyttsx3.drivers \
+            --collect-all edge_tts \
+            --collect-all sounddevice \
+            --collect-all certifi \
+            --noconfirm \
+            ai_voice_app.py
+
+      - name: Ad-hoc sign app bundle
+        run: codesign --deep -s - "dist/Voice Royale.app" || true
+
+      - name: Create DMG
+        run: |
+          hdiutil create \
+            -volname "Voice Royale" \
+            -srcfolder "dist/Voice Royale.app" \
+            -ov -format UDZO \
+            "Voice_Royale_${{ steps.ver.outputs.VERSION }}.dmg"
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Voice_Royale_${{ steps.ver.outputs.VERSION }}.dmg

@@ -8,7 +8,7 @@ REM ============================================================
 set NAME=Voice Royale
 set SCRIPT=ai_voice_app.py
 set VENV_PYTHON=.venv\Scripts\python.exe
-set VERSION=1.1.0
+set VERSION=1.2.0
 set ISCC="C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 set INNO_INSTALLER_URL=https://files.jrsoftware.org/is/6/innosetup-6.3.3.exe
 set INNO_TEMP=%TEMP%\innosetup_installer.exe
@@ -96,9 +96,46 @@ if errorlevel 1 (
 REM ============================================================
 echo.
 echo ============================================================
-echo  Step 3/3 — Done!
+echo  Step 3/4 — Code Signing
+echo ============================================================
+
+set SIGNTOOL="C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
+set INSTALLER=installer_output\Voice_Royale_Setup_%VERSION%.exe
+
+REM Load signing variables from .env if present
+if exist .env (
+    for /f "usebackq tokens=1,2 delims==" %%A in (".env") do (
+        if "%%A"=="SIGN_CERT_PATH"     set SIGN_CERT_PATH=%%B
+        if "%%A"=="SIGN_CERT_PASSWORD" set SIGN_CERT_PASSWORD=%%B
+    )
+)
+
+if not defined SIGN_CERT_PATH (
+    echo Skipping signing — SIGN_CERT_PATH not set in .env
+    goto done
+)
+if not exist "%SIGN_CERT_PATH%" (
+    echo Skipping signing — cert not found: %SIGN_CERT_PATH%
+    goto done
+)
+
+echo Signing: %INSTALLER%
+%SIGNTOOL% sign /f "%SIGN_CERT_PATH%" /p "%SIGN_CERT_PASSWORD%" /td sha256 /fd sha256 "%INSTALLER%"
+
+if errorlevel 1 (
+    echo *** Signing FAILED — check cert path and password in .env ***
+    pause
+    exit /b 1
+)
+echo Signing complete.
+
+REM ============================================================
+:done
 echo.
-echo  Installer: installer_output\Voice_Royale_Setup_%VERSION%.exe
+echo ============================================================
+echo  Step 4/4 — Done!
+echo.
+echo  Installer: %INSTALLER%
 echo.
 echo  Distribute that single file.
 echo  Users run it and follow the wizard.
