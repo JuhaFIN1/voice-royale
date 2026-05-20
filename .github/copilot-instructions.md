@@ -3,11 +3,11 @@
 ## Project overview
 
 Windows + macOS desktop app (PyQt6): microphone → Whisper transcription → translation (Google/DeepL/OpenAI) → TTS playback.
-All logic in one file: `ai_voice_app.py` (~6000 lines).
+All logic in one file: `ai_voice_app.py` (~6300 lines).
 
 Working directory: `E:\CLOUDS\AI-SYSTEMS\ai-voice-router\`
 GitHub: https://github.com/JuhaFIN1/voice-royale
-Current version: `APP_VERSION = "1.3.2"` (constant near top of file; CI auto-patches from git tag)
+Current version: `APP_VERSION = "1.3.5"` (constant near top of file; CI auto-patches from git tag)
 
 ---
 
@@ -24,7 +24,7 @@ Current version: `APP_VERSION = "1.3.2"` (constant near top of file; CI auto-pat
 | `translate_text(text, lang, backend, deepl_key)` | Translation — Google/DeepL/OpenAI |
 | `parse_voice_command(transcript, default_lang)` | GPT-4.1-mini: extract lang + translate wake command |
 | `WakeListener` | Wake-word detector (Porcupine or Whisper VAD fallback) |
-| `SoundboardButton` | Soundboard slot with drag-to-swap, page-link, edit mode |
+| `SoundboardButton` | Soundboard slot — see Soundboard section |
 | `VoiceEffectProcessor` | Real-time DSP: pitch/robot + VB-Cable output. `set_monitor(device, enabled)` = Hear Myself |
 | `class App(QWidget)` | Entire UI and logic |
 | `SetupWizard` | First-run dialog (4 steps: API key → VB-Cable → Devices with recording test) |
@@ -41,7 +41,7 @@ Tab font: 10px, padding: 5px 9px — all 7 tabs visible without scrolling at 900
 | 1 | Käännös & TTS | Translation backend, API keys, TTS backend |
 | 2 | Wake Word | Keyword, Porcupine key, wake command duration |
 | 3 | Kielet | Custom languages |
-| 4 | Pika & Data | Hotkey, history, data files |
+| 4 | Pika & Data | Hotkey, history, data export/import ZIP |
 | 5 | Stream Deck | HTTP API settings (port 17842) |
 | 6 | Asennus | Run Setup Wizard again, Windows autostart, Python packages, VB-Cable |
 | 7 | Päivitys | Version check via GitHub releases API, download & open installer |
@@ -60,47 +60,55 @@ Update all **five** places: `LANGS`, `LANG_FLAG_CODES`, `EDGE_VOICES`, `_GOOGLE_
 - Hindi / Hebrew / Croatian = `None` in `_DEEPL_LANG_MAP` (not supported by DeepL)
 
 ### Thread-safe UI
-Always use Qt signals from background threads — never call widget methods directly.
-Stream Deck actions: use `_sd_action_queue` (Queue) + `_sd_action_timer` (50ms QTimer drains queue on main thread). `QTimer.singleShot(0, cb)` from bg thread is NOT reliable in PyQt6.
+**`QTimer.singleShot(0, cb)` from a background thread does NOT work in PyQt6.**
+Always use `queue.Queue` + a `QTimer` polling on the main thread (200ms interval).
+Stream Deck actions: `_sd_action_queue` (Queue) + `_sd_action_timer` (50ms QTimer drains on main thread).
+
+### Frozen exe / pkg_status
+`_pkg_status()` in frozen exe: use `importlib.import_module()` for all packages **except** `pvporcupine` and `pyrubberband`. Those two native optional libs can crash with non-ImportError exceptions — use `sys.modules` check only for them.
 
 ### Soundboard
+- **55 slots per page** (not 56) + fixed red **■ STOP** button at grid position (row 3, col 13)
+- `_sb_stop_playback()`: increments `_sb_play_id`, calls `sd.stop()`, `update_output_level(0.0)`, resets playing btn
+- Sound meter: `_level_cb` wrapper in `_play_soundboard_slot` checks `_sb_play_id` — emits 0.0 if superseded
 - `SoundboardButton._edit_mode` — class-level flag, `set_edit_mode(bool)` classmethod
-- `swap_requested = pyqtSignal(int, int, int, int)` — drag-to-swap between slots
-- Edit mode: left-click drag over another button swaps their data (within or across pages)
-- Right-click in edit mode → "Link to Page…" — button navigates to another page when pressed
-- Link buttons use `_STYLE_LINK` (blue), store `link_page_name` in data dict
+- Signals: `swap_requested(src_page, src_slot, dst_page, dst_slot)`, `bulk_import_requested(start_slot, [paths])`
+- **Cross-page drag**: App.eventFilter intercepts DragMove on tab bar → 700ms timer switches tab
+  - `_sb_hover_tab`, `_sb_tab_hover_timer` (singleShot QTimer) state on App
+- **Tab reorder**: `setMovable(True)` in edit mode; `tabMoved` → `_sb_tab_moved(from, to)` reorders `_soundboard_buttons`
+- **Bulk import**: drop folder/multi-files on button or right-click → "Bulk Import — tiedostot/kansio…"
+- **Image search**: right-click → "Etsi kuva netistä…" — DuckDuckGo Images via `requests.Session()` (carries cookies), vqd token from HTML, `/i.js` JSON; thumbnail grid; queue+QTimer for all network ops
 - `_sb_swap_handler(src_page, src_slot, dst_page, dst_slot)` on App does the swap + save
-- `_play_soundboard_slot` checks `link_page_name` first — if set and not in edit mode, switches tab
 - Edit mode OFF automatically calls `_save_soundboard()`
 - `_sb_play_id` (int) counter prevents concurrent-play crashes
-- `_soundboard_buttons` is `list[list[SoundboardButton]]` (pages × slots)
+- `_soundboard_buttons` is `list[list[SoundboardButton]]` (pages × slots, 55 per page)
 
 ### Wake listener
 Two modes selected automatically:
 - **Porcupine** — if `pvporcupine` installed AND Picovoice key set
 - **Whisper VAD fallback** — records 2.5s chunks, transcribes, checks for keyword
 
-Both `_run_porcupine` and `_run_whisper` use a local `device` variable (initialized from `self._device_index`).
 On PortAudio "out of range" error (MME -9999): automatically retries with `device=None` (default device).
 
 ### Windows autostart
 - `_apply_autostart(enabled, minimized)` writes/removes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` key
 - Only works in frozen exe (`getattr(sys, "frozen", False)`)
 - `--minimized` in `sys.argv` → `window.showMinimized()` instead of `window.show()`
-- Changes take effect immediately (no Save needed)
 
 ### Auto-update (Päivitys tab)
-- Calls `https://api.github.com/repos/GITHUB_REPO/releases/latest` via `requests`
-- Compares `APP_VERSION` (semver) with latest tag
+- Calls GitHub releases API via `requests` in a daemon thread; result via `queue.Queue` + 200ms QTimer poll
 - Downloads `.exe` (Windows) or `.dmg` (macOS) to `tempfile.mkstemp()`, then opens it
 - CI patches `APP_VERSION` in `ai_voice_app.py` from the git tag at build time
 
-### Frozen exe / Settings
-In frozen exe, `_pkg_status()` uses `sys.modules` check — NEVER call `importlib.import_module` for optional native libs (pyrubberband, pvporcupine) in frozen mode → crash with non-ImportError exception.
+### Export / Import data
+```python
+_DATA_FILES = ["app_settings.json", "speech_history.json", "credentials.env"]
+_DATA_DIRS  = ["soundboard", "favorites_audio"]
+```
+`soundboard/` includes `audio/` and `images/` subfolders — all audio and image files are included via `os.walk`.
 
 ### Voice FX — Hear Myself
 `VoiceEffectProcessor.set_monitor(device, enabled)` starts/stops `_monitor_stream` (second OutputStream to headphones).
-`_is_vbcable_installed()` checks both "cable" and "voicemod" in device names.
 
 ### Code signing
 - Local: `build_app.bat` reads `SIGN_CERT_PATH` + `SIGN_CERT_PASSWORD` from `.env`
@@ -118,7 +126,7 @@ DMG layout: `Voice Royale.app` + `/Applications` symlink (Finder shows arrow) + 
 
 | File | Purpose |
 |---|---|
-| `ai_voice_app.py` | Entire app (~6000 lines) |
+| `ai_voice_app.py` | Entire app (~6300 lines) |
 | `credentials.env` | `OPENAI_API_KEY`, `ELEVEN_API_KEY`, `VOICE_ID` — never commit |
 | `.env` | `SIGN_CERT_PATH`, `SIGN_CERT_PASSWORD` — never commit |
 | `app_settings.json` | User settings |
