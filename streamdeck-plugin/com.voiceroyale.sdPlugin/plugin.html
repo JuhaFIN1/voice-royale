@@ -106,9 +106,10 @@ async function onKeyDown(action, context, payload) {
     }
 
     try {
-        // GET → guaranteed simple CORS request, no preflight, same as state polling
-        const resp = await fetch(`${VR_BASE}/action/${encodeURIComponent(vrAction)}`,
-            { cache: "no-store" });
+        // POST with no body/headers = simple CORS request (no preflight)
+        const resp = await fetch(`${VR_BASE}/action/${encodeURIComponent(vrAction)}`, {
+            method: "POST",
+        });
         if (!resp.ok) showAlert(context);
     } catch {
         showAlert(context);
