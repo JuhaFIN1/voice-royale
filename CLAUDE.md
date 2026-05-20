@@ -33,6 +33,51 @@ build_app.bat                   # PyInstaller + Inno Setup + signing → install
 - `translate_text(text, lang, backend, deepl_key)` — käännös, backend default "Google (free)"
 - `open_settings_dialog()` — 4-välilehtinen asetusikkuna
 
+## Stream Deck HTTP API (ai_voice_app.py — sessio 8)
+
+`StreamDeckHttpServer` käynnistyy aina appin mukana, **port 17842**.
+
+| Endpoint | Kuvaus |
+|---|---|
+| `GET /health` | `{"ok": true}` |
+| `GET /state` | JSON: recording, listening, language, fx_preset, tts_backend, soundboard_page, soundboard_pages[].slots[].{name,has_file,has_image,image_path} |
+| `GET /actions` | Lista kaikista toiminnoista |
+| `POST /action/{name}` | Suorita toiminto (no body, no Content-Type) |
+| `GET /soundboard/image/{page}/{slot}` | `{"image": "data:image/png;base64,..."}` tai `{"image": null}` |
+
+**Thread-safety — kriittinen:** `QTimer.singleShot(0, cb)` bg-threadista EI toimi PyQt6:ssa. Käytä `queue.Queue`:
+
+```python
+self._sd_action_queue = queue.Queue()
+self._sd_action_timer = QTimer(self)           # 50ms — nopea nappivaste
+self._sd_action_timer.timeout.connect(self._drain_sd_action_queue)
+self._sd_action_timer.start(50)
+self._sd_state_timer = QTimer(self)            # 1500ms — tila-pollaus
+self._sd_state_timer.timeout.connect(self._refresh_sd_state)
+self._sd_state_timer.start(1500)
+```
+
+`do_POST` laittaa action-nimen jonoon; `_drain_sd_action_queue()` kutsuu `_handle_sd_action_impl()` pääthreadissa.
+
+**CORS:** POST ilman bodya/Content-Typea = simple request, ei OPTIONS-preflight. Älä lisää headereita fetchiin.
+
+## Stream Deck Plugin (streamdeck-plugin/)
+
+`streamdeck-plugin/com.voiceroyale.sdPlugin/` — virallinen Elgato-plugin.
+
+- `manifest.json` — v1.2.6, **`CategoryIcon` vaaditaan SD 7.x:ssä** (puuttuva → "unable to install")
+- `plugin.html` — HTML-pohjainen plugin (native WebSocket + fetch, ei Node.js); `CodePath: "plugin.html"`
+- `propertyinspector/soundboard.html` — SD WebSocket API: `getSettings`/`setSettings`/`didReceiveSettings`, lataa nimimuuttujat `/state`-endpointista
+- `propertyinspector/lang.html`, `propertyinspector/fx.html` — vastaavat
+- `icons/plugin.png` (72×72), `icons/plugin@2x.png` (144×144)
+- `build-plugin.bat` — pakkaa `.streamDeckPlugin`-tiedostoksi
+
+**Asennus (manuaalinen):** pura zip → `%APPDATA%\Elgato\StreamDeck\Plugins\com.voiceroyale.sdPlugin\`
+
+**Action-nimet** (POST /action/{name}):
+`record_toggle`, `wake_listen_toggle`, `speak`, `stop_recording`, `settings`, `tts_toggle`,
+`sb_page_next`, `sb_page_prev`, `lang_{language}`, `fx_{preset}`, `soundboard_{page}_{slot}`
+
 ## Kriittiset säännöt
 
 **Lippuikonit:** `create_flag_icon()` käyttää VAIN `fillRect` — ei `setBrush/drawEllipse`. PyQt6 strict-mode kaatuu muuten.
