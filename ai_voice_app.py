@@ -280,6 +280,7 @@ DEFAULT_SETTINGS = {
         {"name": "Peli aloitus", "slots": [{"name": f"Slot {i+1}", "file": "", "image": ""} for i in range(56)]}
     ],
     "stream_deck_enabled": True,
+    "stream_deck_mapping": {},   # tyhjä = käytä DEFAULT_MAPPING
     "voice_fx_output_device": None,
 }
 
@@ -625,6 +626,12 @@ class StreamDeckController:
         self._app = None
         self._mapping = dict(self.DEFAULT_MAPPING)
 
+    def set_mapping(self, mapping: dict):
+        """Apply a custom key->action mapping. Empty dict resets to defaults."""
+        self._mapping = dict(mapping) if mapping else dict(self.DEFAULT_MAPPING)
+        if self._deck:
+            self.refresh_all()
+
     def connect(self, app_ref):
         self._app = app_ref
         threading.Thread(target=self._try_connect, daemon=True).start()
@@ -690,10 +697,18 @@ class StreamDeckController:
             from StreamDeck.ImageHelpers import PILHelper  # type: ignore
             img = PILHelper.create_key_image(self._deck, background=(50, 80, 50) if active else (30, 40, 70))
             draw = ImageDraw.Draw(img)
-            try:
-                font = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 13)
-            except Exception:
-                font = ImageFont.load_default()
+            font_paths = [
+                "C:/Windows/Fonts/arialbd.ttf",
+                "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+                "/System/Library/Fonts/Helvetica.ttc",
+            ]
+            font = ImageFont.load_default()
+            for fp in font_paths:
+                try:
+                    font = ImageFont.truetype(fp, 13)
+                    break
+                except Exception:
+                    pass
             kw, kh = img.size
             # Word-wrap
             words = label.split()
@@ -2143,6 +2158,9 @@ class App(QWidget):
 
         # Connect Stream Deck after UI is ready
         if self.settings.get("stream_deck_enabled", True):
+            sd_mapping = self.settings.get("stream_deck_mapping", {})
+            if sd_mapping:
+                self._stream_deck.set_mapping({int(k): v for k, v in sd_mapping.items()})
             self._stream_deck.connect(self)
 
     # ============ Card builders ============
@@ -3207,6 +3225,10 @@ class App(QWidget):
         self.hotkey_label.setText(f"Global hotkey: {self.settings.get('hotkey', 'ctrl+alt+space')}")
         self.register_hotkey()
 
+        # Update Stream Deck mapping if changed
+        new_sd_mapping = self.settings.get("stream_deck_mapping", {})
+        self._stream_deck.set_mapping({int(k): v for k, v in new_sd_mapping.items()} if new_sd_mapping else {})
+
         # If wake listener is running, restart it with new keyword/key
         if self.wake_listener.is_running():
             self.append_status("Restarting wake-word listener with new settings...")
@@ -3719,8 +3741,20 @@ class App(QWidget):
             idx = self.langbox.findText(lang)
             if idx >= 0:
                 self.langbox.setCurrentIndex(idx)
+        elif action == "sb_page_next":
+            n = self._sb_tabs.count()
+            self._sb_tabs.setCurrentIndex((self._sb_tabs.currentIndex() + 1) % n)
+        elif action == "sb_page_prev":
+            n = self._sb_tabs.count()
+            self._sb_tabs.setCurrentIndex((self._sb_tabs.currentIndex() - 1) % n)
         elif action.startswith("soundboard_"):
-            self._play_soundboard_slot(0, int(action[11:]))
+            parts = action[11:].split("_")
+            if len(parts) == 2:
+                # uusi muoto: soundboard_{page}_{slot}
+                self._play_soundboard_slot(int(parts[0]), int(parts[1]))
+            else:
+                # vanha muoto: soundboard_{slot} -> käyttää nykyistä sivua
+                self._play_soundboard_slot(self._sb_tabs.currentIndex(), int(parts[0]))
         elif action.startswith("fx_"):
             self._select_fx_preset(action[3:])
         self._stream_deck.refresh_all()
@@ -3742,12 +3776,28 @@ class App(QWidget):
         if action.startswith("lang_"):
             lang = action[5:]
             return (lang[:8], self.langbox.currentText() == lang)
+        if action == "sb_page_next":
+            n = self._sb_tabs.count()
+            cur = self._sb_tabs.currentIndex()
+            nxt = (cur + 1) % n
+            name = self._sb_tabs.tabText(nxt).strip()
+            return (f"-> {name[:8]}", False)
+        if action == "sb_page_prev":
+            n = self._sb_tabs.count()
+            cur = self._sb_tabs.currentIndex()
+            prv = (cur - 1) % n
+            name = self._sb_tabs.tabText(prv).strip()
+            return (f"<- {name[:8]}", False)
         if action.startswith("soundboard_"):
-            slot = int(action[11:])
-            if self._soundboard_buttons and slot < len(self._soundboard_buttons[0]):
-                name = self._soundboard_buttons[0][slot].get_data().get("name", f"SB{slot+1}")
+            parts = action[11:].split("_")
+            if len(parts) == 2:
+                pi, si = int(parts[0]), int(parts[1])
+            else:
+                pi, si = self._sb_tabs.currentIndex(), int(parts[0])
+            if pi < len(self._soundboard_buttons) and si < len(self._soundboard_buttons[pi]):
+                name = self._soundboard_buttons[pi][si].get_data().get("name", f"SB{si+1}")
                 return (name[:10], False)
-            return (f"SB{slot+1}", False)
+            return (f"SB{si+1}", False)
         if action.startswith("fx_"):
             preset = action[3:]
             active = self._current_fx_preset == preset and self._voice_fx.is_active
@@ -4391,12 +4441,107 @@ def open_settings_dialog(parent_app: "App") -> None:
         "Tuo data — palauttaa ZIP-varmuuskopiosta. Vaatii sovelluksen uudelleenkäynnistyksen."
     ))
 
+    # ══════════════════════════════════════════════════════════════════
+    # TAB 5 — Stream Deck
+    # ══════════════════════════════════════════════════════════════════
+    _SD_FX_PRESETS = ["Normal", "Pitch +4", "Pitch +8", "Pitch -4", "Pitch -8", "Robot", "Deep", "Helium"]
+
+    def _build_sd_action_options(app):
+        """Build list of (label, action_value) pairs for Stream Deck button comboboxes."""
+        opts = [
+            ("(ei toimintoa)", ""),
+            ("Record (päälle/pois)", "record_toggle"),
+            ("Listen / Wake word", "wake_listen_toggle"),
+            ("Speak", "speak"),
+            ("Stop", "stop_recording"),
+            ("TTS vaihto", "tts_toggle"),
+            ("Asetukset", "settings"),
+            ("Soundboard: -> seuraava sivu", "sb_page_next"),
+            ("Soundboard: <- edellinen sivu", "sb_page_prev"),
+        ]
+        for lang in LANGS.keys():
+            if lang != "Auto":
+                opts.append((f"Kieli: {lang}", f"lang_{lang}"))
+        for preset in _SD_FX_PRESETS:
+            opts.append((f"FX: {preset}", f"fx_{preset}"))
+        # Soundboard pages + slots
+        sb_pages = app.settings.get("soundboard_pages", [])
+        for pi, page in enumerate(sb_pages):
+            page_name = page.get("name", f"Sivu {pi+1}")
+            for si, slot in enumerate(page.get("slots", [])):
+                slot_name = slot.get("name", f"Slot {si+1}")
+                opts.append((f"SB: {page_name} > {si+1} {slot_name}", f"soundboard_{pi}_{si}"))
+        return opts
+
+    sd_action_options = _build_sd_action_options(parent_app)
+
+    sd_enabled_cb = QCheckBox("Stream Deck käytössä")
+    sd_enabled_cb.setChecked(settings.get("stream_deck_enabled", True))
+    sd_enabled_cb.setStyleSheet("color: #C0C0E8; font-size: 13px; font-weight: 600; padding: 6px 0;")
+
+    sd_header_lbl = QLabel("Nappimappaus (32 nappia)")
+    sd_header_lbl.setStyleSheet(
+        "color: #C0C0E8; font-size: 13px; font-weight: 700; letter-spacing: 0.4px;"
+        " padding: 14px 0 6px 0; border-bottom: 1px solid #2A2A42; margin-bottom: 2px;"
+    )
+
+    current_sd_mapping = settings.get("stream_deck_mapping", {})
+    sd_default = StreamDeckController.DEFAULT_MAPPING
+
+    sd_key_combos = {}
+    sd_grid_widget = QWidget()
+    sd_grid_layout = QVBoxLayout(sd_grid_widget)
+    sd_grid_layout.setContentsMargins(0, 0, 0, 0)
+    sd_grid_layout.setSpacing(4)
+
+    for i in range(32):
+        row_w = QWidget()
+        row_lay = QHBoxLayout(row_w)
+        row_lay.setContentsMargins(0, 0, 0, 0)
+        row_lay.setSpacing(8)
+        lbl = QLabel(f"Nappi {i}")
+        lbl.setStyleSheet("color: #9090B8; font-size: 12px; font-weight: 600; min-width: 64px;")
+        lbl.setFixedWidth(64)
+        combo = _QComboBox()
+        for label_text, action_val in sd_action_options:
+            combo.addItem(label_text, action_val)
+        # Determine current value for this key
+        current_val = current_sd_mapping.get(str(i), sd_default.get(i, ""))
+        found_idx = -1
+        for ci in range(combo.count()):
+            if combo.itemData(ci) == current_val:
+                found_idx = ci
+                break
+        if found_idx >= 0:
+            combo.setCurrentIndex(found_idx)
+        else:
+            combo.setCurrentIndex(0)
+        sd_key_combos[i] = combo
+        row_lay.addWidget(lbl)
+        row_lay.addWidget(combo, 1)
+        sd_grid_layout.addWidget(row_w)
+
+    sd_scroll_inner = QWidget()
+    sd_scroll_inner_lay = QVBoxLayout(sd_scroll_inner)
+    sd_scroll_inner_lay.setContentsMargins(20, 12, 20, 20)
+    sd_scroll_inner_lay.setSpacing(8)
+    sd_scroll_inner_lay.addWidget(sd_enabled_cb)
+    sd_scroll_inner_lay.addWidget(sd_header_lbl)
+    sd_scroll_inner_lay.addWidget(sd_grid_widget)
+    sd_scroll_inner_lay.addStretch()
+
+    sd_scroll = QScrollArea()
+    sd_scroll.setWidget(sd_scroll_inner)
+    sd_scroll.setWidgetResizable(True)
+    sd_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+
     # ── Tabs ──────────────────────────────────────────────────────────
     tabs = QTabWidget()
     tabs.addTab(_scroll_tab(f1), "  Käännös & Ääni  ")
     tabs.addTab(_scroll_tab(f2), "  Wake Word  ")
     tabs.addTab(_scroll_tab(f3), "  Kielet  ")
     tabs.addTab(_scroll_tab(f4), "  Pikavalinnat & Data  ")
+    tabs.addTab(sd_scroll, "  Stream Deck  ")
 
     # ── Buttons ───────────────────────────────────────────────────────
     btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
@@ -4446,6 +4591,15 @@ def open_settings_dialog(parent_app: "App") -> None:
                 parent_app.append_status("OpenAI API key updated.")
             except Exception as e:
                 parent_app.append_status(f"Warning: could not save key to file: {e}")
+
+        # Stream Deck mapping
+        sd_mapping = {}
+        for i, combo in sd_key_combos.items():
+            val = combo.currentData()
+            if val:
+                sd_mapping[str(i)] = val
+        new_settings["stream_deck_enabled"] = sd_enabled_cb.isChecked()
+        new_settings["stream_deck_mapping"] = sd_mapping
 
         parent_app.settings.update(new_settings)
         save_settings(parent_app.settings)
