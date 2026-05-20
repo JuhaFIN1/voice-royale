@@ -155,11 +155,9 @@ def get_assets_path():
 
 BASE_PATH = get_base_path()
 ASSETS_PATH = get_assets_path()
-ENV_PATH = os.path.join(BASE_PATH, ".env")
-if not os.path.exists(ENV_PATH):
-    ENV_PATH = os.path.join(BASE_PATH, "credentials.env")
-
-load_dotenv(ENV_PATH)
+# Load API keys first, then .env (signing vars) without overriding
+load_dotenv(os.path.join(BASE_PATH, "credentials.env"))
+load_dotenv(os.path.join(BASE_PATH, ".env"), override=False)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ELEVEN_API_KEY = os.getenv("ELEVEN_API_KEY", "")
@@ -1675,12 +1673,17 @@ class WakeListener:
 
                 try:
                     transcript = transcribe_audio_wav(wav_buf.getvalue())
-                    if transcript and self._keyword in transcript.lower():
-                        self.on_status(f"✨ Wake-word '{self._keyword}' detected!")
-                        self.on_wake()
-                        time.sleep(1.0)
-                except Exception:
-                    pass
+                    if transcript:
+                        self.on_status(f"Wake heard: \"{transcript}\"")
+                        if self._keyword in transcript.lower():
+                            self.on_status(f"✨ Wake-word '{self._keyword}' detected!")
+                            self.on_wake()
+                            time.sleep(1.0)
+                    else:
+                        self.on_status(f"👂 Listening for: '{self._keyword}'")
+                except Exception as e:
+                    self.on_status(f"Wake: transcription error — {e}")
+                    time.sleep(1.0)
 
             except Exception as e:
                 if not self._stop_flag.is_set():
@@ -4520,9 +4523,10 @@ class SetupWizard(QDialog):
             "Tämä sovellus:\n\n"
             "  •  Kuuntelee puhettasi mikrofonista\n"
             "  •  Tunnistaa puheen tekstiksi  (OpenAI Whisper)\n"
-            "  •  Kääntää valitsemallesi kielelle  (GPT-4.1-mini)\n"
+            "  •  Kääntää valitsemallesi kielelle  (Google Translate ilmaiseksi tai GPT-4.1-mini)\n"
             "  •  Toistaa käännöksen ääneen  (Edge TTS — täysin ilmainen)\n\n"
-            "Tarvitset OpenAI API-avaimen. Se on ainoa pakollinen asia."
+            "OpenAI API-avain tarvitaan puheentunnistukseen (Whisper).\n"
+            "Jos haluat vain kirjoittaa tekstiä ja kääntää, voit ohittaa avaimen."
         )
         info.setStyleSheet("color: #c9d1d9; font-size: 13px; background: transparent; line-height: 1.7;")
         info.setWordWrap(True)
@@ -4671,6 +4675,15 @@ class SetupWizard(QDialog):
 
         row = QHBoxLayout()
         row.addWidget(self._back_btn(1))
+        skip_btn = QPushButton("Ohita (ei puheentunnistusta)")
+        skip_btn.setFixedHeight(42)
+        skip_btn.setStyleSheet(
+            "QPushButton { background: #21262d; color: #8b949e; border: 1px solid #30363d;"
+            " border-radius: 6px; padding: 6px 16px; font-size: 12px; font-weight: normal; }"
+            "QPushButton:hover { background: #30363d; color: #c9d1d9; }"
+        )
+        skip_btn.clicked.connect(self._skip_key)
+        row.addWidget(skip_btn)
         row.addStretch()
         self._save_btn = QPushButton("Tallenna ja aloita  ✓")
         self._save_btn.setFixedHeight(42)
@@ -4942,6 +4955,12 @@ class SetupWizard(QDialog):
         self._stack.setCurrentIndex(3)
         self._start_wiz_mic_preview()
 
+    def _skip_key(self):
+        """Proceed without OpenAI key — translation only, no voice transcription."""
+        self._api_key = ""
+        self._stack.setCurrentIndex(3)
+        self._start_wiz_mic_preview()
+
     def _finish_setup(self):
         self._stop_wiz_mic_preview()
         # Save device selections to speech_history.json
@@ -4976,13 +4995,15 @@ if __name__ == "__main__":
     if os.path.exists(_app_icon_path):
         app.setWindowIcon(QIcon(_app_icon_path))
 
-    # First-run setup wizard — shown when no API key is saved
-    if not OPENAI_API_KEY:
+    # First-run setup wizard — only on true first launch (no prior settings)
+    _settings_path = os.path.join(BASE_PATH, "app_settings.json")
+    if not OPENAI_API_KEY and not os.path.exists(_settings_path):
         wizard = SetupWizard()
         if wizard.exec() != QDialog.DialogCode.Accepted:
             sys.exit(0)
         OPENAI_API_KEY = wizard.get_api_key()
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        if OPENAI_API_KEY:
+            client = OpenAI(api_key=OPENAI_API_KEY)
 
     # Match App.__init__ geometry exactly so splash and main window occupy the same spot
     _WIN_X, _WIN_Y, _WIN_W, _WIN_H = 100, 100, 1320, 637
