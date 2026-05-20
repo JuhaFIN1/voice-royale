@@ -282,6 +282,8 @@ DEFAULT_SETTINGS = {
     "stream_deck_enabled": True,
     "stream_deck_mapping": {},   # tyhjä = käytä DEFAULT_MAPPING
     "voice_fx_output_device": None,
+    "voice_fx_monitor_device": None,
+    "voice_fx_hear_myself": False,
 }
 
 
@@ -335,7 +337,10 @@ def _apply_custom_languages_to_globals(custom_langs: list) -> None:
 
 def _is_vbcable_installed() -> bool:
     try:
-        return any("cable" in d["name"].lower() for d in sd.query_devices())
+        return any(
+            any(kw in d["name"].lower() for kw in ("cable", "voicemod"))
+            for d in sd.query_devices()
+        )
     except Exception:
         return False
 
@@ -452,6 +457,9 @@ class VoiceEffectProcessor:
         self._buf = collections.deque(maxlen=12)
         self._stream_in = None
         self._stream_out = None
+        self._monitor_stream = None
+        self._hear_myself = False
+        self._monitor_device = None
         self._stop_evt = threading.Event()
         self._proc_thread = None
 
@@ -495,6 +503,8 @@ class VoiceEffectProcessor:
             )
             self._stream_in.start()
             self._active = True
+            if self._hear_myself and self._monitor_device is not None:
+                self._start_monitor_stream(self._monitor_device)
             self._proc_thread = threading.Thread(target=self._proc_loop, daemon=True)
             self._proc_thread.start()
             self._status(f"Voice FX: on [{self._current_preset}]")
@@ -513,7 +523,7 @@ class VoiceEffectProcessor:
         self._status("Voice FX: off")
 
     def _cleanup(self):
-        for s in (self._stream_in, self._stream_out):
+        for s in (self._stream_in, self._stream_out, self._monitor_stream):
             if s:
                 try:
                     s.stop(); s.close()
@@ -521,6 +531,7 @@ class VoiceEffectProcessor:
                     pass
         self._stream_in = None
         self._stream_out = None
+        self._monitor_stream = None
 
     def _capture_cb(self, indata, frames, time_info, status):
         self._buf.append(indata[:, 0].copy())
@@ -538,6 +549,11 @@ class VoiceEffectProcessor:
             if self._stream_out and self._active:
                 try:
                     self._stream_out.write(chunk.reshape(-1, 1))
+                except Exception:
+                    pass
+            if self._monitor_stream and self._hear_myself and self._active:
+                try:
+                    self._monitor_stream.write(chunk.reshape(-1, 1))
                 except Exception:
                     pass
 
@@ -566,6 +582,39 @@ class VoiceEffectProcessor:
         n_new = max(1, int(len(chunk) / factor))
         pitched = resample(chunk, n_new)
         return resample(pitched, len(chunk)).astype(np.float32)
+
+    def set_monitor(self, device, enabled: bool):
+        self._hear_myself = enabled
+        self._monitor_device = device
+        if enabled and device is not None and self._active:
+            self._start_monitor_stream(device)
+        else:
+            self._stop_monitor_stream()
+
+    def _start_monitor_stream(self, device):
+        self._stop_monitor_stream()
+        try:
+            self._monitor_stream = sd.OutputStream(
+                device=device,
+                samplerate=self._SAMPLE_RATE,
+                channels=1,
+                dtype="float32",
+                blocksize=self._BLOCKSIZE,
+                latency="low",
+            )
+            self._monitor_stream.start()
+        except Exception as e:
+            self._status(f"Hear Myself error: {e}")
+            self._monitor_stream = None
+
+    def _stop_monitor_stream(self):
+        if self._monitor_stream:
+            try:
+                self._monitor_stream.stop()
+                self._monitor_stream.close()
+            except Exception:
+                pass
+            self._monitor_stream = None
 
 
 # =========================
@@ -2543,6 +2592,26 @@ class App(QWidget):
         out_row.addWidget(self._fx_output_combo, 1)
         layout.addLayout(out_row)
 
+        # Hear myself toggle + monitor device selector
+        hear_row = QHBoxLayout()
+        self._hear_myself_btn = QPushButton("Hear Myself: OFF")
+        self._hear_myself_btn.setCheckable(True)
+        self._hear_myself_btn.setChecked(self.settings.get("voice_fx_hear_myself", False))
+        self._hear_myself_btn.setStyleSheet(
+            "QPushButton { background: #1E1E1E; border: 1px solid #2a2a2a; color: #888888;"
+            " font-size: 11px; font-weight: 700; padding: 5px 10px; }"
+            "QPushButton:hover { border-color: #FF9500; color: #E0E0E0; }"
+            "QPushButton:checked { background: #2A1A00; border: 1px solid #FF9500; color: #FF9500; }"
+        )
+        self._hear_myself_btn.clicked.connect(self._toggle_hear_myself)
+        hear_row.addWidget(self._hear_myself_btn)
+        self._fx_monitor_combo = QComboBox()
+        self._populate_fx_monitor_combo()
+        hear_row.addWidget(self._fx_monitor_combo, 1)
+        layout.addLayout(hear_row)
+        if self.settings.get("voice_fx_hear_myself", False):
+            self._hear_myself_btn.setText("Hear Myself: ON")
+
         # Preset buttons
         presets_lbl = QLabel("PRESET:")
         presets_lbl.setStyleSheet("font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: #3A7BFF; border: none; margin-top: 6px;")
@@ -2599,6 +2668,36 @@ class App(QWidget):
                 if self._fx_output_combo.itemData(idx) == saved:
                     self._fx_output_combo.setCurrentIndex(idx)
                     break
+
+    def _populate_fx_monitor_combo(self):
+        self._fx_monitor_combo.clear()
+        saved = self.settings.get("voice_fx_monitor_device")
+        virtual_kw = ("cable", "voicemeeter", "voicemod", "virtual")
+        real_outputs = []
+        try:
+            for i, dev in enumerate(sd.query_devices()):
+                if dev["max_output_channels"] > 0:
+                    n = dev["name"]
+                    if not n.startswith("{") and not any(k in n.lower() for k in virtual_kw):
+                        real_outputs.append((i, n))
+        except Exception:
+            pass
+        for i, n in real_outputs[:10]:
+            self._fx_monitor_combo.addItem(f"🎧 {n}", i)
+        if saved is not None:
+            for idx in range(self._fx_monitor_combo.count()):
+                if self._fx_monitor_combo.itemData(idx) == saved:
+                    self._fx_monitor_combo.setCurrentIndex(idx)
+                    break
+
+    def _toggle_hear_myself(self):
+        enabled = self._hear_myself_btn.isChecked()
+        self._hear_myself_btn.setText("Hear Myself: ON" if enabled else "Hear Myself: OFF")
+        mon_dev = self._fx_monitor_combo.currentData()
+        self.settings["voice_fx_hear_myself"] = enabled
+        self.settings["voice_fx_monitor_device"] = mon_dev
+        save_settings(self.settings)
+        self._voice_fx.set_monitor(mon_dev, enabled)
 
     def _build_outputs_card(self) -> QWidget:
         frame, layout = self._make_card("")
@@ -3683,6 +3782,9 @@ class App(QWidget):
             self.settings["voice_fx_output_device"] = out_dev
             save_settings(self.settings)
             self._voice_fx.set_preset(self._current_fx_preset)
+            mon_dev = self._fx_monitor_combo.currentData()
+            hear_on = self._hear_myself_btn.isChecked()
+            self._voice_fx.set_monitor(mon_dev, hear_on)
             self._voice_fx.start(in_dev, out_dev)
             self._fx_toggle.setText("Voice FX: ON")
         else:
@@ -4567,6 +4669,11 @@ def open_settings_dialog(parent_app: "App") -> None:
     ]
 
     def _pkg_status(import_name, pip_name):
+        if getattr(sys, "frozen", False):
+            # In frozen exe importlib.import_module can crash for native optional libs
+            # Check sys.modules instead (already imported at startup) and skip re-import
+            in_modules = import_name in sys.modules
+            return in_modules, ("bundled" if in_modules else "")
         try:
             importlib.import_module(import_name)
             try:
@@ -4574,7 +4681,7 @@ def open_settings_dialog(parent_app: "App") -> None:
             except Exception:
                 ver = "?"
             return True, ver
-        except ImportError:
+        except Exception:
             return False, ""
 
     f6 = _make_form()
@@ -4749,6 +4856,9 @@ class SetupWizard(QDialog):
         self._wiz_stop_flag = threading.Event()
         self._wiz_mic_thread = None
         self._wiz_timer = QTimer(self)
+        self._wiz_rec_buf = []
+        self._wiz_rec_thread = None
+        self._wiz_rec_stop = threading.Event()
         self._wiz_timer.setInterval(40)
         self._build_ui()
         self._wiz_timer.timeout.connect(self._tick_wiz_mic)
@@ -4851,7 +4961,7 @@ class SetupWizard(QDialog):
         lay.setSpacing(0)
         lay.addWidget(self._header(
             "Hanki OpenAI API-avain",
-            "Vaihe 1/2  —  Luo avain OpenAI:n sivuilla. Ilmainen tili riittää aloitukseen."
+            "Vaihe 1/4  —  Luo avain OpenAI:n sivuilla. Ilmainen tili riittää aloitukseen."
         ))
 
         body = QWidget()
@@ -4905,7 +5015,7 @@ class SetupWizard(QDialog):
         lay.setSpacing(0)
         lay.addWidget(self._header(
             "Syötä API-avain",
-            "Vaihe 2/2  —  Liitä kopioimasi avain alle ja testaa yhteys."
+            "Vaihe 2/4  —  Liitä kopioimasi avain alle ja testaa yhteys."
         ))
 
         body = QWidget()
@@ -4981,6 +5091,112 @@ class SetupWizard(QDialog):
         lay.addWidget(body)
         return page
 
+    def _page_vbcable(self) -> QWidget:
+        page = QWidget()
+        page.setStyleSheet("background: #0d1117;")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._header(
+            "Virtuaalimikrofoni (VB-Cable)",
+            "Vaihe 3/4  —  Tarvitaan jos haluat äänen näkyvän mikrofonina peleissä tai Discordissa."
+        ))
+
+        body = QWidget()
+        body.setStyleSheet("background: #0d1117;")
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(32, 22, 32, 24)
+        bl.setSpacing(14)
+
+        vbc_installed = _is_vbcable_installed()
+
+        status_txt = (
+            "Virtuaalimikrofoni löytyi (VB-Cable tai Voicemod). Ei toimia tarvita."
+            if vbc_installed else
+            "Virtuaalimikrofonia ei löydy."
+        )
+        self._vbc_status_lbl = QLabel(status_txt)
+        self._vbc_status_lbl.setStyleSheet(
+            ("color: #3fb950; font-size: 13px; font-weight: bold; background: transparent;"
+             if vbc_installed else
+             "color: #e3b341; font-size: 13px; font-weight: bold; background: transparent;")
+        )
+        self._vbc_status_lbl.setWordWrap(True)
+        bl.addWidget(self._vbc_status_lbl)
+
+        desc = QLabel(
+            "VB-Audio Virtual Cable on ilmainen virtuaaliäänilaite. Se tekee Voice Royalen käännetystä "
+            "puheesta mikrofonilähdön, jota pelit, Discord ja muut sovellukset voivat käyttää.\n\n"
+            "Asennuksen jälkeen:\n"
+            "  • Aseta Voice Royalessa FX Output → CABLE Input\n"
+            "  • Pelissä / Discordissa: mikrofoni → CABLE Output\n\n"
+            "Jos sinulla on jo Voicemod asennettuna, se toimii samalla periaatteella."
+        )
+        desc.setStyleSheet("color: #8b949e; font-size: 12px; background: transparent; line-height: 160%;")
+        desc.setWordWrap(True)
+        bl.addWidget(desc)
+
+        self._vbc_install_btn = QPushButton(
+            "VB-Cable on jo asennettu" if vbc_installed else "Asenna VB-Cable nyt (ilmainen)"
+        )
+        self._vbc_install_btn.setFixedHeight(38)
+        self._vbc_install_btn.setEnabled(not vbc_installed)
+        if not vbc_installed:
+            self._vbc_install_btn.setStyleSheet(
+                "QPushButton { background: #1f6feb; color: #fff; border: none; border-radius: 6px;"
+                " padding: 6px 18px; font-size: 13px; font-weight: bold; }"
+                "QPushButton:hover { background: #388bfd; }"
+                "QPushButton:disabled { background: #21262d; color: #8b949e; }"
+            )
+
+        def _do_vbc_install():
+            self._vbc_install_btn.setEnabled(False)
+            self._vbc_install_btn.setText("Asennetaan — hyväksy UAC-pyyntö...")
+            self._vbc_status_lbl.setStyleSheet("color: #8b949e; font-size: 13px; background: transparent;")
+
+            def _cb(msg):
+                def _apply():
+                    self._vbc_status_lbl.setText(msg)
+                    ok = "✅" in msg or "installed" in msg.lower()
+                    self._vbc_status_lbl.setStyleSheet(
+                        "color: #3fb950; font-size: 13px; font-weight: bold; background: transparent;"
+                        if ok else
+                        "color: #f85149; font-size: 13px; font-weight: bold; background: transparent;"
+                    )
+                    if ok:
+                        self._vbc_install_btn.setText("VB-Cable asennettu")
+                    else:
+                        self._vbc_install_btn.setEnabled(True)
+                        self._vbc_install_btn.setText("Yritä uudelleen")
+                QTimer.singleShot(0, _apply)
+
+            threading.Thread(target=_install_vbcable, args=(_cb,), daemon=True).start()
+
+        self._vbc_install_btn.clicked.connect(_do_vbc_install)
+        bl.addWidget(self._vbc_install_btn)
+
+        skip_note = QLabel(
+            "Ei pakollinen — ohita jos et tarvitse ääntä peleissä tai Discordissa."
+        )
+        skip_note.setStyleSheet("color: #484f58; font-size: 11px; background: transparent;")
+        skip_note.setWordWrap(True)
+        bl.addWidget(skip_note)
+
+        bl.addStretch()
+
+        row = QHBoxLayout()
+        row.addWidget(self._back_btn(2))
+        row.addStretch()
+        nxt = QPushButton("Seuraava  →")
+        nxt.setFixedHeight(42)
+        nxt.setMinimumWidth(140)
+        nxt.clicked.connect(lambda: (self._stack.setCurrentIndex(4), self._start_wiz_mic_preview()))
+        row.addWidget(nxt)
+        bl.addLayout(row)
+
+        lay.addWidget(body)
+        return page
+
     def _page_devices(self) -> QWidget:
         page = QWidget()
         page.setStyleSheet("background: #0d1117;")
@@ -4989,7 +5205,7 @@ class SetupWizard(QDialog):
         lay.setSpacing(0)
         lay.addWidget(self._header(
             "Äänilaitteet",
-            "Vaihe 3/3  —  Valitse mikrofoni ja kaiuttimet. Testaa ääni ennen jatkamista."
+            "Vaihe 4/4  —  Valitse mikrofoni ja kaiuttimet. Testaa ääni ennen jatkamista."
         ))
 
         body = QWidget()
@@ -5081,12 +5297,30 @@ class SetupWizard(QDialog):
 
         bl.addStretch()
 
+        # Recording test
+        rec_row = QHBoxLayout()
+        self._wiz_rec_btn = QPushButton("⏺  Ääntiä 3s ja kuuntele")
+        self._wiz_rec_btn.setFixedHeight(34)
+        self._wiz_rec_btn.setStyleSheet(
+            "QPushButton { background: #21262d; color: #c9d1d9; border: 1px solid #30363d;"
+            " border-radius: 6px; padding: 5px 14px; font-size: 12px; }"
+            "QPushButton:hover { background: #30363d; }"
+            "QPushButton:disabled { color: #484f58; }"
+        )
+        self._wiz_rec_btn.clicked.connect(self._wiz_record_and_playback)
+        self._wiz_rec_status = QLabel("Nauhoita — soitetaan takaisin, jotta tiedät mikki toimii")
+        self._wiz_rec_status.setStyleSheet("color: #484f58; font-size: 11px; background: transparent;")
+        self._wiz_rec_status.setWordWrap(True)
+        rec_row.addWidget(self._wiz_rec_btn)
+        rec_row.addWidget(self._wiz_rec_status, 1)
+        bl.addLayout(rec_row)
+
         # Buttons
         row = QHBoxLayout()
-        back_btn = self._back_btn(2)
+        back_btn = self._back_btn(3)
         row.addWidget(back_btn)
         row.addStretch()
-        test_btn = QPushButton("▶  Testaa ääni")
+        test_btn = QPushButton("▶  Toistotesti (beep)")
         test_btn.setFixedHeight(36)
         test_btn.setStyleSheet(
             "QPushButton { background: #21262d; color: #c9d1d9; border: 1px solid #30363d;"
@@ -5154,6 +5388,71 @@ class SetupWizard(QDialog):
     def _on_wiz_mic_changed(self, _idx):
         self._start_wiz_mic_preview()
 
+    def _wiz_record_and_playback(self):
+        mic_idx = self._wiz_mic_combo.currentData()
+        if mic_idx is None:
+            self._wiz_rec_status.setText("Valitse mikrofoni ensin.")
+            return
+        self._wiz_rec_btn.setEnabled(False)
+        self._wiz_rec_status.setText("Nauhoitetaan 3 sekuntia...")
+        self._wiz_rec_status.setStyleSheet("color: #FF9500; font-size: 11px; background: transparent;")
+        self._wiz_rec_buf.clear()
+        self._wiz_rec_stop.clear()
+
+        btn = self._wiz_rec_btn
+        status = self._wiz_rec_status
+
+        def _set_error(msg):
+            status.setText(msg)
+            status.setStyleSheet("color: #f85149; font-size: 11px; background: transparent;")
+            btn.setEnabled(True)
+
+        def _record():
+            sr = 44100
+            try:
+                with sd.InputStream(device=mic_idx, channels=1, samplerate=sr,
+                                    blocksize=1024, dtype="float32",
+                                    callback=lambda d, *_: self._wiz_rec_buf.append(d[:, 0].copy())):
+                    deadline = time.monotonic() + 3.0
+                    while time.monotonic() < deadline and not self._wiz_rec_stop.is_set():
+                        time.sleep(0.05)
+            except Exception as e:
+                QTimer.singleShot(0, lambda msg=str(e): _set_error(f"Nauhoitusvirhe: {msg}"))
+                return
+
+            if not self._wiz_rec_buf:
+                QTimer.singleShot(0, lambda: _set_error("Mikrofoni ei tuottanut ääntä — tarkista laite."))
+                return
+
+            audio = np.concatenate(self._wiz_rec_buf)
+            peak = float(np.max(np.abs(audio)))
+
+            if peak < 0.005:
+                QTimer.singleShot(0, lambda: _set_error("Signaali liian hiljainen — onko mikki auki?"))
+                return
+
+            QTimer.singleShot(0, lambda: status.setText("Toistetaan takaisin..."))
+
+            buf = io.BytesIO()
+            pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
+            with wave.open(buf, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(sr)
+                wf.writeframes(pcm.tobytes())
+            wav_bytes = buf.getvalue()
+            selected_out = [idx for idx, cb in self._wiz_out_checkboxes.items() if cb.isChecked()]
+            play_wav_bytes(wav_bytes, device_indices=selected_out if selected_out else None)
+
+            def _done():
+                status.setText("Mikrofoni OK — kuulit oman äänesi?")
+                status.setStyleSheet("color: #3fb950; font-size: 11px; background: transparent;")
+                btn.setEnabled(True)
+            QTimer.singleShot(0, _done)
+
+        self._wiz_rec_thread = threading.Thread(target=_record, daemon=True)
+        self._wiz_rec_thread.start()
+
     def _test_audio(self):
         selected_out = [idx for idx, cb in self._wiz_out_checkboxes.items() if cb.isChecked()]
         wav = self._make_beep_wav()
@@ -5188,10 +5487,11 @@ class SetupWizard(QDialog):
         main = QVBoxLayout(self)
         main.setContentsMargins(0, 0, 0, 0)
         main.addWidget(self._stack)
-        self._stack.addWidget(self._page_welcome())
-        self._stack.addWidget(self._page_get_key())
-        self._stack.addWidget(self._page_enter_key())
-        self._stack.addWidget(self._page_devices())
+        self._stack.addWidget(self._page_welcome())      # 0
+        self._stack.addWidget(self._page_get_key())      # 1
+        self._stack.addWidget(self._page_enter_key())    # 2
+        self._stack.addWidget(self._page_vbcable())      # 3
+        self._stack.addWidget(self._page_devices())      # 4
 
     # ---- logic ----
 
@@ -5236,15 +5536,12 @@ class SetupWizard(QDialog):
                 f.write("\n".join(lines) + "\n")
         except Exception:
             pass
-        # Go to device setup page
-        self._stack.setCurrentIndex(3)
-        self._start_wiz_mic_preview()
+        self._stack.setCurrentIndex(3)  # VB-Cable page
 
     def _skip_key(self):
         """Proceed without OpenAI key — translation only, no voice transcription."""
         self._api_key = ""
-        self._stack.setCurrentIndex(3)
-        self._start_wiz_mic_preview()
+        self._stack.setCurrentIndex(3)  # VB-Cable page
 
     def _finish_setup(self):
         self._stop_wiz_mic_preview()
@@ -5267,6 +5564,7 @@ class SetupWizard(QDialog):
         self.accept()
 
     def closeEvent(self, event):
+        self._wiz_rec_stop.set()
         self._stop_wiz_mic_preview()
         super().closeEvent(event)
 
