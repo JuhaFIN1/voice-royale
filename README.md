@@ -9,8 +9,8 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 
 | Platform | Link |
 |---|---|
-| **Windows** | [Voice_Royale_Setup_1.2.7.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
-| **macOS** | [Voice_Royale_1.2.7.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
+| **Windows** | [Voice_Royale_Setup_1.3.5.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
+| **macOS** | [Voice_Royale_1.3.5.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
 
 > **Windows SmartScreen warning?** Click **"More info"** → **"Run anyway"**.
 > This appears because the installer uses a self-signed certificate. The app is safe.
@@ -30,16 +30,23 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 - **Global hotkey** — push-to-talk from any app (default: `Ctrl+Alt+Space`)
 - **History & favorites** — favorites auto-cache translated audio so replaying needs no API call
 - **Live voice morphing (Voice FX)** — real-time pitch shift and effects routed to a virtual output (VB-Cable / Voicemod). Presets: Normal, Pitch +4/+8, Pitch -4/-8, Robot, Deep, Helium. **Hear Myself** toggle lets you monitor your own processed voice through headphones in real time
-- **Wake-word instructions** — usage guide appears automatically when Listen mode is active
-- **Soundboard** — up to 10 pages × 56 buttons. Edit Mode: drag-and-drop audio/image onto any button. Right-click to configure. Pages support rename and delete
-- **Stream Deck XL** — full 32-button layout: record, wake, speak, stop, language shortcuts, soundboard slots, Voice FX presets, TTS toggle, settings
+- **Soundboard** — up to 10 pages × 55 buttons per page:
+  - **Edit Mode**: drag audio/image onto any button; drag a button over a tab label (700 ms) to move it cross-page; drag tab labels to reorder pages
+  - **Bulk import**: drop a folder or multiple files onto a button to fill consecutive slots; or right-click → Bulk Import
+  - **Image search**: right-click → "Etsi kuva netistä…" — search DuckDuckGo Images by button name, browse thumbnails, download with one click
+  - **STOP button**: fixed red ■ STOP in the bottom-right corner of every page — stops playback instantly
+  - Right-click to rename, assign sound/image, link to another page, or clear
+  - Add pages with **+** (up to 10); right-click a tab to rename or delete
+- **Stream Deck XL** — full 32-button layout via official Elgato plugin + local HTTP API (port 17842)
 - **Virtual mic (VB-Cable)** — one-click install from Settings so TTS audio goes into game voice chat
-- **Data backup** — export all your data (settings, history, soundboard files, API keys) to a ZIP; restore with one click
+- **Windows autostart** — start with Windows, optionally minimized to tray
+- **Auto-update** — Settings → Päivitys checks GitHub releases; downloads and launches the installer
+- **Data backup** — export all settings, history, soundboard audio/images, and API keys to a ZIP; restore with one click
 - **Dark-themed UI** — GitHub-style dark theme, record button embedded in the type box, splash screen on startup
 
 ## Installation (Windows)
 
-1. Download `Voice_Royale_Setup_1.2.7.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
+1. Download `Voice_Royale_Setup_1.3.5.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
 2. Run the installer — it creates Start Menu shortcuts and an optional desktop icon
 3. On first launch the **Setup Wizard** opens automatically:
    - **Step 1/4** — get an OpenAI API key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) (free tier available)
@@ -52,7 +59,7 @@ Upgrading: just run the new installer over the old one. Your API key, settings, 
 
 ## Installation (macOS)
 
-1. Download `Voice_Royale_1.2.7.dmg` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
+1. Download `Voice_Royale_1.3.5.dmg` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
 2. Open the DMG and drag **Voice Royale** to Applications
 3. First launch: right-click → **Open** to bypass Gatekeeper (app is ad-hoc signed, not notarized)
 4. Grant microphone and accessibility permissions when prompted
@@ -96,8 +103,14 @@ Next time you click that favorite, it plays instantly with no API call.
 
 ### Soundboard
 Click **Edit** in the soundboard corner to enter Edit Mode.
-Drag an audio file (WAV/MP3/OGG) or image onto any button to assign it.
-Right-click a button for options. Add pages with **+** (up to 10). Right-click a tab to rename or delete.
+
+- **Assign sound/image**: drag a file onto a button, or right-click → Assign Sound / Assign Image
+- **Search image online**: right-click → "Etsi kuva netistä…" — type a search term, pick from results
+- **Bulk import**: drag a folder or multiple audio files onto any button to fill that slot and the ones after it; or right-click → Bulk Import
+- **Move cross-page**: drag a button over a tab label and hold 700 ms — the page switches, then drop onto the target slot
+- **Reorder pages**: in Edit Mode, drag a tab label to a new position
+- **STOP**: the red ■ STOP button in the bottom-right corner stops playback instantly
+- Add pages with **+** (up to 10). Right-click a tab to rename or delete.
 
 ### Voice FX (live voice morphing)
 Enable in the **Voice FX** tab — select a virtual output (VB-Cable/Voicemod) as FX Output and pick a preset.
@@ -134,6 +147,8 @@ Connect before launching — the app assigns buttons automatically:
 | Default TTS backend | Edge TTS (free) or ElevenLabs |
 | Command capture (s) | Recording duration after wake-word (default: 6 s) |
 | Custom languages | Add any language with name, country code, Edge TTS voice |
+| Windows autostart | Start with Windows, optionally minimized |
+| Auto-update | Check for new version and download installer |
 | Virtual mic | Install VB-Cable for game voice chat routing |
 | Data backup | Export/import all personal data as a ZIP archive |
 
@@ -152,13 +167,12 @@ build_app.bat
 
 Requires Python + PyInstaller. Inno Setup is installed automatically via Chocolatey if not present.
 The installer is signed automatically if `SIGN_CERT_PATH` and `SIGN_CERT_PASSWORD` are set in `.env`.
-Output: `installer_output\Voice_Royale_Setup_1.2.7.exe`
 
 ## File Structure
 
 | File / Folder | Description |
 |---|---|
-| `ai_voice_app.py` | Entire app (~5600 lines) |
+| `ai_voice_app.py` | Entire app (~6300 lines) |
 | `credentials.env` | API keys (not committed) |
 | `app_settings.json` | User settings |
 | `speech_history.json` | Translation history + favorites |
