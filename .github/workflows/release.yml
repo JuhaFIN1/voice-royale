@@ -72,6 +72,9 @@ jobs:
             -replace 'AppVersion=.*', "AppVersion=$v" `
             -replace 'OutputBaseFilename=.*', "OutputBaseFilename=Voice_Royale_Setup_$v" |
             Set-Content installer.iss
+          (Get-Content ai_voice_app.py) `
+            -replace 'APP_VERSION = ".*"', "APP_VERSION = `"$v`"" |
+            Set-Content ai_voice_app.py
         shell: pwsh
 
       - name: Build installer
@@ -114,6 +117,11 @@ jobs:
       - name: Extract version
         id: ver
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Patch APP_VERSION in Python source
+        run: |
+          VERSION="${{ steps.ver.outputs.VERSION }}"
+          sed -i '' "s/APP_VERSION = \".*\"/APP_VERSION = \"$VERSION\"/" ai_voice_app.py
 
       - name: Install system dependencies
         run: brew install portaudio
