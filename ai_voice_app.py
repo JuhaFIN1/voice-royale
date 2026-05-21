@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.8"
+APP_VERSION = "1.3.9"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -2029,46 +2029,39 @@ def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None, v
         elif not isinstance(device_indices, list):
             device_indices = []
 
-        if not device_indices:
-            sd.play(audio_data, samplerate=samplerate)
-            sd.wait()
-            return
-
+        # Use sd.OutputStream per device — thread-safe, no global stream conflicts
         def play_to_device(device_index):
             try:
-                device_info = sd.query_devices(device_index)
-                if device_info['max_output_channels'] == 0:
+                info = sd.query_devices(device_index) if device_index is not None else sd.query_devices(sd.default.device[1])
+                if info['max_output_channels'] == 0:
                     return
-                try:
-                    sd.play(audio_data, samplerate=samplerate, device=device_index)
-                    sd.wait()
-                except Exception as first_err:
-                    # Fallback: resample to the device's preferred rate
-                    target_sr = int(device_info.get('default_samplerate') or 48000)
-                    if target_sr == samplerate:
-                        raise
+                sr = samplerate
+                data = audio_data
+                native_sr = int(info.get('default_samplerate') or 48000)
+                if native_sr != sr:
                     import scipy.signal
-                    float_audio = audio_data.astype(np.float32)
-                    if float_audio.ndim == 1:
-                        new_len = int(len(float_audio) * target_sr / samplerate)
-                        resampled = scipy.signal.resample(float_audio, new_len)
-                    else:
-                        new_len = int(float_audio.shape[0] * target_sr / samplerate)
-                        resampled = scipy.signal.resample(float_audio, new_len, axis=0)
-                    resampled_int16 = np.clip(resampled, -32768, 32767).astype(np.int16)
-                    print(f"[DEBUG] Resampled {samplerate}->{target_sr} Hz for device {device_index}")
-                    sd.play(resampled_int16, samplerate=target_sr, device=device_index)
-                    sd.wait()
+                    fa = data.astype(np.float32)
+                    n_frames = fa.shape[0] if fa.ndim > 1 else len(fa)
+                    new_len = max(1, int(n_frames * native_sr / sr))
+                    resampled = scipy.signal.resample(fa, new_len, axis=0) if fa.ndim > 1 else scipy.signal.resample(fa, new_len)
+                    data = np.clip(resampled, -32768, 32767).astype(np.int16)
+                    sr = native_sr
+                n_ch = min(int(info['max_output_channels']), 2)
+                out = data.reshape(-1, 1) if data.ndim == 1 else data[:, :n_ch]
+                if out.shape[1] < n_ch:
+                    out = np.column_stack([out[:, 0]] * n_ch)
+                with sd.OutputStream(device=device_index, samplerate=sr,
+                                     channels=n_ch, dtype='int16', latency='low') as stream:
+                    stream.write(out)
             except Exception as e:
                 print(f"Warning: Failed to play to device {device_index}: {e}")
 
+        targets = device_indices if device_indices else [None]
         threads = []
-        for device_index in device_indices:
-            t = threading.Thread(target=play_to_device, args=(device_index,))
-            t.daemon = True
+        for dev_idx in targets:
+            t = threading.Thread(target=play_to_device, args=(dev_idx,), daemon=True)
             t.start()
             threads.append(t)
-
         for t in threads:
             t.join()
 
@@ -3118,6 +3111,8 @@ class App(QWidget):
             self._sb_remove_page(index)
 
     def _sb_play_handler(self, slot_index: int):
+        if SoundboardButton._edit_mode:
+            return
         sender_btn = self.sender()
         for pi, page_btns in enumerate(self._soundboard_buttons):
             if sender_btn in page_btns:
@@ -4400,10 +4395,9 @@ class App(QWidget):
             self.append_status(f"Soundboard p{page_index+1} slot {slot_index+1}: ei ääntä (oikeaklikkaa)")
             return
 
-        # Stop any currently playing soundboard sound
+        # Increment play ID — running thread sees mismatch and exits cleanly
         self._sb_play_id += 1
         my_play_id = self._sb_play_id
-        sd.stop()
         if self._sb_playing_btn and self._sb_playing_btn is not btn:
             old_btn = self._sb_playing_btn
             QTimer.singleShot(0, lambda: old_btn.set_playing(False))
