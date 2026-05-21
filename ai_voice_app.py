@@ -1570,7 +1570,11 @@ class SoundboardButton(QWidget):
                     r1 = sess.get(
                         "https://duckduckgo.com/i.js",
                         params={"q": q, "vqd": vqd, "o": "json", "f": ",,,,,"},
-                        headers={"Referer": "https://duckduckgo.com/"},
+                        headers={
+                            "Referer": f"https://duckduckgo.com/?q={requests.utils.quote(q)}&iax=images&ia=images",
+                            "Accept": "application/json, text/javascript, */*; q=0.01",
+                            "X-Requested-With": "XMLHttpRequest",
+                        },
                         timeout=12,
                     )
                     results = r1.json().get("results", [])
