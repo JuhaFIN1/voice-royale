@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.7"
+APP_VERSION = "1.3.8"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -489,8 +489,8 @@ class VoiceEffectProcessor:
         "Helium":    {"pitch": 10,  "robot": False},
     }
 
-    _SAMPLE_RATE = 44100
-    _BLOCKSIZE = 2048
+    _SAMPLE_RATE = 48000  # matches USB audio interfaces (RodeCaster etc.)
+    _BLOCKSIZE = 512     # ~10ms latency, same callback-driven approach as Voicemod
 
     def __init__(self, status_cb):
         self._status = status_cb
@@ -500,15 +500,10 @@ class VoiceEffectProcessor:
         self._robot_phase = 0
         self._current_preset = "Normal"
         self._lock = threading.Lock()
-        import collections
-        self._buf = collections.deque(maxlen=12)
-        self._stream_in = None
-        self._stream_out = None
+        self._stream = None       # single bidirectional sd.Stream
         self._monitor_stream = None
         self._hear_myself = False
         self._monitor_device = None
-        self._stop_evt = threading.Event()
-        self._proc_thread = None
 
     @property
     def is_active(self) -> bool:
@@ -525,89 +520,63 @@ class VoiceEffectProcessor:
             self._robot = p["robot"]
             self._current_preset = name
 
+    def _callback(self, indata, outdata, frames, time_info, status):
+        """Audio callback — runs in real-time audio thread, must be fast."""
+        with self._lock:
+            pitch = self._pitch
+            robot = self._robot
+        chunk = indata[:, 0].copy()
+        if robot or pitch != 0:
+            try:
+                chunk = self._apply(chunk, pitch, robot)
+            except Exception:
+                pass  # on error: pass through unmodified
+        outdata[:, 0] = chunk
+        if self._monitor_stream and self._hear_myself:
+            try:
+                self._monitor_stream.write(chunk.reshape(-1, 1))
+            except Exception:
+                pass
+
     def start(self, input_device, output_device):
         if self._active:
             self.stop()
-        self._stop_evt.clear()
         try:
-            self._stream_out = sd.OutputStream(
-                device=output_device,
+            self._stream = sd.Stream(
                 samplerate=self._SAMPLE_RATE,
-                channels=1,
-                dtype="float32",
                 blocksize=self._BLOCKSIZE,
+                device=(input_device, output_device),
+                channels=(1, 1),
+                dtype="float32",
+                callback=self._callback,
                 latency="low",
             )
-            self._stream_out.start()
-            self._stream_in = sd.InputStream(
-                device=input_device,
-                samplerate=self._SAMPLE_RATE,
-                channels=1,
-                dtype="float32",
-                blocksize=self._BLOCKSIZE,
-                callback=self._capture_cb,
-                latency="low",
-            )
-            self._stream_in.start()
+            self._stream.start()
             self._active = True
             if self._hear_myself and self._monitor_device is not None:
                 self._start_monitor_stream(self._monitor_device)
-            self._proc_thread = threading.Thread(target=self._proc_loop, daemon=True)
-            self._proc_thread.start()
-            self._status(f"Voice FX: on [{self._current_preset}]")
+            self._status(f"Voice FX: stream ON [{self._current_preset}]")
         except Exception as e:
             self._active = False
-            self._cleanup()
+            if self._stream:
+                try: self._stream.stop(); self._stream.close()
+                except Exception: pass
+                self._stream = None
             self._status(f"Voice FX error: {e}")
 
     def stop(self):
         self._active = False
-        self._stop_evt.set()
-        self._cleanup()
-        if self._proc_thread:
-            self._proc_thread.join(timeout=2.0)
-            self._proc_thread = None
-        self._status("Voice FX: off")
+        if self._stream:
+            try: self._stream.stop(); self._stream.close()
+            except Exception: pass
+            self._stream = None
+        if self._monitor_stream:
+            try: self._monitor_stream.stop(); self._monitor_stream.close()
+            except Exception: pass
+            self._monitor_stream = None
+        self._status("Voice FX: stream OFF")
 
-    def _cleanup(self):
-        for s in (self._stream_in, self._stream_out, self._monitor_stream):
-            if s:
-                try:
-                    s.stop(); s.close()
-                except Exception:
-                    pass
-        self._stream_in = None
-        self._stream_out = None
-        self._monitor_stream = None
-
-    def _capture_cb(self, indata, frames, time_info, status):
-        self._buf.append(indata[:, 0].copy())
-
-    def _proc_loop(self):
-        while not self._stop_evt.is_set():
-            if not self._buf:
-                time.sleep(0.005)
-                continue
-            try:
-                chunk = self._buf.popleft()
-            except IndexError:
-                continue
-            chunk = self._apply(chunk)
-            if self._stream_out and self._active:
-                try:
-                    self._stream_out.write(chunk.reshape(-1, 1))
-                except Exception:
-                    pass
-            if self._monitor_stream and self._hear_myself and self._active:
-                try:
-                    self._monitor_stream.write(chunk.reshape(-1, 1))
-                except Exception:
-                    pass
-
-    def _apply(self, chunk: np.ndarray) -> np.ndarray:
-        with self._lock:
-            pitch = self._pitch
-            robot = self._robot
+    def _apply(self, chunk: np.ndarray, pitch: int, robot: bool) -> np.ndarray:
         if robot:
             n = len(chunk)
             t = np.arange(self._robot_phase, self._robot_phase + n) / self._SAMPLE_RATE
@@ -623,12 +592,10 @@ class VoiceEffectProcessor:
             return rb.pitch_shift(chunk, self._SAMPLE_RATE, semitones).astype(np.float32)
         except Exception:
             pass
-        # Fallback: resampling trick (fast, acceptable quality for voice)
         from scipy.signal import resample
         factor = 2.0 ** (semitones / 12.0)
         n_new = max(1, int(len(chunk) / factor))
-        pitched = resample(chunk, n_new)
-        return resample(pitched, len(chunk)).astype(np.float32)
+        return resample(resample(chunk, n_new), len(chunk)).astype(np.float32)
 
     def set_monitor(self, device, enabled: bool):
         self._hear_myself = enabled
@@ -1500,31 +1467,37 @@ class SoundboardButton(QWidget):
             rq: _q.Queue = _q.Queue()
 
             def _worker():
-                import html as _html
-                hdrs = {
-                    "User-Agent": (
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
-                    ),
-                    "Accept-Language": "en-US,en;q=0.9",
-                }
+                ua = (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                )
+                sess = requests.Session()
+                sess.headers.update({"User-Agent": ua})
                 try:
-                    r = requests.get(
-                        "https://www.bing.com/images/search",
-                        params={"q": q, "form": "HDRSC2", "first": "1"},
-                        headers=hdrs,
+                    # Step 1: get DuckDuckGo vqd token
+                    r0 = sess.get(
+                        "https://duckduckgo.com/",
+                        params={"q": q, "iax": "images", "ia": "images"},
+                        timeout=10,
+                    )
+                    vqd_m = _re.search(r'vqd=([\d-]+)', r0.text)
+                    if not vqd_m:
+                        raise ValueError("DDG token ei löydy")
+                    vqd = vqd_m.group(1)
+                    # Step 2: fetch image JSON
+                    r1 = sess.get(
+                        "https://duckduckgo.com/i.js",
+                        params={"q": q, "vqd": vqd, "o": "json", "f": ",,,,,"},
+                        headers={"Referer": "https://duckduckgo.com/"},
                         timeout=12,
                     )
-                    # Bing HTML-entity-encodes the JSON — unescape first
-                    text = _html.unescape(r.text)
-                    fulls  = _re.findall(r'"murl":"(https?://[^"]+)"', text)
-                    thumbs = _re.findall(r'"turl":"(https?://[^"]+)"', text)
-                    n = min(len(fulls), len(thumbs), 24)
-                    if n == 0:
+                    results = r1.json().get("results", [])
+                    pairs = [(img["url"], img["thumbnail"]) for img in results[:24]
+                             if img.get("url") and img.get("thumbnail")]
+                    if not pairs:
                         rq.put(("err", "Ei kuvatuloksia — kokeile eri hakusanaa"))
                         return
-                    pairs = list(zip(fulls[:n], thumbs[:n]))
                     rq.put(("ok", pairs))
                 except Exception as e:
                     rq.put(("err", str(e)))
