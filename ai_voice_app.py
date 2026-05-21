@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.9"
+APP_VERSION = "1.3.10"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -911,6 +911,24 @@ class SoundboardButton(QWidget):
         " border: 2px solid #3A7BFF; color: #6AA0FF; }"
         "QToolButton:pressed { background: #060C18; border: 2px solid #9A4DFF; }"
     )
+    _STYLE_FOLDER = (
+        "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+        " stop:0 #1A1400, stop:1 #0E0A00);"
+        " border: 2px solid #7A5A00; border-radius: 10px;"
+        " color: #FFB800; font-size: 8px; font-weight: 700;"
+        " padding-bottom: 2px; }"
+        "QToolButton:hover { border: 2px solid #FFB800; color: #FFD060; }"
+        "QToolButton:pressed { background: #0E0A00; border: 2px solid #FF9A00; }"
+    )
+    _STYLE_BACK = (
+        "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+        " stop:0 #141428, stop:1 #0A0A1A);"
+        " border: 2px solid #444466; border-radius: 10px;"
+        " color: #8888BB; font-size: 9px; font-weight: 700;"
+        " padding-bottom: 2px; }"
+        "QToolButton:hover { border: 2px solid #9A4DFF; color: #C0C0FF; }"
+        "QToolButton:pressed { background: #0A0A1A; border: 2px solid #3A7BFF; }"
+    )
 
     def __init__(self, page_index: int, slot_index: int, parent=None):
         super().__init__(parent)
@@ -942,6 +960,12 @@ class SoundboardButton(QWidget):
         if "link_page_name" not in self._data:
             self._data["link_page_name"] = ""
         self._refresh()
+        # Back-button slots are not draggable or context-menu editable
+        self._btn.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.NoContextMenu if self._data.get("_back")
+            else Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self._btn.setAcceptDrops(not self._data.get("_back"))
 
     def get_data(self) -> dict:
         return dict(self._data)
@@ -994,7 +1018,11 @@ class SoundboardButton(QWidget):
         return super().eventFilter(obj, event)
 
     def _restore_style(self):
-        if self._data.get("link_page_name"):
+        if self._data.get("_back"):
+            self._btn.setStyleSheet(self._STYLE_BACK)
+        elif self._data.get("subfolder"):
+            self._btn.setStyleSheet(self._STYLE_FOLDER)
+        elif self._data.get("link_page_name"):
             self._btn.setStyleSheet(self._STYLE_LINK)
         else:
             self._btn.setStyleSheet(self._STYLE_IDLE)
@@ -1145,6 +1173,27 @@ class SoundboardButton(QWidget):
         p.end()
         return px
 
+    def _make_folder_pixmap(self, size: int) -> QPixmap:
+        px = QPixmap(size, size)
+        px.fill(Qt.GlobalColor.transparent)
+        p = QPainter(px)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        inner = QRectF(2, 2, size - 4, size - 4)
+        clip = QPainterPath()
+        clip.addRoundedRect(inner, 8, 8)
+        p.setClipPath(clip)
+        p.fillRect(inner.toRect(), QColor("#0E0A00"))
+        p.setClipping(False)
+        p.setPen(QColor("#FFB800"))
+        p.setFont(QFont("Segoe UI", size // 3))
+        p.drawText(QRectF(0, 0, size, size - 4), Qt.AlignmentFlag.AlignCenter, "📁")
+        pen = QPen(QColor("#7A5A00"))
+        pen.setWidthF(1.5)
+        p.setPen(pen)
+        p.drawRoundedRect(inner, 8, 8)
+        p.end()
+        return px
+
     def _make_link_pixmap(self, size: int) -> QPixmap:
         px = QPixmap(size, size)
         px.fill(Qt.GlobalColor.transparent)
@@ -1170,7 +1219,17 @@ class SoundboardButton(QWidget):
         link_name = self._data.get("link_page_name", "")
         name = self._data.get("name") or f"Slot {self.slot_index + 1}"
         display = name if len(name) <= 9 else name[:8] + "…"
-        if link_name:
+        if self._data.get("_back"):
+            self._btn.setIcon(QIcon())
+            self._btn.setText("◀ Takaisin")
+            self._btn.setToolTip("Palaa edelliselle sivulle")
+            self._btn.setStyleSheet(self._STYLE_BACK)
+        elif self._data.get("subfolder"):
+            self._btn.setIcon(QIcon(self._make_folder_pixmap(46)))
+            self._btn.setText(display)
+            self._btn.setToolTip(f"📁 Kansio: {name}")
+            self._btn.setStyleSheet(self._STYLE_FOLDER)
+        elif link_name:
             self._btn.setIcon(QIcon(self._make_link_pixmap(46)))
             self._btn.setText(display)
             self._btn.setToolTip(f"→ Sivu: {link_name}")
@@ -1195,7 +1254,10 @@ class SoundboardButton(QWidget):
         menu.addAction("Bulk Import — kansio…", self._bulk_import_folder)
         menu.addSeparator()
         menu.addAction("Link to Page…", self._assign_page_link)
-        has_content = bool(self._data.get("file") or self._data.get("image") or self._data.get("link_page_name"))
+        if not self._data.get("_back") and not self._data.get("subfolder"):
+            menu.addAction("Kansioksi…", self._set_as_folder)
+        has_content = bool(self._data.get("file") or self._data.get("image")
+                          or self._data.get("link_page_name") or self._data.get("subfolder"))
         if has_content:
             menu.addSeparator()
             menu.addAction("Clear", self._clear)
@@ -1306,6 +1368,25 @@ class SoundboardButton(QWidget):
 
     def _clear(self):
         self._data = {"name": f"Slot {self.slot_index + 1}", "file": "", "image": "", "link_page_name": "", "volume": 1.0}
+        self._refresh()
+        self.data_changed.emit(self.slot_index)
+
+    def _set_as_folder(self):
+        name = self._data.get("name", "")
+        if not name or name.startswith("Slot "):
+            name, ok = QInputDialog.getText(self, "Kansion nimi", "Nimi kansiolle:")
+            if not ok or not name.strip():
+                return
+            name = name.strip()
+        self._data["subfolder"] = True
+        self._data["name"] = name
+        self._data["file"] = ""
+        self._data["link_page_name"] = ""
+        if "folder_slots" not in self._data:
+            self._data["folder_slots"] = [
+                {"name": f"Slot {i+1}", "file": "", "image": "", "link_page_name": ""}
+                for i in range(55)
+            ]
         self._refresh()
         self.data_changed.emit(self.slot_index)
 
@@ -2624,6 +2705,7 @@ class App(QWidget):
         self._voice_fx = VoiceEffectProcessor(self.append_status)
         self._current_fx_preset = "Normal"
         self._soundboard_buttons: list[list[SoundboardButton]] = []
+        self._sb_nav_stack: dict[int, list] = {}  # page_index -> [(parent_slots, folder_slot_idx), ...]
         self._fx_preset_buttons: dict[str, QPushButton] = {}
         self._mb_bars: dict[int, tuple] = {}  # device_index -> (bar, db_lbl)
         self._sb_play_id: int = 0
@@ -3070,6 +3152,7 @@ class App(QWidget):
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
 
         self._soundboard_buttons.append(page_btns)
+        self._sb_nav_stack[pi] = []
         self._sb_tabs.addTab(scroll, name)
 
     def _sb_add_page(self):
@@ -3085,6 +3168,14 @@ class App(QWidget):
             return
         self._sb_tabs.removeTab(index)
         self._soundboard_buttons.pop(index)
+        # Rebuild nav stack with corrected indices
+        new_stack = {}
+        for old_pi, entries in self._sb_nav_stack.items():
+            if old_pi == index:
+                continue
+            new_pi = old_pi if old_pi < index else old_pi - 1
+            new_stack[new_pi] = entries
+        self._sb_nav_stack = new_stack
         # Update page_index on buttons of remaining pages
         for pi, page_btns in enumerate(self._soundboard_buttons):
             for btn in page_btns:
@@ -3116,6 +3207,13 @@ class App(QWidget):
         sender_btn = self.sender()
         for pi, page_btns in enumerate(self._soundboard_buttons):
             if sender_btn in page_btns:
+                data = sender_btn.get_data()
+                if data.get("_back"):
+                    self._sb_go_back(pi)
+                    return
+                if data.get("subfolder"):
+                    self._sb_enter_folder(pi, slot_index)
+                    return
                 self._play_soundboard_slot(pi, slot_index)
                 return
 
@@ -3137,8 +3235,78 @@ class App(QWidget):
         dst_btn = dst_btns[dst_slot]
         src_data = src_btn.get_data()
         dst_data = dst_btn.get_data()
+        if src_data.get("_back") or dst_data.get("_back"):
+            return
         src_btn.set_data(dst_data)
         dst_btn.set_data(src_data)
+        self._save_soundboard()
+
+    def _get_page_root_slots(self, page_index: int) -> list:
+        """Return root-level slot data for page, unwinding any subfolder navigation."""
+        stack = self._sb_nav_stack.get(page_index, [])
+        cur_slots = [btn.get_data() for btn in self._soundboard_buttons[page_index]]
+        if not stack:
+            return cur_slots
+        # Strip the back-button placeholder before storing subfolder contents
+        clean = []
+        for i, d in enumerate(cur_slots):
+            if d.get("_back"):
+                clean.append({"name": f"Slot {i+1}", "file": "", "image": "", "link_page_name": ""})
+            else:
+                clean.append(dict(d))
+        # Walk up the stack: stack[0] = outermost, stack[-1] = deepest
+        for entry in reversed(stack):
+            parent_slots, folder_slot_idx = entry[0], entry[1]
+            parent_copy = [dict(s) for s in parent_slots]
+            parent_copy[folder_slot_idx] = dict(parent_copy[folder_slot_idx])
+            parent_copy[folder_slot_idx]["folder_slots"] = clean
+            clean = parent_copy
+        return clean
+
+    def _sb_enter_folder(self, page_index: int, slot_index: int):
+        """Navigate into a folder slot, replacing the page's buttons with folder contents."""
+        page_btns = self._soundboard_buttons[page_index]
+        cur_slots = [btn.get_data() for btn in page_btns]
+        folder_data = cur_slots[slot_index]
+        sub_slots = list(folder_data.get("folder_slots", []))
+        while len(sub_slots) < 55:
+            sub_slots.append({"name": f"Slot {len(sub_slots)+1}", "file": "", "image": "", "link_page_name": ""})
+        # Place back button at slot 42 (row 3, col 0 = bottom-left)
+        sub_slots[42] = {"_back": True, "name": "Takaisin", "file": "", "image": "", "link_page_name": ""}
+        # Push current state onto nav stack (include current tab name for restoration)
+        prev_tab_name = self._sb_tabs.tabText(page_index)
+        self._sb_nav_stack[page_index].append((cur_slots, slot_index, prev_tab_name))
+        # Load subfolder content into buttons
+        for i, btn in enumerate(page_btns):
+            btn.set_data(sub_slots[i])
+        self._sb_tabs.setTabText(page_index, f"📁 {folder_data.get('name', 'Kansio')}")
+
+    def _sb_go_back(self, page_index: int):
+        """Navigate back to the parent level from a subfolder."""
+        stack = self._sb_nav_stack.get(page_index)
+        if not stack:
+            return
+        # Capture current subfolder contents (without back button)
+        page_btns = self._soundboard_buttons[page_index]
+        cur_slots = [btn.get_data() for btn in page_btns]
+        clean = []
+        for i, d in enumerate(cur_slots):
+            if d.get("_back"):
+                clean.append({"name": f"Slot {i+1}", "file": "", "image": "", "link_page_name": ""})
+            else:
+                clean.append(dict(d))
+        # Pop the stack (3-tuple: parent_slots, folder_slot_idx, prev_tab_name)
+        entry = stack.pop()
+        parent_slots, folder_slot_idx, prev_tab_name = entry[0], entry[1], entry[2]
+        # Save current subfolder contents back into the folder slot
+        parent_slots = [dict(s) for s in parent_slots]
+        parent_slots[folder_slot_idx] = dict(parent_slots[folder_slot_idx])
+        parent_slots[folder_slot_idx]["folder_slots"] = clean
+        # Restore parent slots
+        for i, btn in enumerate(page_btns):
+            btn.set_data(parent_slots[i])
+        # Restore tab name to what it was before entering this folder
+        self._sb_tabs.setTabText(page_index, prev_tab_name)
         self._save_soundboard()
 
     def _sb_stop_playback(self):
@@ -3153,6 +3321,18 @@ class App(QWidget):
     def _sb_tab_moved(self, from_idx: int, to_idx: int):
         page = self._soundboard_buttons.pop(from_idx)
         self._soundboard_buttons.insert(to_idx, page)
+        # Remap nav stack keys to reflect new indices
+        new_stack = {}
+        for old_pi, entries in self._sb_nav_stack.items():
+            if old_pi == from_idx:
+                new_stack[to_idx] = entries
+            elif from_idx < to_idx and from_idx < old_pi <= to_idx:
+                new_stack[old_pi - 1] = entries
+            elif from_idx > to_idx and to_idx <= old_pi < from_idx:
+                new_stack[old_pi + 1] = entries
+            else:
+                new_stack[old_pi] = entries
+        self._sb_nav_stack = new_stack
         for pi, page_btns in enumerate(self._soundboard_buttons):
             for btn in page_btns:
                 btn.page_index = pi
@@ -4444,9 +4624,15 @@ class App(QWidget):
 
     def _save_soundboard(self):
         pages = []
-        for pi, page_btns in enumerate(self._soundboard_buttons):
-            name = self._sb_tabs.tabText(pi)
-            pages.append({"name": name, "slots": [b.get_data() for b in page_btns]})
+        for pi in range(len(self._soundboard_buttons)):
+            stack = self._sb_nav_stack.get(pi, [])
+            if stack:
+                # Retrieve the original tab name from the bottom of the stack
+                name = stack[0][2]
+            else:
+                name = self._sb_tabs.tabText(pi)
+            slots = self._get_page_root_slots(pi)
+            pages.append({"name": name, "slots": slots})
         self.settings["soundboard_pages"] = pages
         save_settings(self.settings)
 
