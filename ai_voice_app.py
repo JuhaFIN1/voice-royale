@@ -2075,7 +2075,8 @@ def transcribe_audio_wav(wav_bytes: bytes, language: str = None) -> str:
 # PLAYBACK
 # =========================
 
-def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None, volume: float = 1.0):
+def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None, volume: float = 1.0,
+                   stop_event: "threading.Event | None" = None):
     """Play WAV audio to one or multiple output devices simultaneously."""
     try:
         with io.BytesIO(wav_bytes) as buffer:
@@ -2107,6 +2108,8 @@ def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None, v
 
             def _level_thread():
                 for i in range(0, len(flat), chunk_size):
+                    if stop_event is not None and stop_event.is_set():
+                        break
                     chunk = flat[i:i + chunk_size]
                     if len(chunk) > 0:
                         level_callback(float(np.max(np.abs(chunk))))
@@ -2144,9 +2147,16 @@ def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None, v
                 out = data.reshape(-1, 1) if data.ndim == 1 else data[:, :n_ch]
                 if out.shape[1] < n_ch:
                     out = np.column_stack([out[:, 0]] * n_ch)
+                _CHUNK = 4096  # frames per write — short enough to respond to stop quickly
                 with sd.OutputStream(device=device_index, samplerate=sr,
                                      channels=n_ch, dtype='int16', latency='low') as stream:
-                    stream.write(out)
+                    offset = 0
+                    while offset < len(out):
+                        if stop_event is not None and stop_event.is_set():
+                            break
+                        end = min(offset + _CHUNK, len(out))
+                        stream.write(out[offset:end])
+                        offset = end
             except Exception as e:
                 print(f"Warning: Failed to play to device {device_index}: {e}")
 
@@ -2723,6 +2733,7 @@ class App(QWidget):
         self._mb_bars: dict[int, tuple] = {}  # device_index -> (bar, db_lbl)
         self._sb_play_id: int = 0
         self._sb_playing_btn: "SoundboardButton | None" = None
+        self._sb_stop_event: threading.Event = threading.Event()
 
         # Stream Deck HTTP server (for official Elgato plugin)
         self._stream_deck = StreamDeckHttpServer(self.append_status)
@@ -3324,7 +3335,8 @@ class App(QWidget):
 
     def _sb_stop_playback(self):
         self._sb_play_id += 1
-        sd.stop()
+        self._sb_stop_event.set()
+        self._sb_stop_event = threading.Event()
         self.update_output_level(0.0)
         if self._sb_playing_btn:
             btn = self._sb_playing_btn
@@ -4588,7 +4600,11 @@ class App(QWidget):
             self.append_status(f"Soundboard p{page_index+1} slot {slot_index+1}: ei ääntä (oikeaklikkaa)")
             return
 
-        # Increment play ID — running thread sees mismatch and exits cleanly
+        # Stop any current playback immediately
+        self._sb_stop_event.set()
+        self._sb_stop_event = threading.Event()
+        my_stop_event = self._sb_stop_event
+
         self._sb_play_id += 1
         my_play_id = self._sb_play_id
         if self._sb_playing_btn and self._sb_playing_btn is not btn:
@@ -4599,7 +4615,6 @@ class App(QWidget):
         final_vol = max(0.0, self.settings.get("soundboard_volume", 1.0) * data.get("volume", 1.0))
 
         def _level_cb(level: float):
-            # Silences the meter immediately when this slot's playback has been superseded
             self.update_output_level(level if self._sb_play_id == my_play_id else 0.0)
 
         def _play():
@@ -4608,7 +4623,8 @@ class App(QWidget):
                 wav = self._load_audio_as_wav(path)
                 if self._sb_play_id == my_play_id:
                     play_wav_bytes(wav, device_indices=self.get_selected_devices(),
-                                   level_callback=_level_cb, volume=final_vol)
+                                   level_callback=_level_cb, volume=final_vol,
+                                   stop_event=my_stop_event)
                 self.update_output_level(0.0)
             except Exception as e:
                 if self._sb_play_id == my_play_id:
