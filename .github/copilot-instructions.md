@@ -3,11 +3,11 @@
 ## Project overview
 
 Windows + macOS desktop app (PyQt6): microphone → Whisper transcription → translation (Google/DeepL/OpenAI) → TTS playback.
-All logic in one file: `ai_voice_app.py` (~6300 lines).
+All logic in one file: `ai_voice_app.py` (~6800 lines).
 
 Working directory: `E:\CLOUDS\AI-SYSTEMS\ai-voice-router\`
 GitHub: https://github.com/JuhaFIN1/voice-royale
-Current version: `APP_VERSION = "1.3.6"` (constant near top of file; CI auto-patches from git tag)
+Current version: `APP_VERSION = "1.3.12"` (constant near top of file; CI auto-patches from git tag)
 
 ---
 
@@ -23,18 +23,19 @@ Current version: `APP_VERSION = "1.3.6"` (constant near top of file; CI auto-pat
 | `transcribe_audio_wav(wav_bytes)` | Whisper API transcription |
 | `translate_text(text, lang, backend, deepl_key)` | Translation — Google/DeepL/OpenAI |
 | `parse_voice_command(transcript, default_lang)` | GPT-4.1-mini: extract lang + translate wake command |
+| `play_wav_bytes(wav_bytes, device_indices, level_callback, volume, stop_event)` | Chunk-based per-device OutputStream playback with cancellation |
 | `WakeListener` | Wake-word detector (Porcupine or Whisper VAD fallback) |
 | `SoundboardButton` | Soundboard slot — see Soundboard section |
-| `VoiceEffectProcessor` | Real-time DSP: pitch/robot + VB-Cable output. `set_monitor(device, enabled)` = Hear Myself |
+| `VoiceEffectProcessor` | Real-time DSP: pitch/robot + VB-Cable output. Always-on stream, toggle = preset only |
 | `class App(QWidget)` | Entire UI and logic |
 | `SetupWizard` | First-run dialog (4 steps: API key → VB-Cable → Devices with recording test) |
-| `open_settings_dialog()` | 7-tab settings window (see tabs below) |
+| `open_settings_dialog()` | 8-tab settings window (see tabs below) |
 
 ---
 
 ## Settings tabs (open_settings_dialog)
 
-Tab font: 10px, padding: 5px 9px — all 7 tabs visible without scrolling at 900px dialog width.
+Tab font: 10px, padding: 5px 9px.
 
 | Tab | Name | Content |
 |---|---|---|
@@ -44,7 +45,8 @@ Tab font: 10px, padding: 5px 9px — all 7 tabs visible without scrolling at 900
 | 4 | Pika & Data | Hotkey, history, data export/import ZIP |
 | 5 | Stream Deck | HTTP API settings (port 17842) |
 | 6 | Asennus | Run Setup Wizard again, Windows autostart, Python packages, VB-Cable |
-| 7 | Päivitys | Version check via GitHub releases API, download & open installer |
+| 7 | Siivoa | Scan soundboard audio/images dirs for orphaned files; multi-select + confirm before delete |
+| 8 | Päivitys | Version check via GitHub releases API, download & open installer |
 
 ---
 
@@ -67,38 +69,69 @@ Stream Deck actions: `_sd_action_queue` (Queue) + `_sd_action_timer` (50ms QTime
 ### Frozen exe / pkg_status
 `_pkg_status()` in frozen exe: use `importlib.import_module()` for all packages **except** `pvporcupine` and `pyrubberband`. Those two native optional libs can crash with non-ImportError exceptions — use `sys.modules` check only for them.
 
-### Soundboard
-- **55 slots per page** (not 56) + fixed red **■ STOP** button at grid position (row 3, col 13)
-- `_sb_stop_playback()`: increments `_sb_play_id`, calls `sd.stop()`, `update_output_level(0.0)`, resets playing btn
-- Sound meter: `_level_cb` wrapper in `_play_soundboard_slot` checks `_sb_play_id` — emits 0.0 if superseded
-- `SoundboardButton._edit_mode` — class-level flag, `set_edit_mode(bool)` classmethod
-- Signals: `swap_requested(src_page, src_slot, dst_page, dst_slot)`, `bulk_import_requested(start_slot, [paths])`
-- **Cross-page drag**: App.eventFilter intercepts DragMove on tab bar → 700ms timer switches tab
-  - `_sb_hover_tab`, `_sb_tab_hover_timer` (singleShot QTimer) state on App
-- **Tab reorder**: `setMovable(True)` in edit mode; `tabMoved` → `_sb_tab_moved(from, to)` reorders `_soundboard_buttons`
-- **Bulk import**: drop folder/multi-files on button or right-click → "Bulk Import — tiedostot/kansio…"
-- **Image search**: right-click → "Etsi kuva netistä…" — Bing Images via `requests.Session()`; parse with `html.unescape()` then regex `"murl"` (full URL) and `"turl"` (thumbnail); thumbnail grid (5 col, 130×100); queue+QTimer for all network ops
-- `_sb_swap_handler(src_page, src_slot, dst_page, dst_slot)` on App does the swap + save
-- Edit mode OFF automatically calls `_save_soundboard()`
-- `_sb_play_id` (int) counter prevents concurrent-play crashes
-- `_soundboard_buttons` is `list[list[SoundboardButton]]` (pages × slots, 55 per page)
+### Soundboard — playback
+- **Only one slot plays at a time.** Starting a new slot immediately stops the previous one.
+- `play_wav_bytes` writes in 4096-frame chunks and checks `stop_event: threading.Event` between chunks.
+- `App._sb_stop_event: threading.Event` — set it to stop current playback, then replace with a new Event.
+- STOP button sets the event. `sd.stop()` has **no effect** on OutputStream-based playback — do not use it.
+- `_sb_play_id` (int) — secondary guard against race conditions.
+- `_sb_playing_btn` — reference to the currently playing SoundboardButton widget.
+
+### Soundboard — structure
+- **55 slots per page** (not 56) + fixed red **■ STOP** button at grid position (row 3, col 13).
+- `SoundboardButton._edit_mode` — class-level flag, `set_edit_mode(bool)` classmethod.
+- Signals: `clicked_play(slot_index)`, `data_changed(slot_index)`, `swap_requested(src_page, src_slot, dst_page, dst_slot)`, `bulk_import_requested(start_slot, [paths])`.
+- `_soundboard_buttons: list[list[SoundboardButton]]` (pages × 55 slots).
+- Edit mode OFF automatically calls `_save_soundboard()`.
+- **Cross-page drag**: App.eventFilter intercepts DragMove on tab bar → 700ms timer (`_sb_hover_tab`, `_sb_tab_hover_timer`) switches tab.
+- **Tab reorder**: `setMovable(True)` in edit mode; `tabMoved` → `_sb_tab_moved(from, to)` reorders `_soundboard_buttons` AND remaps `_sb_nav_stack` indices.
+- **Bulk import**: drop folder/multi-files → `bulk_import_requested` signal → `_sb_bulk_import_handler`. Files beyond slot 54 are silently skipped.
+- **Clear button**: deletes the file from disk if it lives under `BASE_PATH/soundboard/`. Never touches the original source.
+
+### Soundboard — subfolder navigation
+- Right-click in edit mode → "Kansioksi…" → converts slot to a folder (`_data["subfolder"] = True`, `_data["folder_slots"] = [{...} × 55]`). Gold/amber style `_STYLE_FOLDER`.
+- Clicking a folder in play mode calls `_sb_enter_folder(page_index, slot_index)`:
+  - Snapshots current slots + tab name onto `_sb_nav_stack[page_index]` as `(parent_slots, folder_slot_idx, prev_tab_name)`.
+  - Loads `folder_slots` into buttons; sets slot 42 (row 3, col 0 = bottom-left) to back button (`_data["_back"] = True`). Dark-blue style `_STYLE_BACK`.
+  - Sets tab name to `"📁 FolderName"`.
+- Back button calls `_sb_go_back(page_index)`:
+  - Snapshots current subfolder contents (replacing back slot placeholder), pops stack, saves into parent's `folder_slots`, restores parent buttons + original tab name, calls `_save_soundboard()`.
+- `_get_page_root_slots(page_index)` unwinds the full nav stack to reconstruct root-level data for `_save_soundboard()`.
+- Back button: `NoContextMenu`, `setAcceptDrops(False)`. `_sb_swap_handler` refuses swaps involving back slots.
+- Subfolders support nesting (folder inside folder).
+
+### Soundboard — image search (DuckDuckGo)
+Two-step process:
+1. GET `https://duckduckgo.com/?q=...&iax=images&ia=images` → extract `vqd` token with regex `vqd=([\d-]+)`.
+2. GET `https://duckduckgo.com/i.js?q=...&vqd=...&o=json&f=,,,,,` with these **required** headers:
+   - `X-Requested-With: XMLHttpRequest` ← without this, DDG returns 403
+   - `Accept: application/json, text/javascript, */*; q=0.01`
+   - `Referer: https://duckduckgo.com/?q=...&iax=images&ia=images`
+
+Use `queue.Queue` + `QTimer` for all network ops (never block the main thread).
 
 ### Wake listener
 Two modes selected automatically:
-- **Porcupine** — if `pvporcupine` installed AND Picovoice key set
-- **Whisper VAD fallback** — records 2.5s chunks, transcribes, checks for keyword
+- **Porcupine** — if `pvporcupine` installed AND Picovoice key set.
+- **Whisper VAD fallback** — records 2.5s chunks, transcribes, checks for keyword.
 
-On PortAudio "out of range" error (MME -9999): automatically retries with `device=None` (default device).
+On PortAudio "out of range" error (MME -9999): automatically retries with `device=None`.
+
+### Voice FX
+`VoiceEffectProcessor`: single `sd.Stream` at 48kHz / 512 blocksize always running when devices configured.
+Toggle = preset only ("Normal" = passthrough, others = effect). Stream never stops on toggle.
+`set_monitor(device, enabled)` starts/stops second `_monitor_stream` OutputStream to headphones ("Hear Myself").
+Autostart 600ms after app launch via `QTimer.singleShot(600, self._autostart_voice_fx)`.
 
 ### Windows autostart
-- `_apply_autostart(enabled, minimized)` writes/removes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` key
-- Only works in frozen exe (`getattr(sys, "frozen", False)`)
-- `--minimized` in `sys.argv` → `window.showMinimized()` instead of `window.show()`
+- `_apply_autostart(enabled, minimized)` writes/removes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` key.
+- Only works in frozen exe (`getattr(sys, "frozen", False)`).
+- `--minimized` in `sys.argv` → `window.showMinimized()`.
 
 ### Auto-update (Päivitys tab)
-- Calls GitHub releases API via `requests` in a daemon thread; result via `queue.Queue` + 200ms QTimer poll
-- Downloads `.exe` (Windows) or `.dmg` (macOS) to `tempfile.mkstemp()`, then opens it
-- CI patches `APP_VERSION` in `ai_voice_app.py` from the git tag at build time
+- GitHub releases API in daemon thread; result via `queue.Queue` + 200ms QTimer poll.
+- Downloads `.exe` (Windows) or `.dmg` (macOS) to `tempfile.mkstemp()`, then opens it.
+- CI patches `APP_VERSION` in `ai_voice_app.py` and version fields in `installer.iss` from git tag at build time.
 
 ### Export / Import data
 Three backup modes selectable via radio dialog (`_ask_mode()`):
@@ -106,20 +139,18 @@ Three backup modes selectable via radio dialog (`_ask_mode()`):
 - **settings** — `app_settings.json`, `speech_history.json`, `credentials.env` (no soundboard audio/images)
 - **soundboard** — `soundboard/` audio+images + `soundboard_pages` key from `app_settings.json` only
 
-`_BACKUP_MODES` dict drives both export and import. Soundboard import merges only `soundboard_pages` into current settings (does not overwrite other settings). `soundboard/` includes `audio/` and `images/` subfolders via `os.walk`.
-
-### Voice FX — Hear Myself
-`VoiceEffectProcessor.set_monitor(device, enabled)` starts/stops `_monitor_stream` (second OutputStream to headphones).
+`_BACKUP_MODES` dict drives both export and import. Soundboard import merges only `soundboard_pages` into current settings.
 
 ### Code signing
-- Local: `build_app.bat` reads `SIGN_CERT_PATH` + `SIGN_CERT_PASSWORD` from `.env`
-- CI: GitHub secrets `SIGN_CERT_BASE64` + `SIGN_CERT_PASSWORD`
-- Never commit: `.env`, `certs/`, `*.pfx`
+- Local: `build_app.bat` reads `SIGN_CERT_PATH` + `SIGN_CERT_PASSWORD` from `.env`.
+- CI: GitHub secrets `SIGN_CERT_BASE64` + `SIGN_CERT_PASSWORD`.
+- Never commit: `.env`, `certs/`, `*.pfx`.
 
 ### macOS build specifics
-PyInstaller flags needed: `--hidden-import pyttsx3.drivers.nsss`, `--hidden-import PyQt6.sip`, `--collect-all pyttsx3`, `--osx-bundle-identifier com.voiceroyale.app`, `--icon iconimage.ico`
-Post-build: PlistBuddy injects `NSMicrophoneUsageDescription` + `NSInputMonitoringUsageDescription` into Info.plist.
-DMG layout: `Voice Royale.app` + `/Applications` symlink (Finder shows arrow) + `Stream Deck Plugin/` folder.
+CI installs Pillow and converts `iconimage.ico` → `iconimage.icns` before PyInstaller.
+PyInstaller flags: `--hidden-import pyttsx3.drivers.nsss`, `--hidden-import PyQt6.sip`, `--collect-all pyttsx3`, `--osx-bundle-identifier com.voiceroyale.app`, `--icon iconimage.icns`.
+Post-build: PlistBuddy injects `NSMicrophoneUsageDescription` + `NSInputMonitoringUsageDescription`.
+DMG layout: `Voice Royale.app` + `/Applications` symlink + `Stream Deck Plugin/` folder.
 
 ---
 
@@ -127,7 +158,7 @@ DMG layout: `Voice Royale.app` + `/Applications` symlink (Finder shows arrow) + 
 
 | File | Purpose |
 |---|---|
-| `ai_voice_app.py` | Entire app (~6300 lines) |
+| `ai_voice_app.py` | Entire app (~6800 lines) |
 | `credentials.env` | `OPENAI_API_KEY`, `ELEVEN_API_KEY`, `VOICE_ID` — never commit |
 | `.env` | `SIGN_CERT_PATH`, `SIGN_CERT_PASSWORD` — never commit |
 | `app_settings.json` | User settings |
@@ -185,13 +216,5 @@ Plus custom languages added via Settings → Kielet (stored in `app_settings.jso
 | `voice_fx_hear_myself` | `false` | Hear Myself enabled |
 | `start_with_windows` | `false` | Windows autostart (registry) |
 | `start_minimized` | `false` | Start minimized when autolaunching |
-| `soundboard_pages` | `[...]` | Pages with slots `{name,file,image,link_page_name}` |
-
----
-
-## Future idea: fully free mode
-
-Replace paid OpenAI calls with free alternatives:
-- Whisper API → `faster-whisper` (local model, ~150 MB, CPU)
-- GPT-4.1-mini → rule-based language keyword parser + Google Translate
-- No API key needed at all
+| `soundboard_volume` | `1.0` | Global soundboard volume multiplier |
+| `soundboard_pages` | `[...]` | Pages with slots `{name,file,image,link_page_name,volume,subfolder?,folder_slots?}` |
