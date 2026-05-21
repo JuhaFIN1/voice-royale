@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.6"
+APP_VERSION = "1.3.7"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -284,6 +284,7 @@ DEFAULT_SETTINGS = {
     ],
     "stream_deck_enabled": True,
     "stream_deck_mapping": {},   # tyhjä = käytä DEFAULT_MAPPING
+    "soundboard_volume": 1.0,
     "voice_fx_output_device": None,
     "voice_fx_monitor_device": None,
     "voice_fx_hear_myself": False,
@@ -1221,6 +1222,7 @@ class SoundboardButton(QWidget):
         menu.addAction("Assign Image…", self._assign_image)
         menu.addAction("Etsi kuva netistä…", self._search_image_online)
         menu.addAction("Rename…", self._rename)
+        menu.addAction("Volume…", self._set_volume)
         menu.addSeparator()
         menu.addAction("Bulk Import — tiedostot…", self._bulk_import_files)
         menu.addAction("Bulk Import — kansio…", self._bulk_import_folder)
@@ -1326,8 +1328,17 @@ class SoundboardButton(QWidget):
             self._refresh()
             self.data_changed.emit(self.slot_index)
 
+    def _set_volume(self):
+        current = int(self._data.get("volume", 1.0) * 100)
+        val, ok = QInputDialog.getInt(
+            self, "Slot volyymi", "Volyymi % (10–200):", current, 10, 200, 5
+        )
+        if ok:
+            self._data["volume"] = val / 100.0
+            self.data_changed.emit(self.slot_index)
+
     def _clear(self):
-        self._data = {"name": f"Slot {self.slot_index + 1}", "file": "", "image": "", "link_page_name": ""}
+        self._data = {"name": f"Slot {self.slot_index + 1}", "file": "", "image": "", "link_page_name": "", "volume": 1.0}
         self._refresh()
         self.data_changed.emit(self.slot_index)
 
@@ -1997,7 +2008,7 @@ def transcribe_audio_wav(wav_bytes: bytes, language: str = None) -> str:
 # PLAYBACK
 # =========================
 
-def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None):
+def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None, volume: float = 1.0):
     """Play WAV audio to one or multiple output devices simultaneously."""
     try:
         with io.BytesIO(wav_bytes) as buffer:
@@ -2018,6 +2029,9 @@ def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None):
 
         if channels > 1:
             audio_data = audio_data.reshape(-1, channels)
+
+        if volume != 1.0:
+            audio_data = np.clip(audio_data.astype(np.float32) * volume, -32768, 32767).astype(np.int16)
 
         # Start level meter thread if callback provided
         if level_callback is not None:
@@ -2733,6 +2747,7 @@ class App(QWidget):
         self._sd_action_timer.timeout.connect(self._drain_sd_action_queue)
         self._sd_action_timer.start(50)
         self._stream_deck.start(self)
+        QTimer.singleShot(600, self._autostart_voice_fx)
 
     # ============ Card builders ============
 
@@ -2995,6 +3010,32 @@ class App(QWidget):
         self._sb_edit_btn.toggled.connect(self._sb_toggle_edit_mode)
         _corner_lay.addWidget(self._sb_edit_btn)
 
+        from PyQt6.QtWidgets import QSlider as _QSlider
+        self._sb_vol_slider = _QSlider(Qt.Orientation.Horizontal)
+        self._sb_vol_slider.setRange(10, 200)
+        self._sb_vol_slider.setValue(int(self.settings.get("soundboard_volume", 1.0) * 100))
+        self._sb_vol_slider.setFixedWidth(72)
+        self._sb_vol_slider.setToolTip("Soundboard volyymi (kaikki slotet)")
+        self._sb_vol_slider.setStyleSheet(
+            "QSlider::groove:horizontal { height:4px; background:#333344; border-radius:2px; }"
+            "QSlider::handle:horizontal { width:12px; height:12px; margin:-4px 0;"
+            " background:#9A4DFF; border-radius:6px; }"
+            "QSlider::sub-page:horizontal { background:#9A4DFF; border-radius:2px; }"
+        )
+        self._sb_vol_label = QLabel(f"{self._sb_vol_slider.value()}%")
+        self._sb_vol_label.setFixedWidth(34)
+        self._sb_vol_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._sb_vol_label.setStyleSheet("color:#AAAACC; font-size:10px; background:transparent;")
+
+        def _on_sb_vol(v):
+            self._sb_vol_label.setText(f"{v}%")
+            self.settings["soundboard_volume"] = v / 100.0
+            save_settings(self.settings)
+
+        self._sb_vol_slider.valueChanged.connect(_on_sb_vol)
+        _corner_lay.addWidget(self._sb_vol_slider)
+        _corner_lay.addWidget(self._sb_vol_label)
+
         add_page_btn = QPushButton("+")
         add_page_btn.setFixedWidth(26)
         add_page_btn.setToolTip("Lisää sivu (max 10)")
@@ -3228,9 +3269,10 @@ class App(QWidget):
     def _build_voice_fx_card(self) -> QWidget:
         frame, layout = self._make_card("Voice FX — real-time voice morphing via virtual output")
 
-        # Enable toggle
-        self._fx_toggle = QPushButton("Enable Voice FX")
+        # FX effects toggle (stream always runs when devices configured)
+        self._fx_toggle = QPushButton("Voice FX: OFF")
         self._fx_toggle.setCheckable(True)
+        self._fx_toggle.setToolTip("Kytkee efektin päälle/pois — äänivirta pysyy aina käynnissä")
         self._fx_toggle.setStyleSheet(
             "QPushButton { background: #1E1E1E; border: 1px solid #2a2a2a; color: #888888; }"
             "QPushButton:hover { border-color: #3A7BFF; color: #E0E0E0; }"
@@ -3247,6 +3289,7 @@ class App(QWidget):
         out_row.addWidget(out_lbl)
         self._fx_output_combo = QComboBox()
         self._populate_fx_output_combo()
+        self._fx_output_combo.activated.connect(self._on_fx_device_changed)
         out_row.addWidget(self._fx_output_combo, 1)
         layout.addLayout(out_row)
 
@@ -3296,7 +3339,7 @@ class App(QWidget):
 
         layout.addStretch()
 
-        hint = QLabel("Tip: select VB-Cable or Voicemod as FX Output\nso the morphed audio reaches your games/apps.")
+        hint = QLabel("Aseta FX Output: CABLE Input (VB-Audio).\nAseta pelissä mikrofoni: CABLE Output (VB-Audio).\nStream käynnistyy automaattisesti — nappi kytkee vain efektin.")
         hint.setStyleSheet("color: #444444; font-size: 11px; border: none; margin-top: 4px;")
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -4393,6 +4436,8 @@ class App(QWidget):
             QTimer.singleShot(0, lambda: old_btn.set_playing(False))
         self._sb_playing_btn = btn
 
+        final_vol = max(0.0, self.settings.get("soundboard_volume", 1.0) * data.get("volume", 1.0))
+
         def _level_cb(level: float):
             # Silences the meter immediately when this slot's playback has been superseded
             self.update_output_level(level if self._sb_play_id == my_play_id else 0.0)
@@ -4403,7 +4448,7 @@ class App(QWidget):
                 wav = self._load_audio_as_wav(path)
                 if self._sb_play_id == my_play_id:
                     play_wav_bytes(wav, device_indices=self.get_selected_devices(),
-                                   level_callback=_level_cb)
+                                   level_callback=_level_cb, volume=final_vol)
                 self.update_output_level(0.0)
             except Exception as e:
                 if self._sb_play_id == my_play_id:
@@ -4440,29 +4485,51 @@ class App(QWidget):
 
     # ============ Voice FX ============
 
-    def _toggle_voice_fx(self):
-        if self._fx_toggle.isChecked():
-            in_dev = self.get_selected_input_device()
-            out_dev = self._fx_output_combo.currentData()
-            if in_dev is None:
-                self.append_status("Voice FX: select a microphone first")
-                self._fx_toggle.setChecked(False)
-                return
-            if out_dev is None:
-                self.append_status("Voice FX: select an output device first")
-                self._fx_toggle.setChecked(False)
-                return
-            self.settings["voice_fx_output_device"] = out_dev
-            save_settings(self.settings)
-            self._voice_fx.set_preset(self._current_fx_preset)
+    def _autostart_voice_fx(self):
+        in_dev = self.get_selected_input_device()
+        out_dev = self._fx_output_combo.currentData()
+        if in_dev is not None and out_dev is not None:
+            self._voice_fx.set_preset("Normal")
             mon_dev = self._fx_monitor_combo.currentData()
             hear_on = self._hear_myself_btn.isChecked()
             self._voice_fx.set_monitor(mon_dev, hear_on)
             self._voice_fx.start(in_dev, out_dev)
+            self.append_status("Voice FX: stream käynnistetty (efekti OFF)")
+
+    def _on_fx_device_changed(self):
+        out_dev = self._fx_output_combo.currentData()
+        if out_dev is not None:
+            self.settings["voice_fx_output_device"] = out_dev
+            save_settings(self.settings)
+        if self._voice_fx.is_active:
+            in_dev = self.get_selected_input_device()
+            if in_dev is not None and out_dev is not None:
+                was_on = self._fx_toggle.isChecked()
+                self._voice_fx.set_preset("Normal")
+                self._voice_fx.start(in_dev, out_dev)
+                if was_on:
+                    self._voice_fx.set_preset(self._current_fx_preset)
+
+    def _toggle_voice_fx(self):
+        if self._fx_toggle.isChecked():
+            if not self._voice_fx.is_active:
+                in_dev = self.get_selected_input_device()
+                out_dev = self._fx_output_combo.currentData()
+                if in_dev is None or out_dev is None:
+                    self.append_status("Voice FX: valitse mikrofoni ja FX Output ensin")
+                    self._fx_toggle.setChecked(False)
+                    return
+                self.settings["voice_fx_output_device"] = out_dev
+                save_settings(self.settings)
+                mon_dev = self._fx_monitor_combo.currentData()
+                hear_on = self._hear_myself_btn.isChecked()
+                self._voice_fx.set_monitor(mon_dev, hear_on)
+                self._voice_fx.start(in_dev, out_dev)
+            self._voice_fx.set_preset(self._current_fx_preset)
             self._fx_toggle.setText("Voice FX: ON")
         else:
-            self._voice_fx.stop()
-            self._fx_toggle.setText("Enable Voice FX")
+            self._voice_fx.set_preset("Normal")
+            self._fx_toggle.setText("Voice FX: OFF")
 
     def _select_fx_preset(self, preset: str):
         self._current_fx_preset = preset
