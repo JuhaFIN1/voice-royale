@@ -1367,6 +1367,15 @@ class SoundboardButton(QWidget):
             self.data_changed.emit(self.slot_index)
 
     def _clear(self):
+        sb_dir = os.path.realpath(os.path.join(BASE_PATH, "soundboard"))
+        for key in ("file", "image"):
+            path = self._data.get(key, "")
+            if path and os.path.isfile(path):
+                try:
+                    if os.path.realpath(path).startswith(sb_dir):
+                        os.remove(path)
+                except Exception:
+                    pass
         self._data = {"name": f"Slot {self.slot_index + 1}", "file": "", "image": "", "link_page_name": "", "volume": 1.0}
         self._refresh()
         self.data_changed.emit(self.slot_index)
@@ -5938,12 +5947,165 @@ def open_settings_dialog(parent_app: "App") -> None:
         "macOS: DMG-tiedosto aukeaa — vedä Voice Royale.app Applications-kansioon."
     ))
 
+    # ── Siivoa tiedostot -välilehti ───────────────────────────────────────
+    from PyQt6.QtWidgets import QListWidget as _LW, QListWidgetItem as _LWI, QAbstractItemView as _AIV
+
+    f_clean = QWidget()
+    lay_clean = QVBoxLayout(f_clean)
+    lay_clean.setContentsMargins(12, 12, 12, 12)
+    lay_clean.setSpacing(8)
+
+    lbl_clean_info = QLabel(
+        "Tarkistaa soundboard-kansion tiedostot ja etsii orpoja (ei viittausta yhdessäkään slotissa).\n"
+        "Valitse poistettavat ja paina Poista valitut."
+    )
+    lbl_clean_info.setWordWrap(True)
+    lbl_clean_info.setStyleSheet("color: #888; font-size: 11px;")
+    lay_clean.addWidget(lbl_clean_info)
+
+    scan_btn = _QPushButton("Tarkista tiedostot")
+    scan_btn.setStyleSheet(
+        "QPushButton { background: #1E2A3A; color: #6AA0FF; border: 1px solid #2A4A7A;"
+        " border-radius: 6px; padding: 7px 18px; font-weight: 700; }"
+        "QPushButton:hover { background: #1A3060; border-color: #3A7BFF; color: #AAC8FF; }"
+    )
+    lay_clean.addWidget(scan_btn)
+
+    clean_status = QLabel("")
+    clean_status.setStyleSheet("color: #888; font-size: 11px;")
+    lay_clean.addWidget(clean_status)
+
+    file_list = _LW()
+    file_list.setSelectionMode(_AIV.SelectionMode.MultiSelection)
+    file_list.setStyleSheet(
+        "QListWidget { background: #0E0E18; border: 1px solid #2a2a3a; border-radius: 6px;"
+        " color: #C0C0E0; font-size: 11px; }"
+        "QListWidget::item { padding: 4px 8px; }"
+        "QListWidget::item:selected { background: #1A2A50; color: #fff; }"
+        "QListWidget::item:hover { background: #141428; }"
+    )
+    lay_clean.addWidget(file_list, 1)
+
+    sel_row = _QHBoxLayout()
+    sel_all_btn = _QPushButton("Valitse kaikki")
+    sel_none_btn = _QPushButton("Poista valinnat")
+    del_btn = _QPushButton("Poista valitut")
+    del_btn.setEnabled(False)
+    del_btn.setStyleSheet(
+        "QPushButton { background: #2A0808; color: #FF4444; border: 1px solid #6B0000;"
+        " border-radius: 6px; padding: 7px 18px; font-weight: 700; }"
+        "QPushButton:hover { background: #3A0808; border-color: #FF3333; }"
+        "QPushButton:disabled { background: #1A1A1A; color: #444; border-color: #333; }"
+    )
+    for b in (sel_all_btn, sel_none_btn):
+        b.setStyleSheet(
+            "QPushButton { background: #1A1A2A; color: #888; border: 1px solid #333;"
+            " border-radius: 6px; padding: 7px 14px; }"
+            "QPushButton:hover { border-color: #666; color: #CCC; }"
+        )
+    sel_row.addWidget(sel_all_btn)
+    sel_row.addWidget(sel_none_btn)
+    sel_row.addStretch()
+    sel_row.addWidget(del_btn)
+    lay_clean.addLayout(sel_row)
+
+    # paths found by scan
+    _orphan_paths: list[str] = []
+
+    def _collect_refs(slots: list, out: set):
+        for s in slots:
+            for key in ("file", "image"):
+                p = s.get(key, "")
+                if p:
+                    out.add(os.path.normpath(p))
+            if s.get("folder_slots"):
+                _collect_refs(s["folder_slots"], out)
+
+    def _do_scan():
+        _orphan_paths.clear()
+        file_list.clear()
+        del_btn.setEnabled(False)
+
+        sb_dir = os.path.join(BASE_PATH, "soundboard")
+        audio_dir = os.path.join(sb_dir, "audio")
+        img_dir = os.path.join(sb_dir, "images")
+
+        # Collect all referenced paths from live soundboard state
+        refs: set[str] = set()
+        pages = parent_app.settings.get("soundboard_pages", [])
+        for page in pages:
+            _collect_refs(page.get("slots", []), refs)
+
+        # Scan files on disk
+        disk_files: list[str] = []
+        for d in (audio_dir, img_dir):
+            if os.path.isdir(d):
+                for fn in os.listdir(d):
+                    disk_files.append(os.path.join(d, fn))
+
+        orphans = [f for f in disk_files if os.path.normpath(f) not in refs]
+
+        if not orphans:
+            clean_status.setText(
+                f"Kaikki {len(disk_files)} tiedostoa on kaytossa — ei siivottavaa."
+            )
+            return
+
+        clean_status.setText(
+            f"Loydetty {len(orphans)} orpo tiedostoa / {len(disk_files)} yhteensa."
+        )
+        for path in sorted(orphans):
+            try:
+                size_kb = os.path.getsize(path) // 1024
+            except Exception:
+                size_kb = 0
+            item = _LWI(f"{os.path.basename(path)}  ({size_kb} KB)  —  {path}")
+            item.setData(256, path)  # Qt.UserRole = 256
+            file_list.addItem(item)
+            _orphan_paths.append(path)
+        del_btn.setEnabled(True)
+
+    def _do_delete():
+        selected = file_list.selectedItems()
+        if not selected:
+            clean_status.setText("Valitse ensin poistettavat tiedostot listalta.")
+            return
+        paths = [it.data(256) for it in selected]
+        names = "\n".join(f"  {os.path.basename(p)}" for p in paths)
+        from PyQt6.QtWidgets import QMessageBox as _MB
+        ans = _MB.question(
+            dlg, "Vahvista poisto",
+            f"Poistetaanko {len(paths)} tiedostoa?\n\n{names}\n\nTätä ei voi peruuttaa.",
+            _MB.StandardButton.Yes | _MB.StandardButton.No,
+            _MB.StandardButton.No,
+        )
+        if ans != _MB.StandardButton.Yes:
+            return
+        removed = 0
+        for path in paths:
+            try:
+                os.remove(path)
+                removed += 1
+            except Exception as e:
+                clean_status.setText(f"Virhe: {e}")
+        clean_status.setText(f"Poistettu {removed}/{len(paths)} tiedostoa.")
+        _do_scan()  # refresh list
+
+    scan_btn.clicked.connect(_do_scan)
+    sel_all_btn.clicked.connect(file_list.selectAll)
+    sel_none_btn.clicked.connect(file_list.clearSelection)
+    del_btn.clicked.connect(_do_delete)
+    file_list.itemSelectionChanged.connect(
+        lambda: del_btn.setEnabled(bool(file_list.selectedItems()))
+    )
+
     tabs.addTab(_scroll_tab(f1), "Käännös & TTS")
     tabs.addTab(_scroll_tab(f2), "Wake Word")
     tabs.addTab(_scroll_tab(f3), "Kielet")
     tabs.addTab(_scroll_tab(f4), "Pika & Data")
     tabs.addTab(sd_scroll, "Stream Deck")
     tabs.addTab(_scroll_tab(f6), "Asennus")
+    tabs.addTab(f_clean, "Siivoa")
     tabs.addTab(_scroll_tab(f7), "Päivitys")
 
     # ── Buttons ───────────────────────────────────────────────────────
