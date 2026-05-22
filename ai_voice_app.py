@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.24"
+APP_VERSION = "1.3.25"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -654,6 +654,83 @@ def _check_voicemeeter_routing() -> tuple[str, bool]:
         return "⚠ " + "\n  • ".join(parts), False
     except Exception as exc:
         return f"Virhe laitetarkistuksessa: {exc}", False
+
+
+def _set_windows_default_recording(name_contains: str) -> tuple[bool, str]:
+    """Set Windows default recording device using inline C# + PolicyConfig COM interface.
+    Works on Windows 10/11 without any extra Python modules.
+    """
+    if sys.platform != "win32":
+        return False, "Ei Windows"
+    import subprocess as _sp
+    ps = f"""
+Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices;
+[Guid("F8679F50-850A-41CF-9C72-430F290290C8")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IPolicyConfig {{
+  [PreserveSig] int _1();[PreserveSig] int _2();[PreserveSig] int _3();
+  [PreserveSig] int _4();[PreserveSig] int _5();[PreserveSig] int _6();
+  [PreserveSig] int _7();[PreserveSig] int _8();[PreserveSig] int _9();[PreserveSig] int _10();
+  [PreserveSig] int SetDefaultEndpoint([MarshalAs(UnmanagedType.LPWStr)] string id, uint role);
+  [PreserveSig] int _12();
+}}
+[Guid("870AF99C-171D-4F9E-AF0D-E63DF40C2BC9")]
+[ClassInterface(ClassInterfaceType.None)][ComImport] class PolicyConfigClient {{}}
+'@ -ErrorAction SilentlyContinue
+$t=[Type]::GetTypeFromCLSID([Guid]'BCDE0395-E52F-467C-8E3D-C4579291692E')
+$en=[Activator]::CreateInstance($t)
+$col=$en.EnumAudioEndpoints(1,1)
+$pc=[Activator]::CreateInstance([Type]::GetTypeFromCLSID([Guid]'870AF99C-171D-4F9E-AF0D-E63DF40C2BC9'))
+$set=$false
+for($i=0;$i-lt$col.GetCount();$i++){{
+  $d=$col.Item($i); $id=$d.GetId(); $s=$d.OpenPropertyStore(0); $nm=''
+  try{{$nm=$s.GetValue([ref]([System.Runtime.InteropServices.Marshal]::AllocHGlobal(20)))}}catch{{}}
+  if($nm -like '*{name_contains}*'){{
+    $pc.SetDefaultEndpoint($id,0);$pc.SetDefaultEndpoint($id,1);$pc.SetDefaultEndpoint($id,2)
+    $set=$true; Write-Output "OK:$nm"; break
+  }}
+}}
+if(-not $set){{Write-Output "NOTFOUND"}}
+"""
+    try:
+        r = _sp.run(
+            ["powershell", "-NonInteractive", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True, timeout=20,
+        )
+        out = r.stdout.strip()
+        if out.startswith("OK:"):
+            return True, f"✅ Windows oletusmikrofoni asetettu: {out[3:]}"
+        return False, "Laitetta ei löydy — aseta manuaalisesti"
+    except Exception as e:
+        return False, str(e)
+
+
+def _open_windows_sound_recording():
+    """Open Windows Sound settings to the Recording tab."""
+    import subprocess as _sp
+    _sp.Popen(["rundll32", "shell32.dll,Control_RunDLL", "mmsys.cpl", ",", "1"])
+
+
+def _get_voicemeeter_output_device_indices() -> list[int]:
+    """Return [Voicemeeter Input index, headphones index] from list_output_devices()."""
+    devices = list_output_devices()
+    vm_idx = next(
+        (idx for idx, n in devices if n.lower() == "voicemeeter input (vb-audio voicemeeter vaio)"),
+        None,
+    )
+    headphone_idx = next(
+        (idx for idx, n in devices if "headphones" in n.lower() and "realtek" in n.lower()),
+        None,
+    )
+    if headphone_idx is None:
+        headphone_idx = next(
+            (idx for idx, n in devices
+             if any(k in n.lower() for k in ("headphone", "headset", "kuuloke"))
+             and not any(k in n.lower() for k in ("voicemeeter", "cable", "virtual"))),
+            None,
+        )
+    return [i for i in [vm_idx, headphone_idx] if i is not None]
 
 
 def _voicemeeter_configure(mic_device_name: str, status_cb) -> None:
@@ -7185,19 +7262,47 @@ class SetupWizard(QDialog):
             self._wiz_vm_cfg_btn.setEnabled(False)
             self._wiz_vm_cfg_btn.setText("Konfiguroidaan...")
 
-            def _cb(msg):
+            def _bg():
+                # 1. Configure Voicemeeter routing
+                result_lines = []
+                _voicemeeter_configure(mic_name, lambda m: result_lines.append(m))
+                vm_msg = result_lines[-1] if result_lines else "Ei vastausta"
+                ok = "✅" in vm_msg
+
+                new_indices = []
+                win_msg = ""
+                dev_names = []
+                if ok:
+                    # 2. Auto-select Voice Royale output devices
+                    new_indices = _get_voicemeeter_output_device_indices()
+                    if new_indices:
+                        self._sd.selected_output_devices = new_indices
+                        self._sd.save()
+                        devices = list_output_devices()
+                        dev_names = [n for idx, n in devices if idx in new_indices]
+
+                    # 3. Set Windows default recording device
+                    _, win_msg = _set_windows_default_recording("Voicemeeter Out B")
+
                 def _apply():
-                    self._wiz_vm_result_lbl.setText(msg)
-                    ok = "✅" in msg
+                    lines = [vm_msg]
+                    if win_msg:
+                        lines.append(win_msg)
+                    if dev_names:
+                        lines.append(f"Voice Royale output: {', '.join(dev_names)}")
+                    self._wiz_vm_result_lbl.setText("\n".join(lines))
                     self._wiz_vm_result_lbl.setStyleSheet(
                         "color: #3fb950; font-size: 11px; background: transparent;" if ok
                         else "color: #f85149; font-size: 11px; background: transparent;"
                     )
                     self._wiz_vm_cfg_btn.setEnabled(True)
                     self._wiz_vm_cfg_btn.setText("Konfiguroi reititys")
+                    if ok:
+                        self.populate_output_devices()
+
                 QTimer.singleShot(0, _apply)
 
-            threading.Thread(target=_voicemeeter_configure, args=(mic_name, _cb), daemon=True).start()
+            threading.Thread(target=_bg, daemon=True).start()
 
         def _do_vm_wiz_test():
             msg, ok = _check_voicemeeter_routing()
@@ -7210,14 +7315,24 @@ class SetupWizard(QDialog):
         self._wiz_vm_cfg_btn.clicked.connect(_do_vm_wiz_configure)
         self._wiz_vm_test_btn.clicked.connect(_do_vm_wiz_test)
 
-        # ---- Game step reminder ----
+        # ---- Windows default mic note ----
         game_note = QLabel(
-            "Pelin viimeinen vaihe (tee tämä itse pelissä):\n"
-            "  Fortnite / Discord / muu peli → Asetukset → Mikrofoni → Voicemeeter Output"
+            "✅ Ei muutoksia peleissä tarvita — Konfiguroi-nappi asettaa Windows-oletusmikrofonin\n"
+            "automaattisesti (Voicemeeter Out B1). Fortnite, Discord ym. käyttävät sitä suoraan."
         )
-        game_note.setStyleSheet("color: #57a6ff; font-size: 11px; background: transparent;")
+        game_note.setStyleSheet("color: #3fb950; font-size: 11px; background: transparent;")
         game_note.setWordWrap(True)
         bl.addWidget(game_note)
+
+        manual_mic_btn = QPushButton("Avaa Windows Ääni → Tallennuslaitteet (manuaalinen vaihtoehto)")
+        manual_mic_btn.setFixedHeight(30)
+        manual_mic_btn.setStyleSheet(
+            "QPushButton { background: #161b22; color: #8b949e; border: 1px solid #30363d;"
+            " border-radius: 5px; padding: 4px 10px; font-size: 11px; }"
+            "QPushButton:hover { color: #c9d1d9; }"
+        )
+        manual_mic_btn.clicked.connect(_open_windows_sound_recording)
+        bl.addWidget(manual_mic_btn)
 
         bl.addStretch()
 
