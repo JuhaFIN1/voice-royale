@@ -2388,10 +2388,16 @@ def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None, v
         # Use sd.OutputStream per device — thread-safe, no global stream conflicts
         # Level callback is driven from inside the write loop (primary device only)
         # so it stays in sync with actual audio output instead of a free-running timer.
+        device_errors: list[str] = []
+        device_errors_lock = threading.Lock()
+
         def play_to_device(device_index, report_level=False):
             try:
                 info = sd.query_devices(device_index) if device_index is not None else sd.query_devices(sd.default.device[1])
+                dev_name = info.get("name", str(device_index))
                 if info['max_output_channels'] == 0:
+                    with device_errors_lock:
+                        device_errors.append(f"'{dev_name}' ei ole toistolaiteet (max_output_channels=0)")
                     return
                 sr = samplerate
                 data = audio_data
@@ -2425,7 +2431,13 @@ def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None, v
                 if report_level and level_callback is not None:
                     level_callback(0.0)
             except Exception as e:
-                print(f"Warning: Failed to play to device {device_index}: {e}")
+                dev_name = str(device_index)
+                try:
+                    dev_name = sd.query_devices(device_index)["name"]
+                except Exception:
+                    pass
+                with device_errors_lock:
+                    device_errors.append(f"'{dev_name}': {e}")
 
         targets = device_indices if device_indices else [None]
         threads = []
@@ -2435,6 +2447,9 @@ def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None, v
             threads.append(t)
         for t in threads:
             t.join()
+
+        if device_errors:
+            raise RuntimeError("Äänen toisto epäonnistui:\n" + "\n".join(device_errors))
 
     except Exception as e:
         raise RuntimeError(f"Audio playback failed: {e}") from e
