@@ -185,6 +185,7 @@ jobs:
           ln -s /Applications "dmg_stage/Applications"
           mkdir -p "dmg_stage/Stream Deck Plugin"
           cp "streamdeck-plugin/com.voiceroyale.streamDeckPlugin" "dmg_stage/Stream Deck Plugin/"
+          sleep 2
           hdiutil create \
             -volname "Voice Royale" \
             -srcfolder dmg_stage \
