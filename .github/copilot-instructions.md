@@ -7,7 +7,7 @@ All logic in one file: `ai_voice_app.py` (~6800 lines).
 
 Working directory: `E:\CLOUDS\AI-SYSTEMS\ai-voice-router\`
 GitHub: https://github.com/JuhaFIN1/voice-royale
-Current version: `APP_VERSION = "1.3.18"` (constant near top of file; CI auto-patches from git tag)
+Current version: `APP_VERSION = "1.3.19"` (constant near top of file; CI auto-patches from git tag)
 
 ---
 
@@ -146,7 +146,7 @@ Three backup modes selectable via radio dialog (`_ask_mode()`):
 
 `_BACKUP_MODES` dict drives both export and import. Soundboard import merges only `soundboard_pages` into current settings.
 
-### Voicemeeter Banana (chat routing) — v1.3.18+
+### Voicemeeter Banana (chat routing) — v1.3.19+
 
 Windows-only. Implemented in Settings → Asennus tab (hidden on non-Windows).
 
