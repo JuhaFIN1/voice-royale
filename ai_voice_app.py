@@ -2101,23 +2101,6 @@ def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None, v
         if volume != 1.0:
             audio_data = np.clip(audio_data.astype(np.float32) * volume, -32768, 32767).astype(np.int16)
 
-        # Start level meter thread if callback provided
-        if level_callback is not None:
-            flat = audio_data.flatten().astype(np.float32) / 32768.0
-            chunk_size = max(1, int(samplerate * 0.05))  # 50ms chunks
-
-            def _level_thread():
-                for i in range(0, len(flat), chunk_size):
-                    if stop_event is not None and stop_event.is_set():
-                        break
-                    chunk = flat[i:i + chunk_size]
-                    if len(chunk) > 0:
-                        level_callback(float(np.max(np.abs(chunk))))
-                    time.sleep(chunk_size / samplerate)
-                level_callback(0.0)
-
-            threading.Thread(target=_level_thread, daemon=True).start()
-
         # Handle single device or multiple devices
         if device_indices is None:
             device_indices = []
@@ -2127,7 +2110,9 @@ def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None, v
             device_indices = []
 
         # Use sd.OutputStream per device — thread-safe, no global stream conflicts
-        def play_to_device(device_index):
+        # Level callback is driven from inside the write loop (primary device only)
+        # so it stays in sync with actual audio output instead of a free-running timer.
+        def play_to_device(device_index, report_level=False):
             try:
                 info = sd.query_devices(device_index) if device_index is not None else sd.query_devices(sd.default.device[1])
                 if info['max_output_channels'] == 0:
@@ -2155,15 +2140,21 @@ def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None, v
                         if stop_event is not None and stop_event.is_set():
                             break
                         end = min(offset + _CHUNK, len(out))
-                        stream.write(out[offset:end])
+                        chunk = out[offset:end]
+                        stream.write(chunk)
+                        if report_level and level_callback is not None:
+                            flat_chunk = chunk.flatten().astype(np.float32) / 32768.0
+                            level_callback(float(np.max(np.abs(flat_chunk))))
                         offset = end
+                if report_level and level_callback is not None:
+                    level_callback(0.0)
             except Exception as e:
                 print(f"Warning: Failed to play to device {device_index}: {e}")
 
         targets = device_indices if device_indices else [None]
         threads = []
-        for dev_idx in targets:
-            t = threading.Thread(target=play_to_device, args=(dev_idx,), daemon=True)
+        for i, dev_idx in enumerate(targets):
+            t = threading.Thread(target=play_to_device, args=(dev_idx, i == 0), daemon=True)
             t.start()
             threads.append(t)
         for t in threads:
@@ -2734,6 +2725,7 @@ class App(QWidget):
         self._sb_play_id: int = 0
         self._sb_playing_btn: "SoundboardButton | None" = None
         self._sb_stop_event: threading.Event = threading.Event()
+        self._play_stop_event: threading.Event = threading.Event()  # stops TTS/speak/favorites
 
         # Stream Deck HTTP server (for official Elgato plugin)
         self._stream_deck = StreamDeckHttpServer(self.append_status)
@@ -3337,6 +3329,8 @@ class App(QWidget):
         self._sb_play_id += 1
         self._sb_stop_event.set()
         self._sb_stop_event = threading.Event()
+        self._play_stop_event.set()
+        self._play_stop_event = threading.Event()
         self.update_output_level(0.0)
         if self._sb_playing_btn:
             btn = self._sb_playing_btn
@@ -4001,6 +3995,7 @@ class App(QWidget):
                 wav_bytes,
                 device_indices=self.get_selected_devices(),
                 level_callback=self.update_output_level,
+                stop_event=self._play_stop_event,
             )
             self.update_output_level(0.0)
         except Exception as e:
@@ -4342,6 +4337,7 @@ class App(QWidget):
                 wav_out,
                 device_indices=self.get_selected_devices(),
                 level_callback=self.update_output_level,
+                stop_event=self._play_stop_event,
             )
             self.update_output_level(0.0)
             self.append_status("Wake-translate complete.")
@@ -5038,6 +5034,7 @@ class App(QWidget):
                 wav_bytes,
                 device_indices=self.get_selected_devices(),
                 level_callback=self.update_output_level,
+                stop_event=self._play_stop_event,
             )
             self.update_output_level(0.0)
             self.append_status("Playback complete.")
