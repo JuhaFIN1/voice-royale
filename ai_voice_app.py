@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.18"
+APP_VERSION = "1.3.19"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -461,10 +461,7 @@ def _install_vbcable(status_cb) -> None:
 # =========================
 
 _VM_REG_PATH = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
-_VM_BANANA_EXE = "VoicemeeterBanana.exe"
 _VM_REMOTE_DLL = "VoicemeeterRemote64.dll"
-_VM_DOWNLOAD_URL = "https://download.vb-audio.com/Download_CABLE/VoicemeeterProSetup_v20240516.zip"
-_VM_FALLBACK_URL = "https://vb-audio.com/Voicemeeter/VoicemeeterBananaSetup_v2060.exe"
 
 
 def _is_voicemeeter_installed() -> bool:
@@ -510,56 +507,118 @@ def _get_voicemeeter_dll_path() -> str | None:
     return None
 
 
+def _get_voicemeeter_download_url() -> str:
+    """Scrape banana.htm for the latest installer URL, fall back to a known CDN path."""
+    import urllib.request, re as _re
+    candidates = []
+    try:
+        req = urllib.request.Request(
+            "https://vb-audio.com/Voicemeeter/banana.htm",
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            html = r.read().decode("utf-8", errors="ignore")
+        for pat in [
+            r'(https?://[^"\']*[Vv]oicemeeter[^"\']*\.(zip|exe))',
+            r'href="(/[^"\']*[Vv]oicemeeter[^"\']*\.(zip|exe))"',
+        ]:
+            for m in _re.finditer(pat, html):
+                url = m.group(1)
+                if not url.startswith("http"):
+                    url = "https://vb-audio.com" + url
+                if url not in candidates:
+                    candidates.append(url)
+    except Exception:
+        pass
+    # Prefer zip over exe, prefer "Banana" in name
+    for url in candidates:
+        if "banana" in url.lower() or "Banana" in url:
+            return url
+    if candidates:
+        return candidates[0]
+    # Hard-coded CDN fallback — NSIS installer, supports /S silent flag
+    return "https://download.vb-audio.com/Download_CABLE/VoicemeeterBananaSetup_v2.0.9.0.zip"
+
+
 def _install_voicemeeter(status_cb) -> None:
     """Download and silent-install Voicemeeter Banana. Runs in a background thread."""
     import tempfile
-    import urllib.request
     import subprocess
+    import zipfile
 
     try:
-        status_cb("Downloading Voicemeeter Banana...")
-        tmp_dir = tempfile.mkdtemp(prefix="voicemeeter_")
+        status_cb("Haetaan latauspaikka...")
+        url = _get_voicemeeter_download_url()
 
-        # Try zip package first (contains versioned exe inside)
+        tmp_dir = tempfile.mkdtemp(prefix="voicemeeter_")
+        is_zip = url.lower().endswith(".zip")
+        dest = os.path.join(tmp_dir, "vm.zip" if is_zip else "VoicemeeterSetup.exe")
+
+        # Stream download with progress so the UI knows we're alive
+        status_cb("Ladataan Voicemeeter Banana...")
         try:
-            import zipfile
-            zip_path = os.path.join(tmp_dir, "vm.zip")
-            urllib.request.urlretrieve(_VM_DOWNLOAD_URL, zip_path)
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(tmp_dir)
-            # Find the setup exe
-            setup_path = None
-            for root, _, files in os.walk(tmp_dir):
-                for f in files:
-                    if f.lower().startswith("voicemeeter") and f.lower().endswith(".exe"):
-                        setup_path = os.path.join(root, f)
+            resp = requests.get(url, stream=True, timeout=30)
+            resp.raise_for_status()
+            total = int(resp.headers.get("content-length", 0))
+            downloaded = 0
+            with open(dest, "wb") as fh:
+                for chunk in resp.iter_content(65536):
+                    fh.write(chunk)
+                    downloaded += len(chunk)
+                    if total:
+                        pct = int(downloaded * 100 / total)
+                        status_cb(f"Ladataan... {pct}%")
+        except Exception as exc:
+            status_cb(f"Latausvirhe: {exc}\nManuaalisesti: vb-audio.com/Voicemeeter")
+            return
+
+        setup_path = None
+        if is_zip:
+            status_cb("Puretaan...")
+            try:
+                with zipfile.ZipFile(dest, "r") as zf:
+                    zf.extractall(tmp_dir)
+                for root, _, files in os.walk(tmp_dir):
+                    for f in files:
+                        if f.lower().endswith(".exe") and "voicemeeter" in f.lower():
+                            setup_path = os.path.join(root, f)
+                            break
+                    if setup_path:
                         break
-                if setup_path:
-                    break
-        except Exception:
-            setup_path = None
+            except Exception as exc:
+                status_cb(f"Purkuvirhe: {exc}")
+                return
+        else:
+            setup_path = dest
 
         if not setup_path:
-            status_cb("Downloading setup directly...")
-            setup_path = os.path.join(tmp_dir, "VoicemeeterSetup.exe")
-            urllib.request.urlretrieve(_VM_FALLBACK_URL, setup_path)
+            status_cb("Asennustiedostoa ei löydy paketista. Yritä manuaalisesti: vb-audio.com/Voicemeeter")
+            return
 
-        status_cb("Installing — approve the UAC admin prompt that appears...")
-        subprocess.run(
-            ["powershell", "-Command",
-             f"Start-Process -FilePath '{setup_path}' -ArgumentList '/S' -Verb RunAs -Wait"],
+        status_cb("Asennetaan — hyväksy UAC-pyyntö joka ilmestyy...")
+        # Quote the path to handle spaces; NSIS /S = silent, /SD = default answers
+        ps_cmd = (
+            f'Start-Process -FilePath \'"{setup_path}"\' '
+            f'-ArgumentList \'/S\' -Verb RunAs -Wait'
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
             capture_output=True, timeout=300,
         )
 
         if _is_voicemeeter_installed():
-            status_cb("✅ Voicemeeter Banana installed! Restart your PC to finish driver setup.")
+            status_cb("✅ Voicemeeter Banana asennettu! Käynnistä PC uudelleen viimeistelläksesi ajuriasennuksen.")
         else:
-            status_cb("Install ran — check Add/Remove Programs. A PC restart may be needed.")
+            stderr = result.stderr.decode("utf-8", errors="ignore").strip()
+            if "cancel" in stderr.lower() or "declined" in stderr.lower() or result.returncode != 0:
+                status_cb(f"Asennus peruutettu tai epäonnistui (koodi {result.returncode}).\nKokeile manuaalisesti: vb-audio.com/Voicemeeter")
+            else:
+                status_cb("Asennus suoritettu. Jos Voicemeeter ei näy, käynnistä PC uudelleen.")
 
-    except urllib.error.URLError as exc:
-        status_cb(f"Download failed: {exc}\nManual: vb-audio.com/Voicemeeter")
+    except subprocess.TimeoutExpired:
+        status_cb("Asennus kesti liian kauan — tarkista tehtävienhallinnasta onko asennus kesken.")
     except Exception as exc:
-        status_cb(f"Error: {exc}")
+        status_cb(f"Virhe: {exc}")
 
 
 def _check_voicemeeter_routing() -> tuple[str, bool]:
