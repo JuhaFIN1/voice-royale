@@ -7,7 +7,7 @@ All logic in one file: `ai_voice_app.py` (~6800 lines).
 
 Working directory: `E:\CLOUDS\AI-SYSTEMS\ai-voice-router\`
 GitHub: https://github.com/JuhaFIN1/voice-royale
-Current version: `APP_VERSION = "1.3.19"` (constant near top of file; CI auto-patches from git tag)
+Current version: `APP_VERSION = "1.3.25"` (constant near top of file; CI auto-patches from git tag)
 
 ---
 
@@ -28,7 +28,7 @@ Current version: `APP_VERSION = "1.3.19"` (constant near top of file; CI auto-pa
 | `SoundboardButton` | Soundboard slot — see Soundboard section |
 | `VoiceEffectProcessor` | Real-time DSP: pitch/robot + VB-Cable output. Always-on stream, toggle = preset only |
 | `class App(QWidget)` | Entire UI and logic |
-| `SetupWizard` | First-run dialog (4 steps: API key → VB-Cable → Devices with recording test) |
+| `SetupWizard` | First-run dialog (5 steps: API key → VB-Cable → Voicemeeter Banana → Devices with recording test) |
 | `open_settings_dialog()` | 8-tab settings window (see tabs below) |
 
 ---
@@ -44,7 +44,7 @@ Tab font: 10px, padding: 5px 9px.
 | 3 | Kielet | Custom languages |
 | 4 | Pika & Data | Hotkey, history, data export/import ZIP |
 | 5 | Stream Deck | HTTP API settings (port 17842) |
-| 6 | Asennus | Run Setup Wizard again, Windows autostart, Python packages, VB-Cable |
+| 6 | Asennus | Run Setup Wizard again, Windows autostart, Python packages, VB-Cable, Voicemeeter Banana |
 | 7 | Siivoa | Scan soundboard audio/images dirs for orphaned files; multi-select + confirm before delete |
 | 8 | Päivitys | Version check via GitHub releases API, download & open installer |
 
@@ -146,27 +146,67 @@ Three backup modes selectable via radio dialog (`_ask_mode()`):
 
 `_BACKUP_MODES` dict drives both export and import. Soundboard import merges only `soundboard_pages` into current settings.
 
-### Voicemeeter Banana (chat routing) — v1.3.19+
+### Voicemeeter Banana (chat routing) — v1.3.25+
 
-Windows-only. Implemented in Settings → Asennus tab (hidden on non-Windows).
+Windows-only. Implemented in Settings → Asennus tab and SetupWizard page 4.
 
-Functions (module level, near VB-Cable block):
+#### Routing architecture
+
+```
+Voice Royale TTS/soundboard → Voicemeeter Input (Strip[2]) → B1 bus → Voicemeeter Out B1
+RodeCaster Chat / Mix Minus mic → Strip[0] → B1 bus → Voicemeeter Out B1
+Windows default recording = Voicemeeter Out B1 → all games/apps automatically
+```
+
+**CABLE Input is NOT used** — Voicemeeter holds it in exclusive mode → PaErrorCode -9996.
+Always use `Voicemeeter Input (VB-Audio Voicemeeter VAIO)` as Voice Royale output device.
+
+#### Functions (module level, near VB-Cable block)
+
 - `_is_voicemeeter_installed()` — registry scan + sounddevice name check
 - `_get_voicemeeter_dll_path()` — finds `VoicemeeterRemote64.dll` in Program Files
-- `_install_voicemeeter(status_cb)` — downloads zip, extracts, silent-installs (`/S`), UAC prompt via PowerShell
+- `_get_voicemeeter_download_url()` — scrapes banana.htm for download link
+- `_install_voicemeeter(status_cb)` — requests stream download + progress %, PowerShell /S silent install
+- `_check_voicemeeter_routing()` — verifies "Voicemeeter Output" (recording) + "Voicemeeter Input" (playback) exist
 - `_voicemeeter_configure(mic_device_name, status_cb)` — ctypes → `VoicemeeterRemote64.dll`:
   - `VBVMR_Login()` / `VBVMR_Logout()`
-  - `VBVMR_SetParameterStringA("Strip[0].device.wdm", ...)` — set HW Input 1 to user's mic
-  - `Strip[0].B1 = 1` and `Strip[2].B1 = 1` → both inputs to B1 virtual bus
-  - `Bus[3].On = 1` — enable B1 output ("Voicemeeter Output" recording device)
+  - `Strip[0].device.wdm` = user's mic (RodeCaster Chat / Mix Minus)
+  - `Strip[0].B1 = 1` and `Strip[2].B1 = 1` → both to B1 virtual bus
+  - `Bus[3].On = 1` → Voicemeeter Output recording device on
+- `_set_windows_default_recording(name_contains)` — inline C# + IPolicyConfig COM via PowerShell:
+  - Sets Windows default recording device (all 3 roles: eConsole/eCommunications/eAll)
+  - Returns `(bool, message)`
+- `_open_windows_sound_recording()` — opens Windows Sound → Recording tab (manual fallback)
+- `_get_voicemeeter_output_device_indices()` — returns `[voicemeeter_input_idx, headphones_idx]` from `list_output_devices()`
 
-Routing goal: RodeCaster Chat (Mix Minus mic) + VB-Cable Out (VR TTS) → Voicemeeter B1 → game mic.
-User's one manual step: set game/Discord mic to "Voicemeeter Output".
-User sets VR output device to "CABLE Input (VB-Audio)" in Voice Royale.
+#### Wizard plug-and-play (v1.3.25)
+
+`_do_vm_wiz_configure` in SetupWizard page 4 does all three steps in one background thread:
+1. Voicemeeter routing via `_voicemeeter_configure`
+2. Auto-selects `Voicemeeter Input` + headphones as Voice Royale output devices (saves to `_sd`)
+3. Sets Windows default recording to `Voicemeeter Out B1` via `_set_windows_default_recording`
+4. Calls `populate_output_devices()` on success to refresh UI
+
+No manual game settings needed — Windows default mic is set automatically.
+
+#### PortAudio error codes
+
+- **-9993**: Input/output devices use different host API → `_populate_fx_output_combo` must use `list_output_devices()` (not raw `sd.query_devices()`)
+- **-9996**: Invalid device = exclusive mode lock (CABLE Input) → use Voicemeeter Input instead
+- **-9999**: WDM-KS blocking API not supported → `_best_audio_devices` skips WDM-KS if non-WDM alternative exists
+
+#### Audio device helpers (v1.3.22+)
+
+- `_best_audio_devices(channel_key)` — replaces `_dedup_audio_devices`:
+  - Skips WDM-KS when a non-WDM alternative exists for same device name
+  - Deduplicates by name, preferring WASAPI > DirectSound > MME
+  - Removes MME-truncated duplicate entries (MME names are ≤31 chars, prefix of longer names)
+- `_fit_combo_dropdown(combo)` — sets `combo.view().setMinimumWidth()` based on longest item
+- `_add_device_row()` — `setMaximumWidth(500)` (was 280)
 
 UI in Settings → Asennus:
 - Status label (installed / not installed)
-- Install button (hidden on non-Windows; skipped on macOS by `if sys.platform == "win32":` guard)
+- Install button (hidden on non-Windows)
 - Device dropdown (recording devices, pre-selects RodeCaster/Chat if found)
 - "Konfiguroi reititys" button + status label
 
