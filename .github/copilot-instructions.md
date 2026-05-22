@@ -7,7 +7,7 @@ All logic in one file: `ai_voice_app.py` (~6800 lines).
 
 Working directory: `E:\CLOUDS\AI-SYSTEMS\ai-voice-router\`
 GitHub: https://github.com/JuhaFIN1/voice-royale
-Current version: `APP_VERSION = "1.3.16"` (constant near top of file; CI auto-patches from git tag)
+Current version: `APP_VERSION = "1.3.17"` (constant near top of file; CI auto-patches from git tag)
 
 ---
 
@@ -145,6 +145,30 @@ Three backup modes selectable via radio dialog (`_ask_mode()`):
 - **soundboard** — `soundboard/` audio+images + `soundboard_pages` key from `app_settings.json` only
 
 `_BACKUP_MODES` dict drives both export and import. Soundboard import merges only `soundboard_pages` into current settings.
+
+### Voicemeeter Banana (chat routing) — v1.3.17+
+
+Windows-only. Implemented in Settings → Asennus tab (hidden on non-Windows).
+
+Functions (module level, near VB-Cable block):
+- `_is_voicemeeter_installed()` — registry scan + sounddevice name check
+- `_get_voicemeeter_dll_path()` — finds `VoicemeeterRemote64.dll` in Program Files
+- `_install_voicemeeter(status_cb)` — downloads zip, extracts, silent-installs (`/S`), UAC prompt via PowerShell
+- `_voicemeeter_configure(mic_device_name, status_cb)` — ctypes → `VoicemeeterRemote64.dll`:
+  - `VBVMR_Login()` / `VBVMR_Logout()`
+  - `VBVMR_SetParameterStringA("Strip[0].device.wdm", ...)` — set HW Input 1 to user's mic
+  - `Strip[0].B1 = 1` and `Strip[2].B1 = 1` → both inputs to B1 virtual bus
+  - `Bus[3].On = 1` — enable B1 output ("Voicemeeter Output" recording device)
+
+Routing goal: RodeCaster Chat (Mix Minus mic) + VB-Cable Out (VR TTS) → Voicemeeter B1 → game mic.
+User's one manual step: set game/Discord mic to "Voicemeeter Output".
+User sets VR output device to "CABLE Input (VB-Audio)" in Voice Royale.
+
+UI in Settings → Asennus:
+- Status label (installed / not installed)
+- Install button (hidden on non-Windows; skipped on macOS by `if sys.platform == "win32":` guard)
+- Device dropdown (recording devices, pre-selects RodeCaster/Chat if found)
+- "Konfiguroi reititys" button + status label
 
 ### Code signing
 - Local: `build_app.bat` reads `SIGN_CERT_PATH` + `SIGN_CERT_PASSWORD` from `.env`.

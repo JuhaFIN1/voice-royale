@@ -1,7 +1,7 @@
 [Setup]
 AppId={{F3A7C2E1-9B4D-4F8A-BC23-1E5D7A9F0C42}
 AppName=Voice Royale
-AppVersion=1.3.13
+AppVersion=1.3.17
 AppPublisher=Juha Lempiäinen
 AppPublisherURL=https://github.com/JuhaFIN1/voice-royale
 AppSupportURL=https://github.com/JuhaFIN1/voice-royale/issues
@@ -9,7 +9,7 @@ DefaultDirName={autopf}\Voice Royale
 DefaultGroupName=Voice Royale
 AllowNoIcons=yes
 OutputDir=installer_output
-OutputBaseFilename=Voice_Royale_Setup_1.3.13
+OutputBaseFilename=Voice_Royale_Setup_1.3.17
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

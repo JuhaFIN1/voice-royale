@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.16"
+APP_VERSION = "1.3.17"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -454,6 +454,177 @@ def _install_vbcable(status_cb) -> None:
         status_cb(f"Download failed: {exc}\nManual download: vb-audio.com/Cable")
     except Exception as exc:
         status_cb(f"Error: {exc}")
+
+
+# =========================
+# VOICEMEETER BANANA
+# =========================
+
+_VM_REG_PATH = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+_VM_BANANA_EXE = "VoicemeeterBanana.exe"
+_VM_REMOTE_DLL = "VoicemeeterRemote64.dll"
+_VM_DOWNLOAD_URL = "https://download.vb-audio.com/Download_CABLE/VoicemeeterProSetup_v20240516.zip"
+_VM_FALLBACK_URL = "https://vb-audio.com/Voicemeeter/VoicemeeterBananaSetup_v2060.exe"
+
+
+def _is_voicemeeter_installed() -> bool:
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            try:
+                with winreg.OpenKey(hive, _VM_REG_PATH) as base:
+                    i = 0
+                    while True:
+                        try:
+                            sub = winreg.EnumKey(base, i)
+                            if "voicemeeter" in sub.lower():
+                                return True
+                        except OSError:
+                            break
+                        i += 1
+            except OSError:
+                pass
+    except Exception:
+        pass
+    # Fallback: check if any sounddevice has Voicemeeter
+    try:
+        return any("voicemeeter" in d["name"].lower() for d in sd.query_devices())
+    except Exception:
+        return False
+
+
+def _get_voicemeeter_dll_path() -> str | None:
+    """Return path to VoicemeeterRemote64.dll or None."""
+    search_dirs = [
+        os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "VB", "Voicemeeter"),
+        os.path.join(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"), "VB", "Voicemeeter"),
+        r"C:\Program Files\VB\Voicemeeter",
+        r"C:\Program Files (x86)\VB\Voicemeeter",
+    ]
+    for d in search_dirs:
+        p = os.path.join(d, _VM_REMOTE_DLL)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _install_voicemeeter(status_cb) -> None:
+    """Download and silent-install Voicemeeter Banana. Runs in a background thread."""
+    import tempfile
+    import urllib.request
+    import subprocess
+
+    try:
+        status_cb("Downloading Voicemeeter Banana...")
+        tmp_dir = tempfile.mkdtemp(prefix="voicemeeter_")
+
+        # Try zip package first (contains versioned exe inside)
+        try:
+            import zipfile
+            zip_path = os.path.join(tmp_dir, "vm.zip")
+            urllib.request.urlretrieve(_VM_DOWNLOAD_URL, zip_path)
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(tmp_dir)
+            # Find the setup exe
+            setup_path = None
+            for root, _, files in os.walk(tmp_dir):
+                for f in files:
+                    if f.lower().startswith("voicemeeter") and f.lower().endswith(".exe"):
+                        setup_path = os.path.join(root, f)
+                        break
+                if setup_path:
+                    break
+        except Exception:
+            setup_path = None
+
+        if not setup_path:
+            status_cb("Downloading setup directly...")
+            setup_path = os.path.join(tmp_dir, "VoicemeeterSetup.exe")
+            urllib.request.urlretrieve(_VM_FALLBACK_URL, setup_path)
+
+        status_cb("Installing — approve the UAC admin prompt that appears...")
+        subprocess.run(
+            ["powershell", "-Command",
+             f"Start-Process -FilePath '{setup_path}' -ArgumentList '/S' -Verb RunAs -Wait"],
+            capture_output=True, timeout=300,
+        )
+
+        if _is_voicemeeter_installed():
+            status_cb("✅ Voicemeeter Banana installed! Restart your PC to finish driver setup.")
+        else:
+            status_cb("Install ran — check Add/Remove Programs. A PC restart may be needed.")
+
+    except urllib.error.URLError as exc:
+        status_cb(f"Download failed: {exc}\nManual: vb-audio.com/Voicemeeter")
+    except Exception as exc:
+        status_cb(f"Error: {exc}")
+
+
+def _voicemeeter_configure(mic_device_name: str, status_cb) -> None:
+    """Configure Voicemeeter Banana routing via VoicemeeterRemote64.dll.
+
+    Routes:
+      - Hardware Input 1 → selected recording device (RodeCaster Chat / Mix Minus)
+      - Virtual Input (VB-Cable Out) → VR TTS audio
+      Both → B1 virtual output bus (becomes Windows default mic for games)
+    """
+    import ctypes
+    import ctypes.wintypes
+
+    dll_path = _get_voicemeeter_dll_path()
+    if not dll_path:
+        status_cb("VoicemeeterRemote64.dll not found. Is Voicemeeter Banana installed?")
+        return
+
+    try:
+        vm = ctypes.WinDLL(dll_path)
+        # Login
+        res = vm.VBVMR_Login()
+        if res not in (0, 1):  # 0=OK, 1=OK+launch
+            status_cb(f"Voicemeeter login failed (code {res}). Is Voicemeeter running?")
+            return
+
+        import time
+        time.sleep(1.5)  # Let Voicemeeter start if it just launched
+
+        # Helper: set parameter string
+        def set_param_str(param: str, value: str):
+            vm.VBVMR_SetParameterStringA(param.encode(), value.encode())
+
+        # Helper: set parameter float
+        def set_param_float(param: str, value: float):
+            vm.VBVMR_SetParameterFloat(param.encode(), ctypes.c_float(value))
+
+        # Hardware Input 1 (Strip[0]): set device to user's chosen recording device
+        # Voicemeeter uses WDM:, MME:, or KS: prefix
+        if mic_device_name:
+            set_param_str("Strip[0].device.wdm", mic_device_name)
+        set_param_float("Strip[0].A1", 0.0)   # not to physical output
+        set_param_float("Strip[0].A2", 0.0)
+        set_param_float("Strip[0].B1", 1.0)   # → B1 (virtual out bus)
+        set_param_float("Strip[0].B2", 0.0)
+
+        # Virtual Input (Strip[2] in Banana = first virtual cable input)
+        # VB-Cable Out is routed here by the user's output device selection in Voice Royale
+        set_param_float("Strip[2].A1", 0.0)
+        set_param_float("Strip[2].A2", 0.0)
+        set_param_float("Strip[2].B1", 1.0)   # → B1
+        set_param_float("Strip[2].B2", 0.0)
+
+        # Bus B1 on (virtual output — appears as "Voicemeeter Output" recording device)
+        set_param_float("Bus[3].On", 1.0)
+
+        time.sleep(0.5)
+        vm.VBVMR_Logout()
+        status_cb(
+            "✅ Voicemeeter configured!\n"
+            "Last step: in Fortnite/game, set microphone to 'Voicemeeter Output' (or Windows Default).\n"
+            "In Voice Royale, set TTS output device to 'CABLE Input (VB-Audio)'."
+        )
+    except Exception as exc:
+        status_cb(f"Configuration error: {exc}")
 
 
 # =========================
@@ -5812,6 +5983,106 @@ def open_settings_dialog(parent_app: "App") -> None:
 
     vbc_install_btn.clicked.connect(_do_vbc_install)
     f6.addRow("", vbc_install_btn)
+
+    # ---- Voicemeeter Banana (chat routing) ----
+    if sys.platform == "win32":
+        f6.addRow(_header("Chat-reititys (Voicemeeter Banana)"))
+
+        _vm_installed = _is_voicemeeter_installed()
+        vm_status_lbl = QLabel(
+            "Voicemeeter Banana: ✅ Asennettu" if _vm_installed else "Voicemeeter Banana: ❌ Ei asennettu"
+        )
+        vm_status_lbl.setStyleSheet(
+            "color: #7fc97f; font-size: 13px;" if _vm_installed else "color: #ff8888; font-size: 13px;"
+        )
+        f6.addRow(_lbl("Tila:"), vm_status_lbl)
+        f6.addRow("", _desc(
+            "Voicemeeter Banana reitittää sekä RodeCaster-mikrofonisi (Chat/Mix Minus) että "
+            "Voice Royalen TTS-äänen yhden virtuaalimikrofonin kautta peliin.\n"
+            "Asennuksen jälkeen:\n"
+            "  1. Aseta Voice Royalessa lähtölaite → 'CABLE Input (VB-Audio)'\n"
+            "  2. Pelissä/Discordissa: mikrofoni → 'Voicemeeter Output' (tai Windowsin oletus)\n"
+            "  3. Klikkaa 'Konfiguroi reititys' ja valitse RodeCaster Chat -laite."
+        ))
+
+        vm_install_btn = _QPushButton(
+            "Voicemeeter on jo asennettu" if _vm_installed else "Asenna Voicemeeter Banana (ilmainen)"
+        )
+        vm_install_btn.setEnabled(not _vm_installed)
+
+        vm_cfg_status_lbl = QLabel("")
+        vm_cfg_status_lbl.setWordWrap(True)
+        vm_cfg_status_lbl.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+
+        def _do_vm_install():
+            vm_install_btn.setEnabled(False)
+            vm_install_btn.setText("Asennetaan...")
+
+            def _vm_status(msg):
+                def _apply():
+                    vm_status_lbl.setText(msg)
+                    vm_status_lbl.setStyleSheet(
+                        "color: #7fc97f; font-size: 13px;" if "✅" in msg else "color: #ff8888; font-size: 13px;"
+                    )
+                    if "✅" in msg:
+                        vm_install_btn.setText("Voicemeeter on jo asennettu")
+                    else:
+                        vm_install_btn.setEnabled(True)
+                        vm_install_btn.setText("Yritä uudelleen")
+                QTimer.singleShot(0, _apply)
+
+            threading.Thread(target=_install_voicemeeter, args=(_vm_status,), daemon=True).start()
+
+        vm_install_btn.clicked.connect(_do_vm_install)
+        f6.addRow("", vm_install_btn)
+
+        # Device selector for HW Input 1 (RodeCaster Chat / Mix Minus mic)
+        vm_dev_label = _lbl("Mikrofonilaite:")
+        vm_dev_combo = _QComboBox()
+        vm_dev_combo.setToolTip(
+            "Valitse RodeCaster Chat (tai muu Mix Minus -mikrofoni) Hardware Input 1:lle."
+        )
+        try:
+            rec_devs = [(i, d["name"]) for i, d in enumerate(sd.query_devices())
+                        if d["max_input_channels"] > 0]
+            for idx, name in rec_devs:
+                vm_dev_combo.addItem(name, idx)
+            # Pre-select RodeCaster Chat if found
+            for i in range(vm_dev_combo.count()):
+                n = vm_dev_combo.itemText(i).lower()
+                if "chat" in n or "rodecaster" in n or "rode" in n:
+                    vm_dev_combo.setCurrentIndex(i)
+                    break
+        except Exception:
+            pass
+        f6.addRow(vm_dev_label, vm_dev_combo)
+
+        vm_cfg_btn = _QPushButton("Konfiguroi reititys Voicemeeterin kautta")
+
+        def _do_vm_configure():
+            mic_name = vm_dev_combo.currentText()
+            vm_cfg_btn.setEnabled(False)
+            vm_cfg_btn.setText("Konfiguroidaan...")
+
+            def _vm_cfg_status(msg):
+                def _apply():
+                    vm_cfg_status_lbl.setText(msg)
+                    vm_cfg_status_lbl.setStyleSheet(
+                        "color: #7fc97f; font-size: 12px; background: transparent;"
+                        if "✅" in msg else
+                        "color: #ff8888; font-size: 12px; background: transparent;"
+                    )
+                    vm_cfg_btn.setEnabled(True)
+                    vm_cfg_btn.setText("Konfiguroi reititys Voicemeeterin kautta")
+                QTimer.singleShot(0, _apply)
+
+            threading.Thread(
+                target=_voicemeeter_configure, args=(mic_name, _vm_cfg_status), daemon=True
+            ).start()
+
+        vm_cfg_btn.clicked.connect(_do_vm_configure)
+        f6.addRow("", vm_cfg_btn)
+        f6.addRow("", vm_cfg_status_lbl)
 
     # ── TAB 7 — Päivitys ─────────────────────────────────────────────
     f7 = _make_form()

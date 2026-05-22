@@ -9,9 +9,9 @@ Windows + macOS desktop app (PyQt6) that listens for a wake-word, transcribes yo
 
 | Platform | Link |
 |---|---|
-| **Windows** | [Voice_Royale_Setup_1.3.16.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
-| **macOS Apple Silicon** (M1/M2/M3) | [Voice_Royale_1.3.16_macOS_arm64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
-| **macOS Intel** (x86_64) | [Voice_Royale_1.3.16_macOS_x86_64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
+| **Windows** | [Voice_Royale_Setup_1.3.17.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
+| **macOS Apple Silicon** (M1/M2/M3) | [Voice_Royale_1.3.17_macOS_arm64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
+| **macOS Intel** (x86_64) | [Voice_Royale_1.3.17_macOS_x86_64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
 
 > **Windows SmartScreen warning?** Click **"More info"** → **"Run anyway"**.
 > This appears because the installer uses a self-signed certificate. The app is safe.
@@ -43,6 +43,7 @@ Windows + macOS desktop app (PyQt6) that listens for a wake-word, transcribes yo
   - Add pages with **+** (up to 10); right-click a tab to rename or delete
 - **Stream Deck XL** — full 32-button layout via official Elgato plugin + local HTTP API (port 17842)
 - **Virtual mic (VB-Cable)** — one-click install from Settings so TTS audio goes into game voice chat
+- **Chat routing (Voicemeeter Banana)** — Settings → Asennus auto-installs and configures Voicemeeter Banana: routes your Mix Minus mic (e.g. RodeCaster Chat) and TTS output into one virtual microphone bus so both are heard in game chat. One manual step: set your game mic to "Voicemeeter Output"
 - **Windows autostart** — start with Windows, optionally minimized to tray
 - **Auto-update** — Settings → Päivitys checks GitHub releases; downloads and launches the installer
 - **Data backup** — export all settings, history, soundboard audio/images, and API keys to a ZIP; restore with one click
@@ -50,7 +51,7 @@ Windows + macOS desktop app (PyQt6) that listens for a wake-word, transcribes yo
 
 ## Installation (Windows)
 
-1. Download `Voice_Royale_Setup_1.3.16.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
+1. Download `Voice_Royale_Setup_1.3.17.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
 2. Run the installer — it creates Start Menu shortcuts and an optional desktop icon
 3. On first launch the **Setup Wizard** opens automatically:
    - **Step 1/4** — get an OpenAI API key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) (free tier available)
