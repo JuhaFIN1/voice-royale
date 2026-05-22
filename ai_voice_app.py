@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.21"
+APP_VERSION = "1.3.22"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -2047,29 +2047,69 @@ def _fit_combo_dropdown(combo) -> None:
     combo.view().setMinimumWidth(max(w, 300))
 
 
-def _dedup_audio_devices(pairs: list) -> list:
-    """Drop MME-truncated entries when a longer WDM/WASAPI name starts with the same prefix."""
-    names = [n for _, n in pairs]
-    return [(idx, n) for idx, n in pairs
-            if not any(other != n and other.startswith(n) for other in names)]
+def _best_audio_devices(channel_key: str) -> list:
+    """Return one entry per device name: prefer WASAPI > DirectSound > MME > WDM-KS.
+    WDM-KS is included only when no other API has the same device name (fallback).
+    """
+    try:
+        host_apis = sd.query_hostapis()
+        api_priority = {}
+        wdmks_indices = set()
+        for i, api in enumerate(host_apis):
+            n = api["name"].lower()
+            if "wdm-ks" in n or "wdm ks" in n or "kernel" in n:
+                api_priority[i] = 99  # lowest priority; skip if better exists
+                wdmks_indices.add(i)
+            elif "wasapi" in n:
+                api_priority[i] = 0
+            elif "directsound" in n:
+                api_priority[i] = 1
+            elif "mme" in n:
+                api_priority[i] = 2
+            else:
+                api_priority[i] = 3
+
+        devices = list(sd.query_devices())
+
+        # Names that have at least one non-WDM-KS entry
+        non_wdm_names = {
+            d["name"] for d in devices
+            if d[channel_key] > 0 and d.get("hostapi", 0) not in wdmks_indices
+        }
+        # Names reachable via non-truncated non-WDM entry
+        full_names = {
+            d["name"] for d in devices
+            if d[channel_key] > 0
+            and api_priority.get(d.get("hostapi", 0), 99) < 99
+        }
+
+        best = {}  # name -> (priority, index)
+        for i, d in enumerate(devices):
+            if d[channel_key] == 0:
+                continue
+            api_idx = d.get("hostapi", 0)
+            pri = api_priority.get(api_idx, 3)
+            name = d["name"]
+            # Skip WDM-KS if a non-WDM version of this device exists
+            if api_idx in wdmks_indices and name in non_wdm_names:
+                continue
+            # Skip MME-truncated (shorter name that is prefix of a longer full name)
+            if any(other != name and other.startswith(name) for other in full_names):
+                continue
+            if name not in best or pri < best[name][0]:
+                best[name] = (pri, i)
+
+        return [(idx, name) for name, (_, idx) in sorted(best.items())]
+    except Exception:
+        return []
 
 
 def list_output_devices():
-    try:
-        devices = sd.query_devices()
-        raw = [(i, d["name"]) for i, d in enumerate(devices) if d["max_output_channels"] > 0]
-        return _dedup_audio_devices(raw)
-    except Exception:
-        return []
+    return _best_audio_devices("max_output_channels")
 
 
 def list_input_devices():
-    try:
-        devices = sd.query_devices()
-        raw = [(i, d["name"]) for i, d in enumerate(devices) if d["max_input_channels"] > 0]
-        return _dedup_audio_devices(raw)
-    except Exception:
-        return []
+    return _best_audio_devices("max_input_channels")
 
 
 def find_voicemeeter_device(devices):
