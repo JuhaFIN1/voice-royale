@@ -562,6 +562,35 @@ def _install_voicemeeter(status_cb) -> None:
         status_cb(f"Error: {exc}")
 
 
+def _check_voicemeeter_routing() -> tuple[str, bool]:
+    """Check that Voicemeeter Output (B1) and CABLE Input both exist in the device list."""
+    try:
+        devices = sd.query_devices()
+        vm_out = any(
+            "voicemeeter output" in d["name"].lower() and d["max_input_channels"] > 0
+            for d in devices
+        )
+        cable_in = any(
+            "cable input" in d["name"].lower() and d["max_output_channels"] > 0
+            for d in devices
+        )
+        if vm_out and cable_in:
+            return (
+                "✅ Reititys valmis!\n"
+                "  • Voice Royale lähtölaite → 'CABLE Input (VB-Audio)'\n"
+                "  • Pelissä mikrofoni → 'Voicemeeter Output'",
+                True,
+            )
+        parts = []
+        if not cable_in:
+            parts.append("CABLE Input ei löydy — asenna ensin VB-Cable (vaihe 3)")
+        if not vm_out:
+            parts.append("Voicemeeter Output ei löydy — käynnistä Voicemeeter Banana uudelleen tai PC:n uudelleenkäynnistys tarvitaan")
+        return "⚠ " + "\n  • ".join(parts), False
+    except Exception as exc:
+        return f"Virhe laitetarkistuksessa: {exc}", False
+
+
 def _voicemeeter_configure(mic_device_name: str, status_cb) -> None:
     """Configure Voicemeeter Banana routing via VoicemeeterRemote64.dll.
 
@@ -6727,7 +6756,7 @@ class SetupWizard(QDialog):
         lay.setSpacing(0)
         lay.addWidget(self._header(
             "Virtuaalimikrofoni (VB-Cable)",
-            "Vaihe 3/4  —  Tarvitaan jos haluat äänen näkyvän mikrofonina peleissä tai Discordissa."
+            "Vaihe 3/5  —  Tarvitaan jos haluat äänen näkyvän mikrofonina peleissä tai Discordissa."
         ))
 
         body = QWidget()
@@ -6818,9 +6847,249 @@ class SetupWizard(QDialog):
         nxt = QPushButton("Seuraava  →")
         nxt.setFixedHeight(42)
         nxt.setMinimumWidth(140)
-        nxt.clicked.connect(lambda: (self._stack.setCurrentIndex(4), self._start_wiz_mic_preview()))
+        nxt.clicked.connect(lambda: self._stack.setCurrentIndex(4))
         row.addWidget(nxt)
         bl.addLayout(row)
+
+        lay.addWidget(body)
+        return page
+
+    def _page_voicemeeter(self) -> QWidget:
+        page = QWidget()
+        page.setStyleSheet("background: #0d1117;")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._header(
+            "Chat-reititys — Voicemeeter Banana",
+            "Vaihe 4/5  —  Valinnainen. Tarvitaan jos käytät fyysistä äänikorttia (esim. RodeCaster Pro 2) "
+            "ja haluat sekä mikrofonin että TTS-äänen kuuluvat pelichatissa."
+        ))
+
+        body = QWidget()
+        body.setStyleSheet("background: #0d1117;")
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(32, 18, 32, 16)
+        bl.setSpacing(10)
+
+        # Only relevant on Windows
+        if sys.platform != "win32":
+            note = QLabel("Chat-reititys on tuettu vain Windowsissa.")
+            note.setStyleSheet("color: #8b949e; font-size: 13px; background: transparent;")
+            bl.addWidget(note)
+            bl.addStretch()
+            row = QHBoxLayout()
+            row.addWidget(self._back_btn(3))
+            row.addStretch()
+            nxt2 = QPushButton("Seuraava  →")
+            nxt2.setFixedHeight(42)
+            nxt2.setMinimumWidth(140)
+            nxt2.clicked.connect(lambda: (self._stack.setCurrentIndex(5), self._start_wiz_mic_preview()))
+            row.addWidget(nxt2)
+            bl.addLayout(row)
+            lay.addWidget(body)
+            return page
+
+        # ---- What this does ----
+        why_lbl = QLabel(
+            "Miksi tämä tarvitaan?\n"
+            "RodeCaster Pro 2:ssa Chat-kanava toimii Mix Minus -periaatteella: "
+            "äänesi menee chattiin mutta peliäänet eivät mene takaisin. "
+            "Voicemeeter yhdistää RodeCasterin mikrofonin JA Voice Royalen TTS-äänen "
+            "yhteen virtuaaliseen mikrofoniin, jota peli käyttää."
+        )
+        why_lbl.setStyleSheet("color: #8b949e; font-size: 12px; background: transparent; line-height: 150%;")
+        why_lbl.setWordWrap(True)
+        bl.addWidget(why_lbl)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("color: #21262d;")
+        bl.addWidget(sep)
+
+        # ---- Step 1: Install ----
+        step1_lbl = QLabel("Vaihe 1 — Asenna Voicemeeter Banana")
+        step1_lbl.setStyleSheet("color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;")
+        bl.addWidget(step1_lbl)
+
+        _vm_installed = _is_voicemeeter_installed()
+        self._wiz_vm_status_lbl = QLabel(
+            "✅ Voicemeeter Banana on jo asennettu." if _vm_installed
+            else "Ei asennettu."
+        )
+        self._wiz_vm_status_lbl.setStyleSheet(
+            "color: #3fb950; font-size: 12px; background: transparent;" if _vm_installed
+            else "color: #e3b341; font-size: 12px; background: transparent;"
+        )
+        bl.addWidget(self._wiz_vm_status_lbl)
+
+        self._wiz_vm_install_btn = QPushButton(
+            "Voicemeeter Banana asennettu" if _vm_installed else "Asenna Voicemeeter Banana (ilmainen)"
+        )
+        self._wiz_vm_install_btn.setFixedHeight(36)
+        self._wiz_vm_install_btn.setEnabled(not _vm_installed)
+
+        def _do_vm_wiz_install():
+            self._wiz_vm_install_btn.setEnabled(False)
+            self._wiz_vm_install_btn.setText("Asennetaan — hyväksy UAC-pyyntö...")
+
+            def _cb(msg):
+                def _apply():
+                    self._wiz_vm_status_lbl.setText(msg)
+                    ok = "✅" in msg
+                    self._wiz_vm_status_lbl.setStyleSheet(
+                        "color: #3fb950; font-size: 12px; background: transparent;" if ok
+                        else "color: #f85149; font-size: 12px; background: transparent;"
+                    )
+                    if ok:
+                        self._wiz_vm_install_btn.setText("Voicemeeter Banana asennettu")
+                        # Refresh device dropdown after install
+                        _refresh_vm_devices()
+                    else:
+                        self._wiz_vm_install_btn.setEnabled(True)
+                        self._wiz_vm_install_btn.setText("Yritä uudelleen")
+                QTimer.singleShot(0, _apply)
+
+            threading.Thread(target=_install_voicemeeter, args=(_cb,), daemon=True).start()
+
+        self._wiz_vm_install_btn.clicked.connect(_do_vm_wiz_install)
+        bl.addWidget(self._wiz_vm_install_btn)
+
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setStyleSheet("color: #21262d;")
+        bl.addWidget(sep2)
+
+        # ---- Step 2: Choose mic device ----
+        step2_lbl = QLabel("Vaihe 2 — Valitse RodeCaster Chat -laite")
+        step2_lbl.setStyleSheet("color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;")
+        bl.addWidget(step2_lbl)
+
+        dev_hint = QLabel(
+            "Valitse äänikortin Chat/Mix Minus -tulo (se laite jonka äänityslähde on Chat-kanava)."
+        )
+        dev_hint.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        dev_hint.setWordWrap(True)
+        bl.addWidget(dev_hint)
+
+        self._wiz_vm_dev_combo = QComboBox()
+        self._wiz_vm_dev_combo.setFixedHeight(34)
+        self._wiz_vm_dev_combo.setStyleSheet(
+            "QComboBox { background: #161b22; border: 1px solid #30363d; border-radius: 6px;"
+            " color: #e6edf3; padding: 4px 10px; font-size: 12px; }"
+            "QComboBox::drop-down { border: none; }"
+            "QComboBox QAbstractItemView { background: #161b22; color: #e6edf3; }"
+        )
+
+        def _refresh_vm_devices():
+            self._wiz_vm_dev_combo.blockSignals(True)
+            self._wiz_vm_dev_combo.clear()
+            try:
+                for d in sd.query_devices():
+                    if d["max_input_channels"] > 0:
+                        self._wiz_vm_dev_combo.addItem(d["name"])
+            except Exception:
+                pass
+            # Pre-select RodeCaster Chat
+            for i in range(self._wiz_vm_dev_combo.count()):
+                n = self._wiz_vm_dev_combo.itemText(i).lower()
+                if "chat" in n or "rodecaster" in n or "rode caster" in n:
+                    self._wiz_vm_dev_combo.setCurrentIndex(i)
+                    break
+            self._wiz_vm_dev_combo.blockSignals(False)
+
+        _refresh_vm_devices()
+        bl.addWidget(self._wiz_vm_dev_combo)
+
+        # ---- Step 3: Configure + Test ----
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.Shape.HLine)
+        sep3.setStyleSheet("color: #21262d;")
+        bl.addWidget(sep3)
+
+        step3_lbl = QLabel("Vaihe 3 — Konfiguroi ja testaa")
+        step3_lbl.setStyleSheet("color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;")
+        bl.addWidget(step3_lbl)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        self._wiz_vm_cfg_btn = QPushButton("Konfiguroi reititys")
+        self._wiz_vm_cfg_btn.setFixedHeight(36)
+
+        self._wiz_vm_test_btn = QPushButton("Testaa reititys")
+        self._wiz_vm_test_btn.setFixedHeight(36)
+        self._wiz_vm_test_btn.setStyleSheet(
+            "QPushButton { background: #1a4731; color: #3fb950; border: 1px solid #3fb950;"
+            " border-radius: 6px; padding: 6px 14px; font-size: 12px; }"
+            "QPushButton:hover { background: #22603c; }"
+        )
+
+        btn_row.addWidget(self._wiz_vm_cfg_btn)
+        btn_row.addWidget(self._wiz_vm_test_btn)
+        btn_row.addStretch()
+        bl.addLayout(btn_row)
+
+        self._wiz_vm_result_lbl = QLabel("")
+        self._wiz_vm_result_lbl.setWordWrap(True)
+        self._wiz_vm_result_lbl.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        bl.addWidget(self._wiz_vm_result_lbl)
+
+        def _do_vm_wiz_configure():
+            mic_name = self._wiz_vm_dev_combo.currentText()
+            self._wiz_vm_cfg_btn.setEnabled(False)
+            self._wiz_vm_cfg_btn.setText("Konfiguroidaan...")
+
+            def _cb(msg):
+                def _apply():
+                    self._wiz_vm_result_lbl.setText(msg)
+                    ok = "✅" in msg
+                    self._wiz_vm_result_lbl.setStyleSheet(
+                        "color: #3fb950; font-size: 11px; background: transparent;" if ok
+                        else "color: #f85149; font-size: 11px; background: transparent;"
+                    )
+                    self._wiz_vm_cfg_btn.setEnabled(True)
+                    self._wiz_vm_cfg_btn.setText("Konfiguroi reititys")
+                QTimer.singleShot(0, _apply)
+
+            threading.Thread(target=_voicemeeter_configure, args=(mic_name, _cb), daemon=True).start()
+
+        def _do_vm_wiz_test():
+            msg, ok = _check_voicemeeter_routing()
+            self._wiz_vm_result_lbl.setText(msg)
+            self._wiz_vm_result_lbl.setStyleSheet(
+                "color: #3fb950; font-size: 11px; background: transparent;" if ok
+                else "color: #e3b341; font-size: 11px; background: transparent;"
+            )
+
+        self._wiz_vm_cfg_btn.clicked.connect(_do_vm_wiz_configure)
+        self._wiz_vm_test_btn.clicked.connect(_do_vm_wiz_test)
+
+        # ---- Game step reminder ----
+        game_note = QLabel(
+            "Pelin viimeinen vaihe (tee tämä itse pelissä):\n"
+            "  Fortnite / Discord / muu peli → Asetukset → Mikrofoni → Voicemeeter Output"
+        )
+        game_note.setStyleSheet("color: #57a6ff; font-size: 11px; background: transparent;")
+        game_note.setWordWrap(True)
+        bl.addWidget(game_note)
+
+        bl.addStretch()
+
+        # ---- Navigation ----
+        skip_lbl = QLabel("Ei RodeCasteria tai fyysistä äänikorttia? Ohita tämä vaihe.")
+        skip_lbl.setStyleSheet("color: #484f58; font-size: 11px; background: transparent;")
+        bl.addWidget(skip_lbl)
+
+        nav_row = QHBoxLayout()
+        nav_row.addWidget(self._back_btn(3))
+        nav_row.addStretch()
+        nxt_vm = QPushButton("Seuraava  →")
+        nxt_vm.setFixedHeight(42)
+        nxt_vm.setMinimumWidth(140)
+        nxt_vm.clicked.connect(lambda: (self._stack.setCurrentIndex(5), self._start_wiz_mic_preview()))
+        nav_row.addWidget(nxt_vm)
+        bl.addLayout(nav_row)
 
         lay.addWidget(body)
         return page
@@ -6833,7 +7102,7 @@ class SetupWizard(QDialog):
         lay.setSpacing(0)
         lay.addWidget(self._header(
             "Äänilaitteet",
-            "Vaihe 4/4  —  Valitse mikrofoni ja kaiuttimet. Testaa ääni ennen jatkamista."
+            "Vaihe 5/5  —  Valitse mikrofoni ja kaiuttimet. Testaa ääni ennen jatkamista."
         ))
 
         body = QWidget()
@@ -6945,7 +7214,7 @@ class SetupWizard(QDialog):
 
         # Buttons
         row = QHBoxLayout()
-        back_btn = self._back_btn(3)
+        back_btn = self._back_btn(4)
         row.addWidget(back_btn)
         row.addStretch()
         test_btn = QPushButton("▶  Toistotesti (beep)")
@@ -7115,11 +7384,12 @@ class SetupWizard(QDialog):
         main = QVBoxLayout(self)
         main.setContentsMargins(0, 0, 0, 0)
         main.addWidget(self._stack)
-        self._stack.addWidget(self._page_welcome())      # 0
-        self._stack.addWidget(self._page_get_key())      # 1
-        self._stack.addWidget(self._page_enter_key())    # 2
-        self._stack.addWidget(self._page_vbcable())      # 3
-        self._stack.addWidget(self._page_devices())      # 4
+        self._stack.addWidget(self._page_welcome())       # 0
+        self._stack.addWidget(self._page_get_key())       # 1
+        self._stack.addWidget(self._page_enter_key())     # 2
+        self._stack.addWidget(self._page_vbcable())       # 3
+        self._stack.addWidget(self._page_voicemeeter())   # 4
+        self._stack.addWidget(self._page_devices())       # 5
 
     # ---- logic ----
 
