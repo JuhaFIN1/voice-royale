@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.22"
+APP_VERSION = "1.3.23"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -808,6 +808,22 @@ class VoiceEffectProcessor:
         if self._active:
             self.stop()
         try:
+            # Verify both devices use the same host API — mixed APIs cause -9993
+            try:
+                in_info = sd.query_devices(input_device)
+                out_info = sd.query_devices(output_device)
+                if in_info["hostapi"] != out_info["hostapi"]:
+                    apis = sd.query_hostapis()
+                    in_api = apis[in_info["hostapi"]]["name"]
+                    out_api = apis[out_info["hostapi"]]["name"]
+                    self._status(
+                        f"Voice FX error: mic '{in_info['name']}' käyttää {in_api}, "
+                        f"mutta output '{out_info['name']}' käyttää {out_api}. "
+                        f"Valitse laitteet samalta API:lta (molemmat WASAPI)."
+                    )
+                    return
+            except Exception:
+                pass
             self._stream = sd.Stream(
                 samplerate=self._SAMPLE_RATE,
                 blocksize=self._BLOCKSIZE,
@@ -3848,16 +3864,11 @@ class App(QWidget):
         saved = self.settings.get("voice_fx_output_device")
         virtual_kw = ("cable", "voicemeeter", "voicemod", "virtual")
         virtual, other = [], []
-        try:
-            for i, dev in enumerate(sd.query_devices()):
-                if dev["max_output_channels"] > 0:
-                    n = dev["name"]
-                    if any(k in n.lower() for k in virtual_kw):
-                        virtual.append((i, n))
-                    elif not n.startswith("{"):
-                        other.append((i, n))
-        except Exception:
-            pass
+        for i, n in list_output_devices():
+            if any(k in n.lower() for k in virtual_kw):
+                virtual.append((i, n))
+            elif not n.startswith("{"):
+                other.append((i, n))
         for i, n in virtual:
             self._fx_output_combo.addItem(f"🔌 {n}", i)
         for i, n in other[:8]:
@@ -3873,17 +3884,9 @@ class App(QWidget):
         self._fx_monitor_combo.clear()
         saved = self.settings.get("voice_fx_monitor_device")
         virtual_kw = ("cable", "voicemeeter", "voicemod", "virtual")
-        real_outputs = []
-        try:
-            for i, dev in enumerate(sd.query_devices()):
-                if dev["max_output_channels"] > 0:
-                    n = dev["name"]
-                    if not n.startswith("{") and not any(k in n.lower() for k in virtual_kw):
-                        real_outputs.append((i, n))
-        except Exception:
-            pass
-        for i, n in real_outputs[:10]:
-            self._fx_monitor_combo.addItem(f"🎧 {n}", i)
+        for i, n in list_output_devices():
+            if not n.startswith("{") and not any(k in n.lower() for k in virtual_kw):
+                self._fx_monitor_combo.addItem(f"🎧 {n}", i)
         if saved is not None:
             for idx in range(self._fx_monitor_combo.count()):
                 if self._fx_monitor_combo.itemData(idx) == saved:
