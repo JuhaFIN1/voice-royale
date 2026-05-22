@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.23"
+APP_VERSION = "1.3.24"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -633,25 +633,24 @@ def _check_voicemeeter_routing() -> tuple[str, bool]:
              and d["max_input_channels"] > 0),
             None,
         )
-        cable_in_dev = next(
+        vm_in_dev = next(
             (d for d in devices
-             if "cable input" in d["name"].lower() and d["max_output_channels"] > 0),
+             if d["name"].lower() == "voicemeeter input (vb-audio voicemeeter vaio)"
+             and d["max_output_channels"] > 0),
             None,
         )
-        if vm_out_dev and cable_in_dev:
-            vm_name = vm_out_dev["name"]
-            cable_name = cable_in_dev["name"]
+        if vm_out_dev and vm_in_dev:
             return (
                 "✅ Reititys valmis!\n"
-                f"  • Voice Royale lähtölaite → '{cable_name}'\n"
-                f"  • Pelissä mikrofoni → '{vm_name}'",
+                f"  • Voice Royale lähtölaite → '{vm_in_dev['name']}'\n"
+                f"  • Pelissä mikrofoni → '{vm_out_dev['name']}'",
                 True,
             )
         parts = []
-        if not cable_in_dev:
-            parts.append("CABLE Input ei löydy — asenna ensin VB-Cable (vaihe 3)")
+        if not vm_in_dev:
+            parts.append("Voicemeeter Input ei löydy — käynnistä Voicemeeter uudelleen")
         if not vm_out_dev:
-            parts.append("Voicemeeter B1-ulostuloa ei löydy — käynnistä Voicemeeter uudelleen tai tee PC:n uudelleenkäynnistys")
+            parts.append("Voicemeeter Out B1 ei löydy — käynnistä Voicemeeter uudelleen tai PC:n uudelleenkäynnistys")
         return "⚠ " + "\n  • ".join(parts), False
     except Exception as exc:
         return f"Virhe laitetarkistuksessa: {exc}", False
@@ -716,7 +715,7 @@ def _voicemeeter_configure(mic_device_name: str, status_cb) -> None:
         status_cb(
             "✅ Voicemeeter configured!\n"
             "Last step: in Fortnite/game, set microphone to 'Voicemeeter Output' (or Windows Default).\n"
-            "In Voice Royale, set TTS output device to 'CABLE Input (VB-Audio)'."
+            "In Voice Royale, set TTS output device to 'Voicemeeter Input (VB-Audio Voicemeeter VAIO)'."
         )
     except Exception as exc:
         status_cb(f"Configuration error: {exc}")
@@ -3853,7 +3852,7 @@ class App(QWidget):
 
         layout.addStretch()
 
-        hint = QLabel("Aseta FX Output: CABLE Input (VB-Audio).\nAseta pelissä mikrofoni: CABLE Output (VB-Audio).\nStream käynnistyy automaattisesti — nappi kytkee vain efektin.")
+        hint = QLabel("Aseta FX Output: Voicemeeter Input (VB-Audio Voicemeeter VAIO).\nPelissä mikrofoni: Voicemeeter Out B1 (VB-Audio Voicemeeter VAIO).\nStream käynnistyy automaattisesti — nappi kytkee vain efektin.")
         hint.setStyleSheet("color: #444444; font-size: 11px; border: none; margin-top: 4px;")
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -6166,8 +6165,8 @@ def open_settings_dialog(parent_app: "App") -> None:
             "Voicemeeter Banana reitittää sekä RodeCaster-mikrofonisi (Chat/Mix Minus) että "
             "Voice Royalen TTS-äänen yhden virtuaalimikrofonin kautta peliin.\n"
             "Asennuksen jälkeen:\n"
-            "  1. Aseta Voice Royalessa lähtölaite → 'CABLE Input (VB-Audio)'\n"
-            "  2. Pelissä/Discordissa: mikrofoni → 'Voicemeeter Output' (tai Windowsin oletus)\n"
+            "  1. Aseta Voice Royalessa lähtölaite → 'Voicemeeter Input (VB-Audio Voicemeeter VAIO)'\n"
+            "  2. Pelissä/Discordissa: mikrofoni → 'Voicemeeter Out B1 (VB-Audio Voicemeeter VAIO)'\n"
             "  3. Klikkaa 'Konfiguroi reititys' ja valitse RodeCaster Chat -laite."
         ))
 
