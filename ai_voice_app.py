@@ -622,29 +622,36 @@ def _install_voicemeeter(status_cb) -> None:
 
 
 def _check_voicemeeter_routing() -> tuple[str, bool]:
-    """Check that Voicemeeter Output (B1) and CABLE Input both exist in the device list."""
+    """Check that a Voicemeeter virtual B1 output and CABLE Input exist in the device list."""
     try:
         devices = sd.query_devices()
-        vm_out = any(
-            "voicemeeter output" in d["name"].lower() and d["max_input_channels"] > 0
-            for d in devices
+        # Match both Banana ("Voicemeeter Output") and Potato ("Voicemeeter Out B1")
+        vm_out_dev = next(
+            (d for d in devices
+             if ("voicemeeter output" in d["name"].lower()
+                 or "voicemeeter out b1" in d["name"].lower())
+             and d["max_input_channels"] > 0),
+            None,
         )
-        cable_in = any(
-            "cable input" in d["name"].lower() and d["max_output_channels"] > 0
-            for d in devices
+        cable_in_dev = next(
+            (d for d in devices
+             if "cable input" in d["name"].lower() and d["max_output_channels"] > 0),
+            None,
         )
-        if vm_out and cable_in:
+        if vm_out_dev and cable_in_dev:
+            vm_name = vm_out_dev["name"]
+            cable_name = cable_in_dev["name"]
             return (
                 "✅ Reititys valmis!\n"
-                "  • Voice Royale lähtölaite → 'CABLE Input (VB-Audio)'\n"
-                "  • Pelissä mikrofoni → 'Voicemeeter Output'",
+                f"  • Voice Royale lähtölaite → '{cable_name}'\n"
+                f"  • Pelissä mikrofoni → '{vm_name}'",
                 True,
             )
         parts = []
-        if not cable_in:
+        if not cable_in_dev:
             parts.append("CABLE Input ei löydy — asenna ensin VB-Cable (vaihe 3)")
-        if not vm_out:
-            parts.append("Voicemeeter Output ei löydy — käynnistä Voicemeeter Banana uudelleen tai PC:n uudelleenkäynnistys tarvitaan")
+        if not vm_out_dev:
+            parts.append("Voicemeeter B1-ulostuloa ei löydy — käynnistä Voicemeeter uudelleen tai tee PC:n uudelleenkäynnistys")
         return "⚠ " + "\n  • ".join(parts), False
     except Exception as exc:
         return f"Virhe laitetarkistuksessa: {exc}", False
@@ -2031,14 +2038,27 @@ def parse_voice_command(transcript: str, default_lang: str) -> tuple[str, str]:
 # AUDIO DEVICE HELPERS
 # =========================
 
+def _fit_combo_dropdown(combo) -> None:
+    """Widen the combo's dropdown popup so long device names are not truncated."""
+    fm = combo.fontMetrics()
+    if combo.count() == 0:
+        return
+    w = max(fm.horizontalAdvance(combo.itemText(i)) for i in range(combo.count())) + 60
+    combo.view().setMinimumWidth(max(w, 300))
+
+
+def _dedup_audio_devices(pairs: list) -> list:
+    """Drop MME-truncated entries when a longer WDM/WASAPI name starts with the same prefix."""
+    names = [n for _, n in pairs]
+    return [(idx, n) for idx, n in pairs
+            if not any(other != n and other.startswith(n) for other in names)]
+
+
 def list_output_devices():
     try:
         devices = sd.query_devices()
-        return [
-            (index, device["name"])
-            for index, device in enumerate(devices)
-            if device["max_output_channels"] > 0
-        ]
+        raw = [(i, d["name"]) for i, d in enumerate(devices) if d["max_output_channels"] > 0]
+        return _dedup_audio_devices(raw)
     except Exception:
         return []
 
@@ -2046,11 +2066,8 @@ def list_output_devices():
 def list_input_devices():
     try:
         devices = sd.query_devices()
-        return [
-            (index, device["name"])
-            for index, device in enumerate(devices)
-            if device["max_input_channels"] > 0
-        ]
+        raw = [(i, d["name"]) for i, d in enumerate(devices) if d["max_input_channels"] > 0]
+        return _dedup_audio_devices(raw)
     except Exception:
         return []
 
@@ -3795,6 +3812,7 @@ class App(QWidget):
                 if self._fx_output_combo.itemData(idx) == saved:
                     self._fx_output_combo.setCurrentIndex(idx)
                     break
+        _fit_combo_dropdown(self._fx_output_combo)
 
     def _populate_fx_monitor_combo(self):
         self._fx_monitor_combo.clear()
@@ -3816,6 +3834,7 @@ class App(QWidget):
                 if self._fx_monitor_combo.itemData(idx) == saved:
                     self._fx_monitor_combo.setCurrentIndex(idx)
                     break
+        _fit_combo_dropdown(self._fx_monitor_combo)
 
     def _toggle_hear_myself(self):
         enabled = self._hear_myself_btn.isChecked()
@@ -4015,7 +4034,7 @@ class App(QWidget):
         name_lbl = QLabel(display_name)
         name_lbl.setStyleSheet("color: #C0C0C0; font-size: 12px; border: none;")
         name_lbl.setMinimumWidth(180)
-        name_lbl.setMaximumWidth(280)
+        name_lbl.setMaximumWidth(500)
         name_lbl.setToolTip(full_name)
 
         bar = QProgressBar()
@@ -4370,6 +4389,7 @@ class App(QWidget):
             self.input_device_combo.addItem(f"🔌 {name}", index)
 
         self.append_status(f"Found {self.input_device_combo.count()} input devices ({len(physical)} physical, {len(virtual)} virtual)")
+        _fit_combo_dropdown(self.input_device_combo)
 
         # Restore previously selected input device
         saved_input_device = self.history_data.get("selected_input_device")
@@ -6131,8 +6151,7 @@ def open_settings_dialog(parent_app: "App") -> None:
             "Valitse RodeCaster Chat (tai muu Mix Minus -mikrofoni) Hardware Input 1:lle."
         )
         try:
-            rec_devs = [(i, d["name"]) for i, d in enumerate(sd.query_devices())
-                        if d["max_input_channels"] > 0]
+            rec_devs = list_input_devices()
             for idx, name in rec_devs:
                 vm_dev_combo.addItem(name, idx)
             # Pre-select RodeCaster Chat if found
@@ -6141,6 +6160,7 @@ def open_settings_dialog(parent_app: "App") -> None:
                 if "chat" in n or "rodecaster" in n or "rode" in n:
                     vm_dev_combo.setCurrentIndex(i)
                     break
+            _fit_combo_dropdown(vm_dev_combo)
         except Exception:
             pass
         f6.addRow(vm_dev_label, vm_dev_combo)
@@ -7064,6 +7084,7 @@ class SetupWizard(QDialog):
                     self._wiz_vm_dev_combo.setCurrentIndex(i)
                     break
             self._wiz_vm_dev_combo.blockSignals(False)
+            _fit_combo_dropdown(self._wiz_vm_dev_combo)
 
         _refresh_vm_devices()
         bl.addWidget(self._wiz_vm_dev_combo)
@@ -7200,6 +7221,7 @@ class SetupWizard(QDialog):
             prefix = "🎤" if not any(k in n for k in ["virtual", "vb-audio", "voicemeeter"]) else "🔌"
             self._wiz_mic_combo.addItem(f"{prefix} {name}", idx)
             self._wiz_input_indices.append(idx)
+        _fit_combo_dropdown(self._wiz_mic_combo)
         bl.addWidget(self._wiz_mic_combo)
 
         # Live mic meter
