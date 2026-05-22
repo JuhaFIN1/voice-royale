@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.17"
+APP_VERSION = "1.3.18"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -6236,7 +6236,15 @@ def open_settings_dialog(parent_app: "App") -> None:
             if result[0] == "ok":
                 tmp_path = result[1]
                 if sys.platform == "win32":
-                    subprocess.Popen([tmp_path])
+                    # ShellExecuteW with "runas" forces a fresh UAC prompt even
+                    # if Voice Royale is already running elevated (e.g. from the
+                    # previous Inno Setup install). subprocess.Popen would silently
+                    # inherit admin rights and skip UAC.
+                    import ctypes
+                    ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", tmp_path, None, None, 1)
+                    if ret <= 32:
+                        # User cancelled UAC or launch failed — fall back to normal open
+                        os.startfile(tmp_path)
                 else:
                     subprocess.Popen(["open", tmp_path])
             else:
