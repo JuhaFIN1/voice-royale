@@ -9,9 +9,9 @@ Windows + macOS desktop app (PyQt6) that listens for a wake-word, transcribes yo
 
 | Platform | Link |
 |---|---|
-| **Windows** | [Voice_Royale_Setup_1.3.17.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
-| **macOS Apple Silicon** (M1/M2/M3) | [Voice_Royale_1.3.17_macOS_arm64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
-| **macOS Intel** (x86_64) | [Voice_Royale_1.3.17_macOS_x86_64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
+| **Windows** | [Voice_Royale_Setup_1.3.18.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
+| **macOS Apple Silicon** (M1/M2/M3) | [Voice_Royale_1.3.18_macOS_arm64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
+| **macOS Intel** (x86_64) | [Voice_Royale_1.3.18_macOS_x86_64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
 
 > **Windows SmartScreen warning?** Click **"More info"** → **"Run anyway"**.
 > This appears because the installer uses a self-signed certificate. The app is safe.
@@ -51,7 +51,7 @@ Windows + macOS desktop app (PyQt6) that listens for a wake-word, transcribes yo
 
 ## Installation (Windows)
 
-1. Download `Voice_Royale_Setup_1.3.17.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
+1. Download `Voice_Royale_Setup_1.3.18.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
 2. Run the installer — it creates Start Menu shortcuts and an optional desktop icon
 3. On first launch the **Setup Wizard** opens automatically:
    - **Step 1/4** — get an OpenAI API key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) (free tier available)
