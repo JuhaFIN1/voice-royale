@@ -3,17 +3,20 @@
 Copyright (c) 2026 Juha Lempiäinen. All rights reserved.
 Use permitted. Modification and redistribution of source code prohibited — see [LICENSE](LICENSE).
 
-Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speech, translates it with GPT-4.1-mini, and speaks the result via TTS — routed to any audio output device, including virtual audio cables for game voice chat. Now with live voice morphing, soundboard, and Stream Deck XL support.
+Windows + macOS desktop app (PyQt6) that listens for a wake-word, transcribes your speech, translates it with GPT-4.1-mini, and speaks the result via TTS — routed to any audio output device, including virtual audio cables for game voice chat. Now with live voice morphing, soundboard, and Stream Deck XL support.
 
 ## Download
 
 | Platform | Link |
 |---|---|
-| **Windows** | [Voice_Royale_Setup_1.3.6.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
-| **macOS** | [Voice_Royale_1.3.6.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
+| **Windows** | [Voice_Royale_Setup_1.3.16.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
+| **macOS Apple Silicon** (M1/M2/M3) | [Voice_Royale_1.3.16_macOS_arm64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
+| **macOS Intel** (x86_64) | [Voice_Royale_1.3.16_macOS_x86_64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
 
 > **Windows SmartScreen warning?** Click **"More info"** → **"Run anyway"**.
 > This appears because the installer uses a self-signed certificate. The app is safe.
+
+> **Not sure which macOS build?** M1/M2/M3 Macs (2020 and later) → arm64. Older Intel Macs → x86_64.
 
 ## Features
 
@@ -33,8 +36,9 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 - **Soundboard** — up to 10 pages × 55 buttons per page:
   - **Edit Mode**: drag audio/image onto any button; drag a button over a tab label (700 ms) to move it cross-page; drag tab labels to reorder pages
   - **Bulk import**: drop a folder or multiple files onto a button to fill consecutive slots; or right-click → Bulk Import
+  - **Subfolders**: right-click a button in Edit Mode → "Kansioksi…" to create a nested folder of 55 more slots
   - **Image search**: right-click → "Etsi kuva netistä…" — search DuckDuckGo Images by button name, browse thumbnails, download with one click
-  - **STOP button**: fixed red ■ STOP in the bottom-right corner of every page — stops playback instantly
+  - **■ STOP button**: fixed red button in the bottom-right corner — stops all active playback instantly (soundboard, speak, favorites, wake TTS)
   - Right-click to rename, assign sound/image, link to another page, or clear
   - Add pages with **+** (up to 10); right-click a tab to rename or delete
 - **Stream Deck XL** — full 32-button layout via official Elgato plugin + local HTTP API (port 17842)
@@ -46,7 +50,7 @@ Windows desktop app (PyQt6) that listens for a wake-word, transcribes your speec
 
 ## Installation (Windows)
 
-1. Download `Voice_Royale_Setup_1.3.6.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
+1. Download `Voice_Royale_Setup_1.3.16.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
 2. Run the installer — it creates Start Menu shortcuts and an optional desktop icon
 3. On first launch the **Setup Wizard** opens automatically:
    - **Step 1/4** — get an OpenAI API key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) (free tier available)
@@ -59,10 +63,13 @@ Upgrading: just run the new installer over the old one. Your API key, settings, 
 
 ## Installation (macOS)
 
-1. Download `Voice_Royale_1.3.6.dmg` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
+1. Download the correct DMG from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest):
+   - **arm64** — Mac with M1, M2, or M3 chip (2020 and later)
+   - **x86_64** — older Intel Mac
 2. Open the DMG and drag **Voice Royale** to Applications
 3. First launch: right-click → **Open** to bypass Gatekeeper (app is ad-hoc signed, not notarized)
 4. Grant microphone and accessibility permissions when prompted
+5. Global hotkeys require **Accessibility** permission: System Settings → Privacy & Security → Accessibility → enable Voice Royale
 
 ## Optional packages
 
@@ -107,9 +114,10 @@ Click **Edit** in the soundboard corner to enter Edit Mode.
 - **Assign sound/image**: drag a file onto a button, or right-click → Assign Sound / Assign Image
 - **Search image online**: right-click → "Etsi kuva netistä…" — type a search term, pick from results
 - **Bulk import**: drag a folder or multiple audio files onto any button to fill that slot and the ones after it; or right-click → Bulk Import
+- **Subfolders**: right-click in Edit Mode → "Kansioksi…" — creates a nested page of 55 slots inside that button. Navigate back with the blue ← button in the bottom-left corner
 - **Move cross-page**: drag a button over a tab label and hold 700 ms — the page switches, then drop onto the target slot
 - **Reorder pages**: in Edit Mode, drag a tab label to a new position
-- **STOP**: the red ■ STOP button in the bottom-right corner stops playback instantly
+- **■ STOP**: the red ■ STOP button in the bottom-right corner stops all active playback instantly — soundboard, speak, favorites, and wake TTS
 - Add pages with **+** (up to 10). Right-click a tab to rename or delete.
 
 ### Voice FX (live voice morphing)
@@ -172,7 +180,7 @@ The installer is signed automatically if `SIGN_CERT_PATH` and `SIGN_CERT_PASSWOR
 
 | File / Folder | Description |
 |---|---|
-| `ai_voice_app.py` | Entire app (~6300 lines) |
+| `ai_voice_app.py` | Entire app (~6800 lines) |
 | `credentials.env` | API keys (not committed) |
 | `app_settings.json` | User settings |
 | `speech_history.json` | Translation history + favorites |

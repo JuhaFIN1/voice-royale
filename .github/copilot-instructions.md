@@ -7,7 +7,7 @@ All logic in one file: `ai_voice_app.py` (~6800 lines).
 
 Working directory: `E:\CLOUDS\AI-SYSTEMS\ai-voice-router\`
 GitHub: https://github.com/JuhaFIN1/voice-royale
-Current version: `APP_VERSION = "1.3.12"` (constant near top of file; CI auto-patches from git tag)
+Current version: `APP_VERSION = "1.3.16"` (constant near top of file; CI auto-patches from git tag)
 
 ---
 
@@ -23,7 +23,7 @@ Current version: `APP_VERSION = "1.3.12"` (constant near top of file; CI auto-pa
 | `transcribe_audio_wav(wav_bytes)` | Whisper API transcription |
 | `translate_text(text, lang, backend, deepl_key)` | Translation — Google/DeepL/OpenAI |
 | `parse_voice_command(transcript, default_lang)` | GPT-4.1-mini: extract lang + translate wake command |
-| `play_wav_bytes(wav_bytes, device_indices, level_callback, volume, stop_event)` | Chunk-based per-device OutputStream playback with cancellation |
+| `play_wav_bytes(wav_bytes, device_indices, level_callback, volume, stop_event)` | Chunk-based per-device OutputStream playback with cancellation. Level callback runs **inside** the write loop (synced to actual output, not a free-running timer). |
 | `WakeListener` | Wake-word detector (Porcupine or Whisper VAD fallback) |
 | `SoundboardButton` | Soundboard slot — see Soundboard section |
 | `VoiceEffectProcessor` | Real-time DSP: pitch/robot + VB-Cable output. Always-on stream, toggle = preset only |
@@ -69,11 +69,16 @@ Stream Deck actions: `_sd_action_queue` (Queue) + `_sd_action_timer` (50ms QTime
 ### Frozen exe / pkg_status
 `_pkg_status()` in frozen exe: use `importlib.import_module()` for all packages **except** `pvporcupine` and `pyrubberband`. Those two native optional libs can crash with non-ImportError exceptions — use `sys.modules` check only for them.
 
-### Soundboard — playback
+### Soundboard — playback and STOP
+
 - **Only one slot plays at a time.** Starting a new slot immediately stops the previous one.
 - `play_wav_bytes` writes in 4096-frame chunks and checks `stop_event: threading.Event` between chunks.
-- `App._sb_stop_event: threading.Event` — set it to stop current playback, then replace with a new Event.
-- STOP button sets the event. `sd.stop()` has **no effect** on OutputStream-based playback — do not use it.
+- **Level callback is computed inside the write loop** (primary device only), not a separate timer thread. This keeps the meter in sync with actual audio output.
+- Two stop events on `App`:
+  - `_sb_stop_event: threading.Event` — soundboard playback only. Set + replace on new play or STOP.
+  - `_play_stop_event: threading.Event` — all other playback (speak/`run_pipeline`, wake-command TTS, `_play_favorite_audio`). Passed as `stop_event=` to every non-soundboard `play_wav_bytes` call.
+- `_sb_stop_playback()` sets **both** events — the soundboard ■ STOP button stops all active audio.
+- `sd.stop()` has **no effect** on OutputStream-based playback — do not use it.
 - `_sb_play_id` (int) — secondary guard against race conditions.
 - `_sb_playing_btn` — reference to the currently playing SoundboardButton widget.
 
@@ -146,11 +151,30 @@ Three backup modes selectable via radio dialog (`_ask_mode()`):
 - CI: GitHub secrets `SIGN_CERT_BASE64` + `SIGN_CERT_PASSWORD`.
 - Never commit: `.env`, `certs/`, `*.pfx`.
 
-### macOS build specifics
-CI installs Pillow and converts `iconimage.ico` → `iconimage.icns` before PyInstaller.
-PyInstaller flags: `--hidden-import pyttsx3.drivers.nsss`, `--hidden-import PyQt6.sip`, `--collect-all pyttsx3`, `--osx-bundle-identifier com.voiceroyale.app`, `--icon iconimage.icns`.
+### macOS build (release.yml) — two separate jobs
+
+**macos-13 is retired. Use macos-14 (ARM64) only.**
+
+#### build-macos-arm64
+- Runner: `macos-14` (Apple Silicon M1/M2/M3)
+- Python: `actions/setup-python@v5` (ARM64)
+- No brew portaudio — sounddevice 0.4.x bundles its own. Use `--collect-all sounddevice --collect-all _sounddevice_data`.
+- Icon: `iconutil -c icns iconimage.iconset -o iconimage.icns` (proper ICNS, not `PIL.save`)
+- `sleep 2` before `hdiutil create` — codesign holds file locks briefly; the sleep prevents "Resource busy"
+- Output: `Voice_Royale_{version}_macOS_arm64.dmg`
+
+#### build-macos-intel
+- Runner: `macos-14` (M1), cross-build x86_64 via Rosetta 2
+- `NONINTERACTIVE=1 arch -x86_64 /bin/bash -c "$(curl ... install.sh)"` installs x86_64 Homebrew to `/usr/local`
+- `HOMEBREW_NO_ENV_HINTS=1 arch -x86_64 /usr/local/bin/brew install python@3.11 || true` — `|| true` required: brew link fails if `/usr/local/bin/python3.11` already exists on runner
+- Python path: `/usr/local/opt/python@3.11/bin/python3.11`
+- All pip + PyInstaller commands prefixed with `arch -x86_64`
+- Output: `Voice_Royale_{version}_macOS_x86_64.dmg`
+
+Shared PyInstaller flags (both jobs):
+`--hidden-import pyttsx3.drivers.nsss`, `--hidden-import PyQt6.sip`, `--collect-all edge_tts`, `--collect-all sounddevice`, `--collect-all _sounddevice_data`, `--collect-all pyttsx3`, `--collect-all certifi`, `--osx-bundle-identifier com.voiceroyale.app`
+
 Post-build: PlistBuddy injects `NSMicrophoneUsageDescription` + `NSInputMonitoringUsageDescription`.
-DMG layout: `Voice Royale.app` + `/Applications` symlink + `Stream Deck Plugin/` folder.
 
 ---
 
