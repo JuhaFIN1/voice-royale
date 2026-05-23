@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.27"
+APP_VERSION = "1.3.28"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -7801,16 +7801,25 @@ class SetupWizard(QDialog):
         )
         self._dev_out_checkboxes = {}
 
+        self._dev_default_out = _def_out
         for idx, name in self._dev_output_devices:
             r = QWidget()
             r.setStyleSheet("background: transparent;")
             rl = QHBoxLayout(r)
             rl.setContentsMargins(4, 2, 4, 2)
             rl.setSpacing(8)
+            is_cable_in = "cable input" in name.lower() or (
+                "cable" in name.lower() and "output" not in name.lower()
+                and "voicemeeter" not in name.lower()
+            )
             is_v = any(k in name.lower() for k in ["virtual", "vb-audio", "voicemeeter", "cable"])
             icon = "🔌" if is_v else "🔊"
             is_def = (idx == _def_out)
-            cb = QCheckBox(f"{icon} {name[:42]}{'…' if len(name) > 42 else ''}")
+            display_name = name[:38] + ("…" if len(name) > 38 else "")
+            if is_cable_in:
+                display_name += " [→ peliin]"
+            cb = QCheckBox(f"{icon} {display_name}")
+            cb.setChecked(is_def)
             cb.setStyleSheet(
                 "QCheckBox { color: #c9d1d9; font-size: 11px; padding: 2px; background: transparent; }"
             )
@@ -8406,6 +8415,19 @@ class SetupWizard(QDialog):
                         selected_out.append(_pi)
                 except Exception:
                     pass
+            # Safety net: if no physical output selected, add system default
+            _phys = []
+            for _si in selected_out:
+                try:
+                    _sn = sd.query_devices(_si)["name"].lower()
+                    if not any(k in _sn for k in _virt_kw):
+                        _phys.append(_si)
+                except Exception:
+                    pass
+            if not _phys:
+                _def_idx = getattr(self, "_dev_default_out", -1)
+                if _def_idx >= 0 and _def_idx not in selected_out:
+                    selected_out.append(_def_idx)
             if self._dev_selected_input is not None:
                 hd["selected_input_device"] = self._dev_selected_input
             if selected_out:

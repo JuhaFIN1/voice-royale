@@ -1,7 +1,7 @@
 [Setup]
 AppId={{F3A7C2E1-9B4D-4F8A-BC23-1E5D7A9F0C42}
 AppName=Voice Royale
-AppVersion=1.3.25
+AppVersion=1.3.28
 AppPublisher=Juha Lempiäinen
 AppPublisherURL=https://github.com/JuhaFIN1/voice-royale
 AppSupportURL=https://github.com/JuhaFIN1/voice-royale/issues
