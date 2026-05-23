@@ -50,6 +50,7 @@ import math
 import threading
 import time
 import traceback
+import uuid
 import wave
 import webbrowser
 
@@ -260,7 +261,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.29"
+APP_VERSION = "1.3.30"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1187,7 +1188,7 @@ def _sb_import_audio(src_path: str, page_index: int, slot_index: int) -> tuple[s
     """Convert and copy audio into soundboard data dir. Returns (dest_path, orig_bytes, new_bytes)."""
     out_dir = os.path.join(BASE_PATH, "soundboard", "audio")
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"p{page_index}_slot_{slot_index}.wav")
+    out_path = os.path.join(out_dir, f"{uuid.uuid4().hex}.wav")
     orig_size = os.path.getsize(src_path)
 
     ext = os.path.splitext(src_path)[1].lower()
@@ -1250,7 +1251,7 @@ def _sb_import_image(src_path: str, page_index: int, slot_index: int) -> tuple[s
     """Scale and JPEG-compress image into soundboard data dir. Returns (dest_path, orig_bytes, new_bytes)."""
     out_dir = os.path.join(BASE_PATH, "soundboard", "images")
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"p{page_index}_slot_{slot_index}.jpg")
+    out_path = os.path.join(out_dir, f"{uuid.uuid4().hex}.jpg")
     orig_size = os.path.getsize(src_path)
 
     px = QPixmap(src_path)

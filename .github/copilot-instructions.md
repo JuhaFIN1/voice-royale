@@ -7,7 +7,7 @@ All logic in one file: `ai_voice_app.py` (~8500 lines).
 
 Working directory: `E:\CLOUDS\AI-SYSTEMS\ai-voice-router\`
 GitHub: https://github.com/JuhaFIN1/voice-royale
-Current version: `APP_VERSION = "1.3.29"` (constant near top of file; CI auto-patches from git tag)
+Current version: `APP_VERSION = "1.3.30"` (constant near top of file; CI auto-patches from git tag)
 
 ---
 
@@ -60,7 +60,7 @@ can differ from the Python dev environment. `speech_history.json → selected_ou
 raw integer indices — an index that works in Python may resolve to a WDM-KS device in the EXE
 (PaErrorCode -9999, blocking API not supported).
 
-Mitigation: `play_wav_bytes` is fault-tolerant (v1.3.29) — one device failing does not block the others.
+Mitigation: `play_wav_bytes` is fault-tolerant (v1.3.30) — one device failing does not block the others.
 Do NOT store CABLE Input (VB-Audio Virtual Cable) as output — it goes to game audio, not monitoring headphones.
 
 ---
