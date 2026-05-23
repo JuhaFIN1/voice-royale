@@ -3,11 +3,11 @@
 ## Project overview
 
 Windows + macOS desktop app (PyQt6): microphone → Whisper transcription → translation (Google/DeepL/OpenAI) → TTS playback.
-All logic in one file: `ai_voice_app.py` (~8400 lines).
+All logic in one file: `ai_voice_app.py` (~8500 lines).
 
 Working directory: `E:\CLOUDS\AI-SYSTEMS\ai-voice-router\`
 GitHub: https://github.com/JuhaFIN1/voice-royale
-Current version: `APP_VERSION = "1.3.27"` (constant near top of file; CI auto-patches from git tag)
+Current version: `APP_VERSION = "1.3.29"` (constant near top of file; CI auto-patches from git tag)
 
 ---
 
@@ -23,27 +23,45 @@ Current version: `APP_VERSION = "1.3.27"` (constant near top of file; CI auto-pa
 | `transcribe_audio_wav(wav_bytes)` | Whisper API transcription |
 | `translate_text(text, lang, backend, deepl_key)` | Translation — Google/DeepL/OpenAI |
 | `parse_voice_command(transcript, default_lang)` | GPT-4.1-mini: extract lang + translate wake command |
-| `play_wav_bytes(wav_bytes, device_indices, level_callback, volume, stop_event)` | Chunk-based per-device OutputStream playback with cancellation. Level callback runs **inside** the write loop. |
+| `play_wav_bytes(wav_bytes, device_indices, level_callback, volume, stop_event)` | Chunk-based per-device OutputStream. **Fault-tolerant**: continues to remaining devices if one fails; only raises if ALL fail. `device_ok: list[bool]` + `results_lock` track per-device success. |
 | `WakeListener` | Wake-word detector (Porcupine or Whisper VAD fallback) |
 | `SoundboardButton` | Soundboard slot — classmethod `set_edit_mode(bool)`, `_edit_mode` class flag |
 | `VoiceEffectProcessor` | Real-time DSP: pitch/robot + VB-Cable output. Always-on stream. |
 | `class App(QWidget)` | Entire UI and logic |
-| `SetupWizard` | First-run dialog — 6 pages (0–5 stack index, 1–6 in UI labels) |
+| `SetupWizard` | First-run dialog — 7 stack pages (0–6), shown as "Vaihe 1/6"–"Vaihe 6/6" |
 | `open_settings_dialog()` | 8-tab settings window |
 
 ---
 
 ## SetupWizard pages
 
-| Index | Label | Content |
+| Stack index | UI label | Content |
 |---|---|---|
 | 0 | Welcome | Intro |
 | 1 | Vaihe 1/6 | Python packages (pip auto-install) |
 | 2 | Vaihe 2/6 | OpenAI API key |
 | 3 | Vaihe 3/6 | VB-Cable install |
 | 4 | Vaihe 4/6 | Voicemeeter Banana install + routing configure + Windows default mic |
-| 5 | Vaihe 5/6 | Mic auto-detect (live bars) + output beep test |
+| 5 | Vaihe 5/6 | Mic auto-detect (live bars) + output device checkboxes |
 | 6 | Vaihe 6/6 | End-to-end test: mic level, TTS playback, soundboard beep |
+
+### Wizard device page (index 5) — v1.3.28+
+- System default output device is **pre-checked** on page load
+- CABLE Input devices get `[→ peliin]` suffix to clarify they route to game audio
+- `self._dev_default_out` stored for use in `_finish_setup`
+- `_finish_setup` safety net: if only virtual devices checked, adds `_dev_default_out` automatically
+
+---
+
+## EXE vs Python device index mismatch
+
+**Critical:** EXE bundles its own PortAudio via `--collect-all sounddevice`. Device indices in the EXE
+can differ from the Python dev environment. `speech_history.json → selected_output_devices` stores
+raw integer indices — an index that works in Python may resolve to a WDM-KS device in the EXE
+(PaErrorCode -9999, blocking API not supported).
+
+Mitigation: `play_wav_bytes` is fault-tolerant (v1.3.29) — one device failing does not block the others.
+Do NOT store CABLE Input (VB-Audio Virtual Cable) as output — it goes to game audio, not monitoring headphones.
 
 ---
 
@@ -55,15 +73,16 @@ RodeCaster Chat mic → Voicemeeter Hardware Input 1 (Strip[0]) → B1 bus ─�
 Voice Royale TTS/Soundboard → Voicemeeter Input (Strip[2]) → B1 bus ────┘
 ```
 
-- `_ensure_voicemeeter_running()` — starts `voicemeeterb.exe` if not running; called from App.__init__ (1.2s delay, bg thread) and before wizard configure
+- `_ensure_voicemeeter_running()` — starts `voicemeeterb.exe` if not running; App.__init__ (1.2s delay, bg thread)
 - `_is_voicemeeter_installed()` — registry + sounddevice check
 - `_get_voicemeeter_dll_path()` — finds VoicemeeterRemote64.dll
 - `_install_voicemeeter(status_cb)` — downloads + installs silently
 - `_voicemeeter_configure(mic_device_name, status_cb)` — ctypes DLL: Strip[0].device.wdm+mme = mic, Strip[0]+Strip[2] → B1, Bus[3].On
-- `_set_windows_default_recording(name_contains)` — PowerShell: reads registry `{a45c254e...},2` for device name, uses `PolicyConfigHelperVR` C# class to call IPolicyConfig.SetDefaultEndpoint
-- `_get_voicemeeter_output_device_indices()` — finds "Voicemeeter Input (VB-Audio Voicemeeter VAIO)" (Strip[2] playback device) + headphones; saves to HISTORY_FILE
+- `_set_windows_default_recording(name_contains)` — PowerShell inline C# + IPolicyConfig COM
+- `_get_voicemeeter_output_device_indices()` — returns [Voicemeeter Input idx, headphones idx]; saves to HISTORY_FILE
 
-**Critical:** Voice Royale must output TTS to `"Voicemeeter Input (VB-Audio Voicemeeter VAIO)"` (exact name, Strip[2]). NOT "Voicemeeter In 2" or other strips. Selected output devices saved to `speech_history.json → selected_output_devices`.
+**Critical:** Voice Royale outputs TTS to `"Voicemeeter Input (VB-Audio Voicemeeter VAIO)"` (Strip[2] exact name).
+**Never use CABLE Input** — Voicemeeter holds it in exclusive mode → PaErrorCode -9996.
 
 ---
 
@@ -123,11 +142,11 @@ Update all **five** places: `LANGS`, `LANG_FLAG_CODES`, `EDGE_VOICES`, `_GOOGLE_
 
 ### PortAudio errors to watch
 - **-9993**: I/O devices on different host APIs
-- **-9996**: Device in exclusive mode (don't use CABLE Input directly)
-- **-9999**: WDM-KS blocking — `_best_audio_devices` skips WDM-KS if alternatives exist
+- **-9996**: CABLE Input exclusive mode — never use as output
+- **-9999**: WDM-KS blocking API — `_best_audio_devices` skips WDM-KS if alternatives exist, but EXE indices can still resolve to WDM-KS; handled by fault-tolerant `play_wav_bytes`
 
 ### exe/frozen mode
-- `BASE_PATH = %APPDATA%\Voice Royale\` when frozen
+- `BASE_PATH = %APPDATA%\Voice Royale\` when frozen (separate from dev `speech_history.json`)
 - `_pkg_status()`: use `sys.modules` for pvporcupine/pyrubberband (not importlib — can crash frozen)
 - Auto-updater uses `ShellExecuteW("runas", ...)` to force UAC prompt
 
