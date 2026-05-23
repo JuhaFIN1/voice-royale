@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.28"
+APP_VERSION = "1.3.29"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -2564,55 +2564,60 @@ def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None, v
         # Level callback is driven from inside the write loop (primary device only)
         # so it stays in sync with actual audio output instead of a free-running timer.
         device_errors: list[str] = []
-        device_errors_lock = threading.Lock()
+        device_ok: list[bool] = []
+        results_lock = threading.Lock()
 
         def play_to_device(device_index, report_level=False):
+            ok = False
+            err_msg = None
             try:
                 info = sd.query_devices(device_index) if device_index is not None else sd.query_devices(sd.default.device[1])
                 dev_name = info.get("name", str(device_index))
                 if info['max_output_channels'] == 0:
-                    with device_errors_lock:
-                        device_errors.append(f"'{dev_name}' ei ole toistolaiteet (max_output_channels=0)")
-                    return
-                sr = samplerate
-                data = audio_data
-                native_sr = int(info.get('default_samplerate') or 48000)
-                if native_sr != sr:
-                    import scipy.signal
-                    fa = data.astype(np.float32)
-                    n_frames = fa.shape[0] if fa.ndim > 1 else len(fa)
-                    new_len = max(1, int(n_frames * native_sr / sr))
-                    resampled = scipy.signal.resample(fa, new_len, axis=0) if fa.ndim > 1 else scipy.signal.resample(fa, new_len)
-                    data = np.clip(resampled, -32768, 32767).astype(np.int16)
-                    sr = native_sr
-                n_ch = min(int(info['max_output_channels']), 2)
-                out = data.reshape(-1, 1) if data.ndim == 1 else data[:, :n_ch]
-                if out.shape[1] < n_ch:
-                    out = np.column_stack([out[:, 0]] * n_ch)
-                _CHUNK = 4096  # frames per write — short enough to respond to stop quickly
-                with sd.OutputStream(device=device_index, samplerate=sr,
-                                     channels=n_ch, dtype='int16', latency='low') as stream:
-                    offset = 0
-                    while offset < len(out):
-                        if stop_event is not None and stop_event.is_set():
-                            break
-                        end = min(offset + _CHUNK, len(out))
-                        chunk = out[offset:end]
-                        stream.write(chunk)
-                        if report_level and level_callback is not None:
-                            flat_chunk = chunk.flatten().astype(np.float32) / 32768.0
-                            level_callback(float(np.max(np.abs(flat_chunk))))
-                        offset = end
-                if report_level and level_callback is not None:
-                    level_callback(0.0)
+                    err_msg = f"'{dev_name}' ei ole toistolaiteet (max_output_channels=0)"
+                else:
+                    sr = samplerate
+                    data = audio_data
+                    native_sr = int(info.get('default_samplerate') or 48000)
+                    if native_sr != sr:
+                        import scipy.signal
+                        fa = data.astype(np.float32)
+                        n_frames = fa.shape[0] if fa.ndim > 1 else len(fa)
+                        new_len = max(1, int(n_frames * native_sr / sr))
+                        resampled = scipy.signal.resample(fa, new_len, axis=0) if fa.ndim > 1 else scipy.signal.resample(fa, new_len)
+                        data = np.clip(resampled, -32768, 32767).astype(np.int16)
+                        sr = native_sr
+                    n_ch = min(int(info['max_output_channels']), 2)
+                    out = data.reshape(-1, 1) if data.ndim == 1 else data[:, :n_ch]
+                    if out.shape[1] < n_ch:
+                        out = np.column_stack([out[:, 0]] * n_ch)
+                    _CHUNK = 4096  # frames per write — short enough to respond to stop quickly
+                    with sd.OutputStream(device=device_index, samplerate=sr,
+                                         channels=n_ch, dtype='int16', latency='low') as stream:
+                        offset = 0
+                        while offset < len(out):
+                            if stop_event is not None and stop_event.is_set():
+                                break
+                            end = min(offset + _CHUNK, len(out))
+                            chunk = out[offset:end]
+                            stream.write(chunk)
+                            if report_level and level_callback is not None:
+                                flat_chunk = chunk.flatten().astype(np.float32) / 32768.0
+                                level_callback(float(np.max(np.abs(flat_chunk))))
+                            offset = end
+                    if report_level and level_callback is not None:
+                        level_callback(0.0)
+                    ok = True
             except Exception as e:
-                dev_name = str(device_index)
                 try:
                     dev_name = sd.query_devices(device_index)["name"]
                 except Exception:
-                    pass
-                with device_errors_lock:
-                    device_errors.append(f"'{dev_name}': {e}")
+                    dev_name = str(device_index)
+                err_msg = f"'{dev_name}': {e}"
+            with results_lock:
+                device_ok.append(ok)
+                if err_msg:
+                    device_errors.append(err_msg)
 
         targets = device_indices if device_indices else [None]
         threads = []
@@ -2623,7 +2628,8 @@ def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None, v
         for t in threads:
             t.join()
 
-        if device_errors:
+        # Only raise if every device failed — single-device errors are silent warnings
+        if device_errors and not any(device_ok):
             raise RuntimeError("Äänen toisto epäonnistui:\n" + "\n".join(device_errors))
 
     except Exception as e:
