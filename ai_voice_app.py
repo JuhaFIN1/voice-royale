@@ -1658,8 +1658,10 @@ class SoundboardButton(QWidget):
         menu.addAction("Link to Page…", self._assign_page_link)
         if not self._data.get("_back") and not self._data.get("subfolder"):
             menu.addAction("Kansioksi…", self._set_as_folder)
+        _name = self._data.get("name", "")
         has_content = bool(self._data.get("file") or self._data.get("image")
-                          or self._data.get("link_page_name") or self._data.get("subfolder"))
+                          or self._data.get("link_page_name") or self._data.get("subfolder")
+                          or (_name and not _name.startswith("Slot ")))
         if has_content:
             menu.addSeparator()
             menu.addAction("Clear", self._clear)
