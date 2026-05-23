@@ -3,15 +3,15 @@
 Copyright (c) 2026 Juha Lempiäinen. All rights reserved.
 Use permitted. Modification and redistribution of source code prohibited — see [LICENSE](LICENSE).
 
-Windows + macOS desktop app (PyQt6) that listens for a wake-word, transcribes your speech, translates it with GPT-4.1-mini, and speaks the result via TTS — routed to any audio output device, including virtual audio cables for game voice chat. Now with live voice morphing, soundboard, and Stream Deck XL support.
+Windows + macOS desktop app (PyQt6) that listens for a wake-word, transcribes your speech, translates it with GPT-4.1-mini, and speaks the result via TTS — routed to any audio output device, including virtual audio cables for game voice chat. Now with live voice morphing, soundboard, Stream Deck XL support, and full Voicemeeter Banana integration for zero-config game chat routing.
 
 ## Download
 
 | Platform | Link |
 |---|---|
-| **Windows** | [Voice_Royale_Setup_1.3.19.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
-| **macOS Apple Silicon** (M1/M2/M3) | [Voice_Royale_1.3.19_macOS_arm64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
-| **macOS Intel** (x86_64) | [Voice_Royale_1.3.19_macOS_x86_64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
+| **Windows** | [Voice_Royale_Setup_1.3.27.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
+| **macOS Apple Silicon** (M1/M2/M3) | [Voice_Royale_1.3.27_macOS_arm64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
+| **macOS Intel** (x86_64) | [Voice_Royale_1.3.27_macOS_x86_64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
 
 > **Windows SmartScreen warning?** Click **"More info"** → **"Run anyway"**.
 > This appears because the installer uses a self-signed certificate. The app is safe.
@@ -20,7 +20,9 @@ Windows + macOS desktop app (PyQt6) that listens for a wake-word, transcribes yo
 
 ## Features
 
-- **First-run wizard** — guided 4-step setup: OpenAI API key → VB-Cable virtual mic check/install → mic and speaker selection with live recording test (records 3 s and plays back)
+- **Setup Wizard** — guided 6-step setup: packages → OpenAI API key → VB-Cable → Voicemeeter Banana → mic/speaker selection → end-to-end audio test (mic level, TTS playback, soundboard beep)
+- **Voicemeeter Banana auto-start** — app launches Voicemeeter Banana automatically on startup; no manual action needed
+- **Zero-config game chat** — wizard installs and configures Voicemeeter Banana, sets Windows default microphone to Voicemeeter Out B1 automatically; Discord, Fortnite, and all other apps pick it up with no in-game changes
 - **Wake-word detection** — say "Jarvis, in German: hello team" to trigger automatically
   - Picovoice Porcupine (offline, accurate) if you have an AccessKey
   - Whisper VAD fallback (works without any key)
@@ -42,8 +44,7 @@ Windows + macOS desktop app (PyQt6) that listens for a wake-word, transcribes yo
   - Right-click to rename, assign sound/image, link to another page, or clear
   - Add pages with **+** (up to 10); right-click a tab to rename or delete
 - **Stream Deck XL** — full 32-button layout via official Elgato plugin + local HTTP API (port 17842)
-- **Virtual mic (VB-Cable)** — one-click install from Settings so TTS audio goes into game voice chat
-- **Chat routing (Voicemeeter Banana)** — Settings → Asennus auto-installs and configures Voicemeeter Banana: routes your Mix Minus mic (e.g. RodeCaster Chat) and TTS output into one virtual microphone bus so both are heard in game chat. One manual step: set your game mic to "Voicemeeter Output"
+- **Virtual mic (VB-Cable)** — one-click install from wizard so TTS audio goes into game voice chat
 - **Windows autostart** — start with Windows, optionally minimized to tray
 - **Auto-update** — Settings → Päivitys checks GitHub releases; downloads and launches the installer
 - **Data backup** — export all settings, history, soundboard audio/images, and API keys to a ZIP; restore with one click
@@ -51,16 +52,29 @@ Windows + macOS desktop app (PyQt6) that listens for a wake-word, transcribes yo
 
 ## Installation (Windows)
 
-1. Download `Voice_Royale_Setup_1.3.19.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
+1. Download `Voice_Royale_Setup_1.3.27.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
 2. Run the installer — it creates Start Menu shortcuts and an optional desktop icon
 3. On first launch the **Setup Wizard** opens automatically:
-   - **Step 1/4** — get an OpenAI API key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) (free tier available)
-   - **Step 2/4** — paste and test the key
-   - **Step 3/4** — VB-Cable virtual mic check — install with one click if not already present (needed for game voice chat)
-   - **Step 4/4** — select your microphone and speakers, record 3 seconds to verify the mic works, play a test beep
-4. Done — the app opens and is ready to use
+   - **Step 1/6** — install required Python packages automatically
+   - **Step 2/6** — enter your OpenAI API key ([platform.openai.com/api-keys](https://platform.openai.com/api-keys), free credits for new accounts)
+   - **Step 3/6** — VB-Cable virtual mic: one-click install if not present
+   - **Step 4/6** — Voicemeeter Banana: one-click install + automatic routing configuration
+     - After clicking **Konfiguroi reititys**, open Voicemeeter Banana and confirm Hardware Input 1 shows your mic/Chat device with **B1** lit. If it's blank, click Hardware Input 1 and select the device manually.
+   - **Step 5/6** — speak into your mic to auto-detect it; beep-test your speakers
+   - **Step 6/6** — end-to-end test: mic level check, TTS playback, soundboard beep
+4. Done — the app opens and is ready to use. Voicemeeter Banana starts automatically with the app.
 
 Upgrading: just run the new installer over the old one. Your API key, settings, and history are preserved.
+
+## How game chat routing works
+
+```
+RodeCaster Chat mic → Voicemeeter Hardware Input 1 → B1 bus ─┐
+                                                               ├→ Voicemeeter Out B1 → Windows default mic → Fortnite / Discord
+Voice Royale TTS/Soundboard → Voicemeeter Input → B1 bus ────┘
+```
+
+The wizard sets **Windows default microphone = Voicemeeter Out B1** automatically. Any game or app that uses the Windows default mic will hear both your physical mic and TTS/soundboard audio without any in-game configuration.
 
 ## Installation (macOS)
 
@@ -136,12 +150,6 @@ Connect before launching — the app assigns buttons automatically:
 - 24–29 = Voice FX presets
 - 30 = TTS backend toggle, 31 = Settings
 
-### Game voice chat (virtual mic)
-1. Open ⚙️ Settings → click **Install VB-Cable (Virtual Mic)**
-2. Approve the Windows admin prompt
-3. Select **CABLE Input** as the output device in this app
-4. Select **CABLE Output** as the microphone in your game / Discord
-
 ## Settings (⚙️)
 
 | Setting | Description |
@@ -159,6 +167,7 @@ Connect before launching — the app assigns buttons automatically:
 | Windows autostart | Start with Windows, optionally minimized |
 | Auto-update | Check for new version and download installer |
 | Virtual mic | Install VB-Cable for game voice chat routing |
+| Voicemeeter Banana | Re-run wizard configuration for game chat routing |
 | Data backup | Export/import all personal data as a ZIP archive |
 
 ## Running from source
@@ -181,10 +190,10 @@ The installer is signed automatically if `SIGN_CERT_PATH` and `SIGN_CERT_PASSWOR
 
 | File / Folder | Description |
 |---|---|
-| `ai_voice_app.py` | Entire app (~6800 lines) |
+| `ai_voice_app.py` | Entire app (~8400 lines) |
 | `credentials.env` | API keys (not committed) |
 | `app_settings.json` | User settings |
-| `speech_history.json` | Translation history + favorites |
+| `speech_history.json` | Translation history + favorites + selected audio devices |
 | `favorites_audio/` | Cached TTS WAV files for favorites |
 | `soundboard/` | Imported soundboard audio and images |
 | `juhalempiainensoftware.png` | Splash screen image |

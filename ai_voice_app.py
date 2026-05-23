@@ -260,7 +260,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.25"
+APP_VERSION = "1.3.27"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -492,6 +492,34 @@ def _is_voicemeeter_installed() -> bool:
         return False
 
 
+def _ensure_voicemeeter_running() -> bool:
+    """Start Voicemeeter Banana if installed but not running. Returns True if running."""
+    if sys.platform != "win32":
+        return False
+    import subprocess as _sp, time as _t
+    try:
+        r = _sp.run(["tasklist", "/FI", "IMAGENAME eq voicemeeterb.exe", "/NH"],
+                    capture_output=True, text=True, timeout=5)
+        if "voicemeeterb.exe" in r.stdout.lower():
+            return True
+    except Exception:
+        pass
+    search_dirs = [
+        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "VB", "Voicemeeter"),
+        os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "VB", "Voicemeeter"),
+    ]
+    for d in search_dirs:
+        exe = os.path.join(d, "voicemeeterb.exe")
+        if os.path.isfile(exe):
+            try:
+                _sp.Popen([exe])
+                _t.sleep(2.5)
+                return True
+            except Exception:
+                pass
+    return False
+
+
 def _get_voicemeeter_dll_path() -> str | None:
     """Return path to VoicemeeterRemote64.dll or None."""
     search_dirs = [
@@ -643,7 +671,8 @@ def _check_voicemeeter_routing() -> tuple[str, bool]:
             return (
                 "✅ Reititys valmis!\n"
                 f"  • Voice Royale lähtölaite → '{vm_in_dev['name']}'\n"
-                f"  • Pelissä mikrofoni → '{vm_out_dev['name']}'",
+                f"  • Windows oletusmikrofoni → '{vm_out_dev['name']}'\n"
+                "  • Discord, Fortnite ym. käyttävät sitä automaattisesti.",
                 True,
             )
         parts = []
@@ -657,51 +686,60 @@ def _check_voicemeeter_routing() -> tuple[str, bool]:
 
 
 def _set_windows_default_recording(name_contains: str) -> tuple[bool, str]:
-    """Set Windows default recording device using inline C# + PolicyConfig COM interface.
-    Works on Windows 10/11 without any extra Python modules.
+    """Set Windows default recording device.
+    Reads device names from registry (reliable), sets default via IPolicyConfig COM.
     """
     if sys.platform != "win32":
         return False, "Ei Windows"
     import subprocess as _sp
+    # Registry: PKEY_Device_DeviceDesc = {a45c254e...},2
+    # C# helper does the COM vtable cast natively (PowerShell -as fails for IUnknown interfaces)
     ps = f"""
 Add-Type -TypeDefinition @'
 using System; using System.Runtime.InteropServices;
-[Guid("F8679F50-850A-41CF-9C72-430F290290C8")]
-[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-interface IPolicyConfig {{
+[ComImport, Guid("F8679F50-850A-41CF-9C72-430F290290C8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IPolicyConfigVR {{
   [PreserveSig] int _1();[PreserveSig] int _2();[PreserveSig] int _3();
   [PreserveSig] int _4();[PreserveSig] int _5();[PreserveSig] int _6();
   [PreserveSig] int _7();[PreserveSig] int _8();[PreserveSig] int _9();[PreserveSig] int _10();
   [PreserveSig] int SetDefaultEndpoint([MarshalAs(UnmanagedType.LPWStr)] string id, uint role);
   [PreserveSig] int _12();
 }}
-[Guid("870AF99C-171D-4F9E-AF0D-E63DF40C2BC9")]
-[ClassInterface(ClassInterfaceType.None)][ComImport] class PolicyConfigClient {{}}
-'@ -ErrorAction SilentlyContinue
-$t=[Type]::GetTypeFromCLSID([Guid]'BCDE0395-E52F-467C-8E3D-C4579291692E')
-$en=[Activator]::CreateInstance($t)
-$col=$en.EnumAudioEndpoints(1,1)
-$pc=[Activator]::CreateInstance([Type]::GetTypeFromCLSID([Guid]'870AF99C-171D-4F9E-AF0D-E63DF40C2BC9'))
-$set=$false
-for($i=0;$i-lt$col.GetCount();$i++){{
-  $d=$col.Item($i); $id=$d.GetId(); $s=$d.OpenPropertyStore(0); $nm=''
-  try{{$nm=$s.GetValue([ref]([System.Runtime.InteropServices.Marshal]::AllocHGlobal(20)))}}catch{{}}
-  if($nm -like '*{name_contains}*'){{
-    $pc.SetDefaultEndpoint($id,0);$pc.SetDefaultEndpoint($id,1);$pc.SetDefaultEndpoint($id,2)
-    $set=$true; Write-Output "OK:$nm"; break
+[ComImport, Guid("870AF99C-171D-4F9E-AF0D-E63DF40C2BC9"), ClassInterface(ClassInterfaceType.None)]
+public class PolicyConfigClientVR {{}}
+public static class PolicyConfigHelperVR {{
+  public static void SetDefault(string epId) {{
+    var pc = (IPolicyConfigVR)new PolicyConfigClientVR();
+    pc.SetDefaultEndpoint(epId, 0);
+    pc.SetDefaultEndpoint(epId, 1);
+    pc.SetDefaultEndpoint(epId, 2);
   }}
 }}
-if(-not $set){{Write-Output "NOTFOUND"}}
+'@ -ErrorAction SilentlyContinue
+$regBase = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Capture'
+$found = $false
+foreach ($key in Get-ChildItem $regBase -ErrorAction SilentlyContinue) {{
+  $propPath = Join-Path $key.PSPath 'Properties'
+  $nm = (Get-ItemProperty -Path $propPath -Name '{{a45c254e-df1c-4efd-8020-67d146a850e0}},2' -ErrorAction SilentlyContinue).'{{a45c254e-df1c-4efd-8020-67d146a850e0}},2'
+  if ($nm -and $nm -like '*{name_contains}*') {{
+    $epId = '{{0.0.1.00000000}}.' + $key.PSChildName
+    [PolicyConfigHelperVR]::SetDefault($epId)
+    Write-Output "OK:$nm"
+    $found = $true
+    break
+  }}
+}}
+if (-not $found) {{ Write-Output "NOTFOUND" }}
 """
     try:
         r = _sp.run(
             ["powershell", "-NonInteractive", "-NoProfile", "-Command", ps],
-            capture_output=True, text=True, timeout=20,
+            capture_output=True, text=True, timeout=25,
         )
         out = r.stdout.strip()
         if out.startswith("OK:"):
             return True, f"✅ Windows oletusmikrofoni asetettu: {out[3:]}"
-        return False, "Laitetta ei löydy — aseta manuaalisesti"
+        return False, f"Laitetta ei löydy ('{name_contains}') — käynnistä Voicemeeter ja yritä uudelleen"
     except Exception as e:
         return False, str(e)
 
@@ -715,8 +753,10 @@ def _open_windows_sound_recording():
 def _get_voicemeeter_output_device_indices() -> list[int]:
     """Return [Voicemeeter Input index, headphones index] from list_output_devices()."""
     devices = list_output_devices()
+    # Must be exactly "Voicemeeter Input" (Strip[2] → B1), not "Voicemeeter In 2" etc.
     vm_idx = next(
-        (idx for idx, n in devices if n.lower() == "voicemeeter input (vb-audio voicemeeter vaio)"),
+        (idx for idx, n in reversed(devices)
+         if n.lower() == "voicemeeter input (vb-audio voicemeeter vaio)"),
         None,
     )
     headphone_idx = next(
@@ -768,31 +808,34 @@ def _voicemeeter_configure(mic_device_name: str, status_cb) -> None:
         def set_param_float(param: str, value: float):
             vm.VBVMR_SetParameterFloat(param.encode(), ctypes.c_float(value))
 
-        # Hardware Input 1 (Strip[0]): set device to user's chosen recording device
-        # Voicemeeter uses WDM:, MME:, or KS: prefix
+        # Hardware Input 1 (Strip[0]): route RodeCaster/physical mic → B1
+        # Try WDM first, then MME — Voicemeeter may accept either format
         if mic_device_name:
             set_param_str("Strip[0].device.wdm", mic_device_name)
-        set_param_float("Strip[0].A1", 0.0)   # not to physical output
+            time.sleep(0.3)
+            set_param_str("Strip[0].device.mme", mic_device_name)
+        set_param_float("Strip[0].A1", 0.0)
         set_param_float("Strip[0].A2", 0.0)
-        set_param_float("Strip[0].B1", 1.0)   # → B1 (virtual out bus)
+        set_param_float("Strip[0].B1", 1.0)   # → B1 bus
         set_param_float("Strip[0].B2", 0.0)
 
-        # Virtual Input (Strip[2] in Banana = first virtual cable input)
-        # VB-Cable Out is routed here by the user's output device selection in Voice Royale
+        # Virtual Input Strip[2] (= "Voicemeeter Input" VAIO) → B1
+        # Voice Royale sends TTS/soundboard here
         set_param_float("Strip[2].A1", 0.0)
         set_param_float("Strip[2].A2", 0.0)
         set_param_float("Strip[2].B1", 1.0)   # → B1
         set_param_float("Strip[2].B2", 0.0)
 
-        # Bus B1 on (virtual output — appears as "Voicemeeter Output" recording device)
+        # Bus B1 on
         set_param_float("Bus[3].On", 1.0)
 
-        time.sleep(0.5)
+        time.sleep(0.8)
         vm.VBVMR_Logout()
         status_cb(
-            "✅ Voicemeeter configured!\n"
-            "Last step: in Fortnite/game, set microphone to 'Voicemeeter Output' (or Windows Default).\n"
-            "In Voice Royale, set TTS output device to 'Voicemeeter Input (VB-Audio Voicemeeter VAIO)'."
+            "✅ Reititys asetettu: Strip[0] → B1 ja Strip[2] → B1.\n"
+            "⚠ Tarkista Voicemeeter Banana: Hardware Input 1 -kohtaan pitää näkyä "
+            f"'{mic_device_name}'. Jos se on tyhjä, valitse se manuaalisesti.\n"
+            "Varmista myös että B1-nappi palaa Hardware Input 1 -stripissä."
         )
     except Exception as exc:
         status_cb(f"Configuration error: {exc}")
@@ -3137,6 +3180,12 @@ class App(QWidget):
             on_wake_callback=self._on_wake_detected,
             on_status_callback=self.append_status,
         )
+
+        # Auto-start Voicemeeter Banana if installed
+        if _is_voicemeeter_installed():
+            QTimer.singleShot(1200, lambda: threading.Thread(
+                target=_ensure_voicemeeter_running, daemon=True
+            ).start())
 
         # Voice FX + soundboard state
         self._voice_fx = VoiceEffectProcessor(self.append_status)
@@ -6727,7 +6776,7 @@ def open_settings_dialog(parent_app: "App") -> None:
 # SETUP WIZARD (combined)
 # =========================
 class SetupWizard(QDialog):
-    """Asennusvelho: paketit → API-avain → VB-Cable → Voicemeeter → Äänilaitteet."""
+    """Asennusvelho: paketit → API-avain → VB-Cable → Voicemeeter → Äänilaitteet → Lopputesti."""
 
     _STYLE = """
         QDialog { background: #0d1117; color: #e6edf3; font-family: "Segoe UI", sans-serif; }
@@ -6924,7 +6973,7 @@ class SetupWizard(QDialog):
         lay.setSpacing(0)
         lay.addWidget(self._header(
             "Python-paketit",
-            "Vaihe 1/5  —  Tarkistetaan tarvittavat kirjastot."
+            "Vaihe 1/6  —  Tarkistetaan tarvittavat kirjastot."
         ))
         body = QWidget()
         body.setStyleSheet("background: #0d1117;")
@@ -7045,7 +7094,7 @@ class SetupWizard(QDialog):
         lay.setSpacing(0)
         lay.addWidget(self._header(
             "OpenAI API-avain",
-            "Vaihe 2/5  —  Tarvitaan puheentunnistukseen. Ohitettavissa."
+            "Vaihe 2/6  —  Tarvitaan puheentunnistukseen. Ohitettavissa."
         ))
         body = QWidget()
         body.setStyleSheet("background: #0d1117;")
@@ -7161,7 +7210,7 @@ class SetupWizard(QDialog):
         lay.setSpacing(0)
         lay.addWidget(self._header(
             "Virtuaalimikrofoni (VB-Cable)",
-            "Vaihe 3/5  —  Valinnainen. Tarvitaan jos haluat äänen näkyvän mikrofonina peleissä."
+            "Vaihe 3/6  —  Valinnainen. Tarvitaan jos haluat äänen näkyvän mikrofonina peleissä."
         ))
         body = QWidget()
         body.setStyleSheet("background: #0d1117;")
@@ -7250,7 +7299,7 @@ class SetupWizard(QDialog):
         lay.setSpacing(0)
         lay.addWidget(self._header(
             "Chat-reititys — Voicemeeter Banana",
-            "Vaihe 4/5  —  Valinnainen. Tarvitaan fyysiselle äänikortille (esim. RodeCaster Pro 2)."
+            "Vaihe 4/6  —  Valinnainen. Tarvitaan fyysiselle äänikortille (esim. RodeCaster Pro 2)."
         ))
         body = QWidget()
         body.setStyleSheet("background: #0d1117;")
@@ -7278,7 +7327,8 @@ class SetupWizard(QDialog):
         why = QLabel(
             "Voicemeeter yhdistää RodeCasterin Chat-mikrofonin JA Voice Royalen TTS-äänen "
             "yhteen virtuaaliseen mikrofoniin, jota Discord/pelit käyttävät automaattisesti.\n\n"
-            "Reititys: TTS → Voicemeeter Input → B1 → Voicemeeter Out B1 → Discord/pelit"
+            "Reititys: TTS → Voicemeeter Input → B1 → Voicemeeter Out B1 → Discord/pelit\n\n"
+            "Voicemeeter Banana käynnistyy automaattisesti appin mukana aina."
         )
         why.setStyleSheet(
             "color: #8b949e; font-size: 12px; background: transparent; line-height: 145%;"
@@ -7350,7 +7400,12 @@ class SetupWizard(QDialog):
         )
         bl.addWidget(step2)
 
-        dev_hint = QLabel("Valitse äänikortin Chat/Mix Minus -tulolähde.")
+        dev_hint = QLabel(
+            "Valitse mikrofoni tai Chat/Mix Minus -tulo joka menee Voicemeeterin Hardware Input 1:een.\n"
+            "Konfiguroi-nappi yrittää asettaa sen automaattisesti. Jos se epäonnistuu,\n"
+            "avaa Voicemeeter Banana → klikkaa Hardware Input 1 → valitse sama laite manuaalisesti → "
+            "varmista että B1-nappi palaa."
+        )
         dev_hint.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
         bl.addWidget(dev_hint)
 
@@ -7425,6 +7480,7 @@ class SetupWizard(QDialog):
             _rq = _q2.Queue()
 
             def _bg():
+                _ensure_voicemeeter_running()
                 result_lines = []
                 _voicemeeter_configure(mic_name, lambda m: result_lines.append(m))
                 vm_msg = result_lines[-1] if result_lines else "Ei vastausta"
@@ -7446,7 +7502,7 @@ class SetupWizard(QDialog):
                             dev_names = [n for idx, n in devs if idx in new_indices]
                         except Exception:
                             pass
-                    _, win_msg = _set_windows_default_recording("Voicemeeter Out B")
+                    _, win_msg = _set_windows_default_recording("Voicemeeter Out B1")
                 _rq.put((vm_msg, ok, win_msg, dev_names))
 
             def _poll():
@@ -7485,12 +7541,60 @@ class SetupWizard(QDialog):
         self._wiz_vm_test_btn.clicked.connect(_do_vm_test)
 
         game_note = QLabel(
-            "✅ Konfiguroi-nappi asettaa Windows-oletusmikrofonin automaattisesti "
-            "(Voicemeeter Out B1).\nDiscord, Fortnite ym. käyttävät sitä suoraan."
+            "Konfiguroi-nappi asettaa Windows-oletusmikrofonin automaattisesti "
+            "(Voicemeeter Output).\nDiscord, Fortnite ym. käyttävät sitä suoraan — "
+            "ei muutoksia peleissä tarvita."
         )
         game_note.setStyleSheet("color: #3fb950; font-size: 11px; background: transparent;")
         game_note.setWordWrap(True)
         bl.addWidget(game_note)
+
+        self._wiz_win_mic_lbl = QLabel("")
+        self._wiz_win_mic_lbl.setStyleSheet(
+            "color: #8b949e; font-size: 11px; background: transparent;"
+        )
+        self._wiz_win_mic_lbl.setWordWrap(True)
+        bl.addWidget(self._wiz_win_mic_lbl)
+
+        win_mic_btn = QPushButton("Aseta Windows oletusmikrofoni → Voicemeeter Output")
+        win_mic_btn.setFixedHeight(30)
+        win_mic_btn.setStyleSheet(
+            "QPushButton { background: #161b22; color: #c9d1d9; border: 1px solid #30363d;"
+            " border-radius: 5px; padding: 4px 12px; font-size: 11px; font-weight: normal; }"
+            "QPushButton:hover { background: #21262d; color: #e6edf3; }"
+        )
+
+        def _do_set_win_mic():
+            import queue as _q3
+            win_mic_btn.setEnabled(False)
+            win_mic_btn.setText("Asetetaan...")
+            _rq3 = _q3.Queue()
+
+            def _bg():
+                ok, msg = _set_windows_default_recording("Voicemeeter Out B1")
+                _rq3.put((ok, msg))
+
+            def _poll():
+                try:
+                    ok, msg = _rq3.get_nowait()
+                except Exception:
+                    return
+                _ptmr3.stop()
+                self._wiz_win_mic_lbl.setText(msg)
+                self._wiz_win_mic_lbl.setStyleSheet(
+                    f"color: {'#3fb950' if ok else '#e3b341'};"
+                    " font-size: 11px; background: transparent;"
+                )
+                win_mic_btn.setEnabled(True)
+                win_mic_btn.setText("Aseta Windows oletusmikrofoni → Voicemeeter Output")
+
+            _ptmr3 = QTimer(self)
+            _ptmr3.timeout.connect(_poll)
+            _ptmr3.start(100)
+            threading.Thread(target=_bg, daemon=True).start()
+
+        win_mic_btn.clicked.connect(_do_set_win_mic)
+        bl.addWidget(win_mic_btn)
 
         manual_btn = QPushButton("Avaa Windows Ääni → Tallennuslaitteet (manuaalinen)")
         manual_btn.setFixedHeight(28)
@@ -7526,7 +7630,7 @@ class SetupWizard(QDialog):
         lay.setSpacing(0)
         lay.addWidget(self._header(
             "Äänilaitteet",
-            "Vaihe 5/5  —  Puhu mikrofoniisi → tunnistetaan automaattisesti. Beep-testaa kaiuttimet."
+            "Vaihe 5/6  —  Puhu mikrofoniisi → tunnistetaan automaattisesti. Beep-testaa kaiuttimet."
         ))
         body = QWidget()
         body.setStyleSheet("background: #0d1117;")
@@ -7746,6 +7850,284 @@ class SetupWizard(QDialog):
         nav = QHBoxLayout()
         nav.addWidget(self._back_btn(4))
         nav.addStretch()
+        nxt = QPushButton("Seuraava  →")
+        nxt.setFixedHeight(42)
+        nxt.setMinimumWidth(140)
+        nxt.clicked.connect(lambda: self._navigate(6))
+        nav.addWidget(nxt)
+        bl.addLayout(nav)
+        lay.addWidget(body)
+        return page
+
+    def _page_final_test(self):
+        page = QWidget()
+        page.setStyleSheet("background: #0d1117;")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._header(
+            "Lopputesti",
+            "Vaihe 6/6  —  Testaa mikrofoni, TTS ja soundboard ennen kuin aloitat."
+        ))
+        body = QWidget()
+        body.setStyleSheet("background: #0d1117;")
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(32, 16, 32, 16)
+        bl.setSpacing(10)
+
+        # ── 1. Mikrofoni ───────────────────────────────────────────────
+        mic_hdr = QLabel("1. Mikrofoni")
+        mic_hdr.setStyleSheet(
+            "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;"
+        )
+        bl.addWidget(mic_hdr)
+        mic_hint = QLabel("Paina nappi ja puhu — appi tarkistaa kuuleeko mikrofoni äänen.")
+        mic_hint.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        mic_hint.setWordWrap(True)
+        bl.addWidget(mic_hint)
+        mic_btn = QPushButton("▶ Testaa mikrofoni (3 s)")
+        mic_btn.setFixedHeight(34)
+        mic_result = QLabel("")
+        mic_result.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        mic_result.setWordWrap(True)
+        bl.addWidget(mic_btn)
+        bl.addWidget(mic_result)
+
+        def _do_mic_test():
+            import queue as _q
+            selected = self._dev_selected_input
+            if selected is None:
+                mic_result.setText(
+                    "⚠️ Ei mikrofonia valittu — palaa sivulle 5 ja puhu mikrofoniisi."
+                )
+                mic_result.setStyleSheet(
+                    "color: #e3b341; font-size: 11px; background: transparent;"
+                )
+                return
+            mic_btn.setEnabled(False)
+            mic_btn.setText("Kuunnellaan 3 s...")
+            _rq = _q.Queue()
+
+            def _record():
+                try:
+                    buf = []
+                    done_evt = threading.Event()
+                    target_frames = 16000 * 3
+                    _CONFIGS = [(1, 16000), (1, 48000), (2, 48000), (1, 44100)]
+                    stream_err = None
+                    for ch, sr in _CONFIGS:
+                        buf.clear()
+                        done_evt.clear()
+                        _collected = [0]
+
+                        def _cb(data, frames, t, status, _ch=ch, _sr=sr):
+                            buf.append(data[:, 0].copy() if data.ndim > 1 else data.copy())
+                            _collected[0] += frames
+                            if _collected[0] >= _sr * 3:
+                                done_evt.set()
+                                raise sd.CallbackStop()
+
+                        try:
+                            with sd.InputStream(
+                                device=selected, channels=ch, samplerate=sr,
+                                blocksize=512, dtype="float32", callback=_cb
+                            ):
+                                done_evt.wait(timeout=5)
+                            stream_err = None
+                            break
+                        except Exception as e:
+                            stream_err = e
+
+                    if stream_err is not None:
+                        _rq.put(("err", str(stream_err)))
+                        return
+                    if not buf:
+                        _rq.put(("err", "Ei ääntä nauhoitettu"))
+                        return
+                    audio = np.concatenate(buf)
+                    peak = float(np.max(np.abs(audio)))
+                    _rq.put(("ok", peak))
+                except Exception as exc:
+                    _rq.put(("err", str(exc)))
+
+            def _poll_mic():
+                try:
+                    kind, val = _rq.get_nowait()
+                except Exception:
+                    return
+                _ptmr.stop()
+                try:
+                    self._dev_active_poll_timers.remove(_ptmr)
+                except ValueError:
+                    pass
+                mic_btn.setEnabled(True)
+                mic_btn.setText("▶ Testaa mikrofoni (3 s)")
+                if kind == "err":
+                    mic_result.setText(f"⚠️ Virhe: {val}")
+                    mic_result.setStyleSheet(
+                        "color: #f85149; font-size: 11px; background: transparent;"
+                    )
+                elif val > 0.02:
+                    mic_result.setText(f"✅ Mikrofoni kuuluu (taso: {val:.3f})")
+                    mic_result.setStyleSheet(
+                        "color: #3fb950; font-size: 11px; background: transparent;"
+                    )
+                else:
+                    mic_result.setText(
+                        f"⚠️ Äänitaso hyvin matala ({val:.4f}) — tarkista mikrofoni ja luvat."
+                    )
+                    mic_result.setStyleSheet(
+                        "color: #e3b341; font-size: 11px; background: transparent;"
+                    )
+
+            _ptmr = QTimer(self)
+            _ptmr.timeout.connect(_poll_mic)
+            _ptmr.start(100)
+            self._dev_active_poll_timers.append(_ptmr)
+            threading.Thread(target=_record, daemon=True).start()
+
+        mic_btn.clicked.connect(_do_mic_test)
+
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.Shape.HLine)
+        sep1.setStyleSheet("color: #21262d;")
+        bl.addWidget(sep1)
+
+        # ── 2. TTS ────────────────────────────────────────────────────
+        tts_hdr = QLabel("2. TTS — teksti puheeksi")
+        tts_hdr.setStyleSheet(
+            "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;"
+        )
+        bl.addWidget(tts_hdr)
+        tts_hint = QLabel("Kuuletko äänen kaiuttimistasi / kuulokkeistasi?")
+        tts_hint.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        bl.addWidget(tts_hint)
+        tts_btn = QPushButton("▶ Testaa TTS")
+        tts_btn.setFixedHeight(34)
+        tts_result = QLabel("")
+        tts_result.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        tts_result.setWordWrap(True)
+        bl.addWidget(tts_btn)
+        bl.addWidget(tts_result)
+
+        def _do_tts_test():
+            import queue as _q
+            selected_out = [idx for idx, cb in self._dev_out_checkboxes.items() if cb.isChecked()]
+            tts_btn.setEnabled(False)
+            tts_btn.setText("Generoidaan...")
+            _rq = _q.Queue()
+
+            def _bg():
+                try:
+                    import asyncio
+                    wav = asyncio.run(
+                        request_edge_tts_wav("Voice Royale on valmis. Testi onnistui.", "Finnish")
+                    )
+                    play_wav_bytes(wav, device_indices=selected_out if selected_out else None)
+                    _rq.put((True, "✅ TTS toimii"))
+                except Exception as exc:
+                    _rq.put((False, f"⚠️ Virhe: {exc}"))
+
+            def _poll_tts():
+                try:
+                    ok, msg = _rq.get_nowait()
+                except Exception:
+                    return
+                _ptmr.stop()
+                try:
+                    self._dev_active_poll_timers.remove(_ptmr)
+                except ValueError:
+                    pass
+                tts_btn.setEnabled(True)
+                tts_btn.setText("▶ Testaa TTS")
+                tts_result.setText(msg)
+                tts_result.setStyleSheet(
+                    f"color: {'#3fb950' if ok else '#e3b341'};"
+                    " font-size: 11px; background: transparent;"
+                )
+
+            _ptmr = QTimer(self)
+            _ptmr.timeout.connect(_poll_tts)
+            _ptmr.start(100)
+            self._dev_active_poll_timers.append(_ptmr)
+            threading.Thread(target=_bg, daemon=True).start()
+
+        tts_btn.clicked.connect(_do_tts_test)
+
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setStyleSheet("color: #21262d;")
+        bl.addWidget(sep2)
+
+        # ── 3. Soundboard ─────────────────────────────────────────────
+        sb_hdr = QLabel("3. Soundboard")
+        sb_hdr.setStyleSheet(
+            "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;"
+        )
+        bl.addWidget(sb_hdr)
+        sb_hint = QLabel("Kuuletko 660 Hz testiäänen?")
+        sb_hint.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        bl.addWidget(sb_hint)
+        sb_btn = QPushButton("▶ Testaa soundboard")
+        sb_btn.setFixedHeight(34)
+        sb_result = QLabel("")
+        sb_result.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        bl.addWidget(sb_btn)
+        bl.addWidget(sb_result)
+
+        def _do_sb_test():
+            import queue as _q
+            selected_out = [idx for idx, cb in self._dev_out_checkboxes.items() if cb.isChecked()]
+            sb_btn.setEnabled(False)
+            _rq = _q.Queue()
+
+            def _play():
+                try:
+                    target = selected_out[0] if selected_out else None
+                    info = (
+                        sd.query_devices(target) if target is not None
+                        else sd.query_devices(kind="output")
+                    )
+                    sr = int(info.get("default_samplerate", 48000))
+                    ch = max(1, min(2, int(info.get("max_output_channels", 2))))
+                    t = np.linspace(0, 0.7, int(sr * 0.7), endpoint=False)
+                    mono = (np.sin(2 * np.pi * 660.0 * t) * 0.45).astype("float32")
+                    tone = np.column_stack([mono] * ch) if ch > 1 else mono.reshape(-1, 1)
+                    sd.play(tone, samplerate=sr, device=target, blocking=True)
+                    _rq.put((True, "✅ Soundboard toimii"))
+                except Exception as exc:
+                    _rq.put((False, f"⚠️ Virhe: {exc}"))
+
+            def _poll_sb():
+                try:
+                    ok, msg = _rq.get_nowait()
+                except Exception:
+                    return
+                _ptmr.stop()
+                try:
+                    self._dev_active_poll_timers.remove(_ptmr)
+                except ValueError:
+                    pass
+                sb_btn.setEnabled(True)
+                sb_result.setText(msg)
+                sb_result.setStyleSheet(
+                    f"color: {'#3fb950' if ok else '#e3b341'};"
+                    " font-size: 11px; background: transparent;"
+                )
+
+            _ptmr = QTimer(self)
+            _ptmr.timeout.connect(_poll_sb)
+            _ptmr.start(100)
+            self._dev_active_poll_timers.append(_ptmr)
+            threading.Thread(target=_play, daemon=True).start()
+
+        sb_btn.clicked.connect(_do_sb_test)
+
+        bl.addStretch()
+
+        nav = QHBoxLayout()
+        nav.addWidget(self._back_btn(5))
+        nav.addStretch()
         fin = QPushButton("Valmis  ✓")
         fin.setFixedHeight(42)
         fin.setMinimumWidth(140)
@@ -7939,6 +8321,7 @@ class SetupWizard(QDialog):
         self._stack.addWidget(self._page_vbcable())      # 3
         self._stack.addWidget(self._page_voicemeeter())  # 4
         self._stack.addWidget(self._page_devices())      # 5
+        self._stack.addWidget(self._page_final_test())   # 6
 
     def _on_key_changed(self, text):
         valid = text.strip().startswith("sk-") and len(text.strip()) > 20
