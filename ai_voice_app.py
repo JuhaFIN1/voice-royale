@@ -262,7 +262,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.37"
+APP_VERSION = "1.3.38"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1398,6 +1398,7 @@ class SoundboardButton(QWidget):
         self._btn.setAcceptDrops(True)
         self._btn.installEventFilter(self)
         lay.addWidget(self._btn)
+        self.setAcceptDrops(True)
 
         self._refresh()
 
@@ -1407,11 +1408,13 @@ class SoundboardButton(QWidget):
             self._data["link_page_name"] = ""
         self._refresh()
         # Back-button slots are not draggable or context-menu editable
+        _is_back = bool(self._data.get("_back"))
         self._btn.setContextMenuPolicy(
-            Qt.ContextMenuPolicy.NoContextMenu if self._data.get("_back")
+            Qt.ContextMenuPolicy.NoContextMenu if _is_back
             else Qt.ContextMenuPolicy.CustomContextMenu
         )
-        self._btn.setAcceptDrops(not self._data.get("_back"))
+        self._btn.setAcceptDrops(not _is_back)
+        self.setAcceptDrops(not _is_back)
 
     def get_data(self) -> dict:
         return dict(self._data)
@@ -1462,6 +1465,24 @@ class SoundboardButton(QWidget):
                 self._on_drop(event)
                 return True
         return super().eventFilter(obj, event)
+
+    # Override drag methods on the outer QWidget so EXE OLE drops work even
+    # when Qt's hit-testing lands on this widget instead of _btn.
+    def dragEnterEvent(self, event):
+        self._on_drag_enter(event)
+
+    def dragMoveEvent(self, event):
+        mime = event.mimeData()
+        if SoundboardButton._edit_mode and (mime.hasUrls() or mime.hasFormat(self._SLOT_MIME)):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self._restore_style()
+
+    def dropEvent(self, event):
+        self._on_drop(event)
 
     def _restore_style(self):
         if self._data.get("_back"):
