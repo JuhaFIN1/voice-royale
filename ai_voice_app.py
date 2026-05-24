@@ -262,7 +262,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.34"
+APP_VERSION = "1.3.35"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -3351,7 +3351,7 @@ class App(QWidget):
         # Voicemeeter Banana running check — poll every 5s, update warning label
         self._vm_check_timer = QTimer(self)
         self._vm_check_timer.timeout.connect(self._check_voicemeeter_running)
-        self._vm_check_timer.start(5000)
+        self._vm_check_timer.start(60000)
         QTimer.singleShot(3000, self._check_voicemeeter_running)
         self._stream_deck.start(self)
         QTimer.singleShot(600, self._autostart_voice_fx)
