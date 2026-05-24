@@ -262,7 +262,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.38"
+APP_VERSION = "1.3.39"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1453,7 +1453,9 @@ class SoundboardButton(QWidget):
                 return True
             if t == QEvent.Type.DragMove:
                 mime = event.mimeData()
-                if SoundboardButton._edit_mode and (mime.hasUrls() or mime.hasFormat(self._SLOT_MIME)):
+                if SoundboardButton._edit_mode and (
+                        mime.hasUrls() or mime.hasFormat(self._SLOT_MIME)
+                        or self._has_file_drag(mime)):
                     event.acceptProposedAction()
                 else:
                     event.ignore()
@@ -1473,7 +1475,9 @@ class SoundboardButton(QWidget):
 
     def dragMoveEvent(self, event):
         mime = event.mimeData()
-        if SoundboardButton._edit_mode and (mime.hasUrls() or mime.hasFormat(self._SLOT_MIME)):
+        if SoundboardButton._edit_mode and (
+                mime.hasUrls() or mime.hasFormat(self._SLOT_MIME)
+                or self._has_file_drag(mime)):
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -1506,6 +1510,11 @@ class SoundboardButton(QWidget):
         drag.setHotSpot(QPoint(px.width() // 2, px.height() // 2))
         drag.exec(Qt.DropAction.MoveAction)
 
+    @staticmethod
+    def _has_file_drag(mime) -> bool:
+        """EXE fallback: Windows OLE drags may not populate hasUrls() at DragEnter time."""
+        return any('CF_HDROP' in f or 'FileName' in f for f in mime.formats())
+
     def _on_drag_enter(self, event):
         if not SoundboardButton._edit_mode:
             event.ignore()
@@ -1532,6 +1541,11 @@ class SoundboardButton(QWidget):
                     else:
                         self._btn.setStyleSheet(self._STYLE_DRAG)
                     return
+        # EXE/OLE fallback: hasUrls() may be False at DragEnter for Windows file drags
+        if self._has_file_drag(mime):
+            event.acceptProposedAction()
+            self._btn.setStyleSheet(self._STYLE_DRAG)
+            return
         event.ignore()
 
     def _on_drop(self, event):
@@ -2039,7 +2053,12 @@ class SoundboardButton(QWidget):
                     "Chrome/124.0.0.0 Safari/537.36"
                 )
                 sess = requests.Session()
-                sess.headers.update({"User-Agent": ua})
+                sess.headers.update({
+                    "User-Agent": ua,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.5",
+                    "Accept-Encoding": "gzip, deflate, br",
+                })
                 try:
                     # Step 1: get DuckDuckGo vqd token
                     r0 = sess.get(
@@ -2050,9 +2069,11 @@ class SoundboardButton(QWidget):
                     vqd_m = (
                         _re.search(r'"vqd"\s*:\s*"([^"]+)"', r0.text)
                         or _re.search(r"vqd=([^&\"'\s]+)", r0.text)
+                        or _re.search(r'data-vqd=["\']([^"\']+)', r0.text)
                     )
                     if not vqd_m:
-                        raise ValueError("DDG token ei löydy")
+                        preview = r0.text[:120].replace('\n', ' ')
+                        raise ValueError(f"DDG token ei löydy (HTTP {r0.status_code}): {preview}")
                     vqd = vqd_m.group(1)
                     # Step 2: fetch image JSON
                     r1 = sess.get(
