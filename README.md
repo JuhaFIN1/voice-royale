@@ -9,9 +9,9 @@ Windows + macOS desktop app (PyQt6) that listens for a wake-word, transcribes yo
 
 | Platform | Link |
 |---|---|
-| **Windows** | [Voice_Royale_Setup_1.3.30.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
-| **macOS Apple Silicon** (M1/M2/M3) | [Voice_Royale_1.3.30_macOS_arm64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
-| **macOS Intel** (x86_64) | [Voice_Royale_1.3.30_macOS_x86_64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
+| **Windows** | [Voice_Royale_Setup_1.3.31.exe](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed |
+| **macOS Apple Silicon** (M1/M2/M3) | [Voice_Royale_1.3.31_macOS_arm64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
+| **macOS Intel** (x86_64) | [Voice_Royale_1.3.31_macOS_x86_64.dmg](https://github.com/JuhaFIN1/voice-royale/releases/latest) |
 
 > **Windows SmartScreen warning?** Click **"More info"** → **"Run anyway"**.
 > This appears because the installer uses a self-signed certificate. The app is safe.
@@ -45,14 +45,15 @@ Windows + macOS desktop app (PyQt6) that listens for a wake-word, transcribes yo
   - Add pages with **+** (up to 10); right-click a tab to rename or delete
 - **Stream Deck XL** — full 32-button layout via official Elgato plugin + local HTTP API (port 17842)
 - **Virtual mic (VB-Cable)** — one-click install from wizard so TTS audio goes into game voice chat
-- **Windows autostart** — start with Windows, optionally minimized to tray
+- **System tray** — minimizing or closing the window sends the app to the notification area (near the clock); double-click the tray icon to restore, right-click to quit
+- **Windows autostart** — start with Windows, launches directly to tray
 - **Auto-update** — Settings → Päivitys checks GitHub releases; downloads and launches the installer
 - **Data backup** — export all settings, history, soundboard audio/images, and API keys to a ZIP; restore with one click
 - **Dark-themed UI** — GitHub-style dark theme, record button embedded in the type box, splash screen on startup
 
 ## Installation (Windows)
 
-1. Download `Voice_Royale_Setup_1.3.30.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest)
+1. Download `Voice_Royale_Setup_1.3.31.exe` from [Releases](https://github.com/JuhaFIN1/voice-royale/releases/latest) — no Python needed
 2. Run the installer — it creates Start Menu shortcuts and an optional desktop icon
 3. On first launch the **Setup Wizard** opens automatically:
    - **Step 1/6** — install required Python packages automatically
