@@ -85,6 +85,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSplashScreen,
     QStackedWidget,
+    QSystemTrayIcon,
     QTabWidget,
     QTextEdit,
     QToolButton,
@@ -261,7 +262,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.30"
+APP_VERSION = "1.3.31"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -513,7 +514,10 @@ def _ensure_voicemeeter_running() -> bool:
         exe = os.path.join(d, "voicemeeterb.exe")
         if os.path.isfile(exe):
             try:
-                _sp.Popen([exe])
+                si = _sp.STARTUPINFO()
+                si.dwFlags |= _sp.STARTF_USESHOWWINDOW
+                si.wShowWindow = 2  # SW_SHOWMINIMIZED
+                _sp.Popen([exe], startupinfo=si)
                 _t.sleep(2.5)
                 return True
             except Exception:
@@ -3190,11 +3194,25 @@ class App(QWidget):
             on_status_callback=self.append_status,
         )
 
-        # Auto-start Voicemeeter Banana if installed
-        if _is_voicemeeter_installed():
-            QTimer.singleShot(1200, lambda: threading.Thread(
-                target=_ensure_voicemeeter_running, daemon=True
-            ).start())
+        # Auto-start Voicemeeter Banana if installed (always try; _ensure handles missing gracefully)
+        QTimer.singleShot(1200, lambda: threading.Thread(
+            target=_ensure_voicemeeter_running, daemon=True
+        ).start())
+
+        # System tray icon — app minimizes/closes to tray instead of taskbar
+        self._tray_icon = QSystemTrayIcon(self)
+        _icon_path = os.path.join(ASSETS_PATH, "iconimage.ico")
+        self._tray_icon.setIcon(QIcon(_icon_path) if os.path.exists(_icon_path) else QIcon())
+        self._tray_icon.setToolTip("Voice Royale")
+        _tray_menu = QMenu()
+        _show_action = _tray_menu.addAction("Avaa Voice Royale")
+        _show_action.triggered.connect(self._restore_from_tray)
+        _tray_menu.addSeparator()
+        _quit_action = _tray_menu.addAction("Sulje ohjelma")
+        _quit_action.triggered.connect(self._quit_from_tray)
+        self._tray_icon.setContextMenu(_tray_menu)
+        self._tray_icon.activated.connect(self._on_tray_activated)
+        self._tray_icon.show()
 
         # Voice FX + soundboard state
         self._voice_fx = VoiceEffectProcessor(self.append_status)
@@ -5331,9 +5349,31 @@ class App(QWidget):
             return (preset[:10], active)
         return (action[:10], False)
 
-    # ============ App close ============
+    # ============ App close / tray ============
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.WindowStateChange and self.isMinimized():
+            QTimer.singleShot(0, self.hide)
+        super().changeEvent(event)
+
+    def _on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._restore_from_tray()
+
+    def _restore_from_tray(self):
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def _quit_from_tray(self):
+        self._force_quit = True
+        self.close()
 
     def closeEvent(self, event):
+        if not getattr(self, "_force_quit", False):
+            event.ignore()
+            self.hide()
+            return
         try:
             if self.wake_listener.is_running():
                 self.wake_listener.stop()
@@ -8460,6 +8500,7 @@ class SetupWizard(QDialog):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
     _app_icon_path = os.path.join(ASSETS_PATH, "iconimage.ico")
     if os.path.exists(_app_icon_path):
         app.setWindowIcon(QIcon(_app_icon_path))
@@ -8504,12 +8545,12 @@ if __name__ == "__main__":
     if splash:
         _remaining = max(0, 4000 - _elapsed_ms)
         if _start_minimized:
-            QTimer.singleShot(_remaining, lambda: (splash.finish(window), window.showMinimized()))
+            QTimer.singleShot(_remaining, lambda: (splash.finish(window), window.hide()))
         else:
             QTimer.singleShot(_remaining, lambda: (splash.finish(window), window.show()))
     else:
         if _start_minimized:
-            window.showMinimized()
+            window.hide()
         else:
             window.show()
 
