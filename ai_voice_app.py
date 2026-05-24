@@ -262,7 +262,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.32"
+APP_VERSION = "1.3.33"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -499,8 +499,9 @@ def _ensure_voicemeeter_running() -> bool:
     if sys.platform != "win32":
         return False
     import subprocess as _sp, time as _t
-    # Voicemeeter exe names vary by version: old=voicemeeterb.exe, new=voicemeeter_x64.exe/voicemeeter.exe
-    _vm_exe_names = ["voicemeeterb.exe", "voicemeeter_x64.exe", "voicemeeter.exe"]
+    # Voicemeeter Banana exe names: old installer=voicemeeterb.exe, new installer=voicemeeterpro_x64.exe
+    # voicemeeter.exe/voicemeeter_x64.exe are basic Voicemeeter — do NOT start those
+    _vm_exe_names = ["voicemeeterb.exe", "voicemeeterpro_x64.exe", "voicemeeterpro.exe"]
     try:
         r = _sp.run(["tasklist", "/NH"], capture_output=True, text=True, timeout=5)
         if any(name in r.stdout.lower() for name in _vm_exe_names):
