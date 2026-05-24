@@ -25,6 +25,7 @@ REQUIRED = {
     "pyttsx3": "pyttsx3",
     "edge_tts": "edge-tts",
     "deep_translator": "deep-translator",
+    "duckduckgo_search": "duckduckgo-search",
 }
 
 
@@ -262,7 +263,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.39"
+APP_VERSION = "1.3.40"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1452,10 +1453,7 @@ class SoundboardButton(QWidget):
                 self._on_drag_enter(event)
                 return True
             if t == QEvent.Type.DragMove:
-                mime = event.mimeData()
-                if SoundboardButton._edit_mode and (
-                        mime.hasUrls() or mime.hasFormat(self._SLOT_MIME)
-                        or self._has_file_drag(mime)):
+                if SoundboardButton._edit_mode:
                     event.acceptProposedAction()
                 else:
                     event.ignore()
@@ -1474,10 +1472,7 @@ class SoundboardButton(QWidget):
         self._on_drag_enter(event)
 
     def dragMoveEvent(self, event):
-        mime = event.mimeData()
-        if SoundboardButton._edit_mode and (
-                mime.hasUrls() or mime.hasFormat(self._SLOT_MIME)
-                or self._has_file_drag(mime)):
+        if SoundboardButton._edit_mode:
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -1510,11 +1505,6 @@ class SoundboardButton(QWidget):
         drag.setHotSpot(QPoint(px.width() // 2, px.height() // 2))
         drag.exec(Qt.DropAction.MoveAction)
 
-    @staticmethod
-    def _has_file_drag(mime) -> bool:
-        """EXE fallback: Windows OLE drags may not populate hasUrls() at DragEnter time."""
-        return any('CF_HDROP' in f or 'FileName' in f for f in mime.formats())
-
     def _on_drag_enter(self, event):
         if not SoundboardButton._edit_mode:
             event.ignore()
@@ -1531,22 +1521,17 @@ class SoundboardButton(QWidget):
             event.acceptProposedAction()
             self._btn.setStyleSheet(self._STYLE_DRAG)
             return
-        if mime.hasUrls():
+        # Accept unconditionally in edit mode — mime.hasUrls() is unreliable at
+        # DragEnter time for Windows OLE file drags in frozen EXE (lazy loading).
+        # File type is validated in _on_drop where mime.urls() is always populated.
+        style = self._STYLE_DRAG
+        if self._data.get("subfolder") and mime.hasUrls():
             for url in mime.urls():
-                ext = os.path.splitext(url.toLocalFile())[1].lower()
-                if ext in self._IMAGE_EXTS or ext in self._AUDIO_EXTS:
-                    event.acceptProposedAction()
-                    if self._data.get("subfolder") and ext in self._IMAGE_EXTS:
-                        self._btn.setStyleSheet(self._STYLE_FOLDER_DRAG)
-                    else:
-                        self._btn.setStyleSheet(self._STYLE_DRAG)
-                    return
-        # EXE/OLE fallback: hasUrls() may be False at DragEnter for Windows file drags
-        if self._has_file_drag(mime):
-            event.acceptProposedAction()
-            self._btn.setStyleSheet(self._STYLE_DRAG)
-            return
-        event.ignore()
+                if os.path.splitext(url.toLocalFile())[1].lower() in self._IMAGE_EXTS:
+                    style = self._STYLE_FOLDER_DRAG
+                    break
+        event.acceptProposedAction()
+        self._btn.setStyleSheet(style)
 
     def _on_drop(self, event):
         self._restore_style()
@@ -2047,48 +2032,12 @@ class SoundboardButton(QWidget):
             rq: _q.Queue = _q.Queue()
 
             def _worker():
-                ua = (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                )
-                sess = requests.Session()
-                sess.headers.update({
-                    "User-Agent": ua,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "en-US,en;q=0.5",
-                    "Accept-Encoding": "gzip, deflate, br",
-                })
                 try:
-                    # Step 1: get DuckDuckGo vqd token
-                    r0 = sess.get(
-                        "https://duckduckgo.com/",
-                        params={"q": q, "iax": "images", "ia": "images"},
-                        timeout=10,
-                    )
-                    vqd_m = (
-                        _re.search(r'"vqd"\s*:\s*"([^"]+)"', r0.text)
-                        or _re.search(r"vqd=([^&\"'\s]+)", r0.text)
-                        or _re.search(r'data-vqd=["\']([^"\']+)', r0.text)
-                    )
-                    if not vqd_m:
-                        preview = r0.text[:120].replace('\n', ' ')
-                        raise ValueError(f"DDG token ei löydy (HTTP {r0.status_code}): {preview}")
-                    vqd = vqd_m.group(1)
-                    # Step 2: fetch image JSON
-                    r1 = sess.get(
-                        "https://duckduckgo.com/i.js",
-                        params={"q": q, "vqd": vqd, "o": "json", "f": ",,,,,"},
-                        headers={
-                            "Referer": f"https://duckduckgo.com/?q={requests.utils.quote(q)}&iax=images&ia=images",
-                            "Accept": "application/json, text/javascript, */*; q=0.01",
-                            "X-Requested-With": "XMLHttpRequest",
-                        },
-                        timeout=12,
-                    )
-                    results = r1.json().get("results", [])
-                    pairs = [(img["url"], img["thumbnail"]) for img in results[:24]
-                             if img.get("url") and img.get("thumbnail")]
+                    from duckduckgo_search import DDGS
+                    with DDGS() as ddgs:
+                        results = list(ddgs.images(q, max_results=24))
+                    pairs = [(r["image"], r["thumbnail"])
+                             for r in results if r.get("image") and r.get("thumbnail")]
                     if not pairs:
                         rq.put(("err", "Ei kuvatuloksia — kokeile eri hakusanaa"))
                         return
@@ -8623,6 +8572,11 @@ class SetupWizard(QDialog):
 
 
 if __name__ == "__main__":
+    # On Windows, OleInitialize must be called before QApplication so that
+    # RegisterDragDrop works correctly in frozen EXE builds.
+    if sys.platform == "win32":
+        import ctypes
+        ctypes.windll.ole32.OleInitialize(None)
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     _app_icon_path = os.path.join(ASSETS_PATH, "iconimage.ico")

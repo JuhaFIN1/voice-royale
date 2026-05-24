@@ -30,7 +30,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller
-          pip install PyQt6 requests python-dotenv sounddevice numpy keyboard openai pyttsx3 edge-tts scipy deep-translator
+          pip install PyQt6 requests python-dotenv sounddevice numpy keyboard openai pyttsx3 edge-tts scipy deep-translator duckduckgo-search
           pip install pvporcupine || true
         shell: pwsh
 
@@ -50,6 +50,7 @@ jobs:
             --collect-all edge_tts `
             --collect-all sounddevice `
             --collect-all certifi `
+            --collect-all duckduckgo_search `
             --noconfirm `
             ai_voice_app.py
         shell: pwsh

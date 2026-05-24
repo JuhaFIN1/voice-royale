@@ -1,6 +1,6 @@
-@echo off
+﻿@echo off
 REM ============================================================
-REM  Voice Royale — Full build: PyInstaller + Windows Installer
+REM  Voice Royale â€” Full build: PyInstaller + Windows Installer
 REM
 REM  Output: installer_output\Voice_Royale_Setup_%VERSION%.exe
 REM ============================================================
@@ -14,7 +14,7 @@ set INNO_INSTALLER_URL=https://files.jrsoftware.org/is/6/innosetup-6.3.3.exe
 set INNO_TEMP=%TEMP%\innosetup_installer.exe
 
 echo ============================================================
-echo  Step 1/3 — PyInstaller
+echo  Step 1/3 â€” PyInstaller
 echo ============================================================
 
 REM Use venv python if available, else system python
@@ -40,13 +40,13 @@ echo.
     --hidden-import comtypes.stream ^
     --collect-all edge_tts ^
     --collect-all sounddevice ^
-    --collect-all certifi ^
+    --collect-all certifi ^\r\n    --collect-all duckduckgo_search ^
     --noconfirm ^
     %SCRIPT%
 
 if errorlevel 1 (
     echo.
-    echo *** PyInstaller FAILED — check errors above ***
+    echo *** PyInstaller FAILED â€” check errors above ***
     pause
     exit /b 1
 )
@@ -57,7 +57,7 @@ echo PyInstaller build complete.
 REM ============================================================
 echo.
 echo ============================================================
-echo  Step 2/4 — Stream Deck Plugin Package
+echo  Step 2/4 â€” Stream Deck Plugin Package
 echo ============================================================
 
 echo Building Stream Deck plugin...
@@ -75,7 +75,7 @@ echo Stream Deck plugin built.
 REM ============================================================
 echo.
 echo ============================================================
-echo  Step 3/4 — Inno Setup (Windows Installer)
+echo  Step 3/4 â€” Inno Setup (Windows Installer)
 echo ============================================================
 
 REM Check for Inno Setup; download and install if missing
@@ -106,7 +106,7 @@ if not exist installer_output mkdir installer_output
 
 if errorlevel 1 (
     echo.
-    echo *** Installer build FAILED — check errors above ***
+    echo *** Installer build FAILED â€” check errors above ***
     pause
     exit /b 1
 )
@@ -114,7 +114,7 @@ if errorlevel 1 (
 REM ============================================================
 echo.
 echo ============================================================
-echo  Step 4/4 — Code Signing
+echo  Step 4/4 â€” Code Signing
 echo ============================================================
 
 set SIGNTOOL="C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
@@ -129,11 +129,11 @@ if exist .env (
 )
 
 if not defined SIGN_CERT_PATH (
-    echo Skipping signing — SIGN_CERT_PATH not set in .env
+    echo Skipping signing â€” SIGN_CERT_PATH not set in .env
     goto done
 )
 if not exist "%SIGN_CERT_PATH%" (
-    echo Skipping signing — cert not found: %SIGN_CERT_PATH%
+    echo Skipping signing â€” cert not found: %SIGN_CERT_PATH%
     goto done
 )
 
@@ -141,7 +141,7 @@ echo Signing: %INSTALLER%
 %SIGNTOOL% sign /f "%SIGN_CERT_PATH%" /p "%SIGN_CERT_PASSWORD%" /td sha256 /fd sha256 "%INSTALLER%"
 
 if errorlevel 1 (
-    echo *** Signing FAILED — check cert path and password in .env ***
+    echo *** Signing FAILED â€” check cert path and password in .env ***
     pause
     exit /b 1
 )
@@ -151,7 +151,7 @@ REM ============================================================
 :done
 echo.
 echo ============================================================
-echo  Step 4/4 — Done!
+echo  Step 4/4 â€” Done!
 echo.
 echo  Installer: %INSTALLER%
 echo.
