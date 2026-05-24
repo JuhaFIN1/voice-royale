@@ -262,7 +262,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.35"
+APP_VERSION = "1.3.36"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -503,7 +503,8 @@ def _ensure_voicemeeter_running() -> bool:
     # voicemeeter.exe/voicemeeter_x64.exe are basic Voicemeeter — do NOT start those
     _vm_exe_names = ["voicemeeterb.exe", "voicemeeterpro_x64.exe", "voicemeeterpro.exe"]
     try:
-        r = _sp.run(["tasklist", "/NH"], capture_output=True, text=True, timeout=5)
+        r = _sp.run(["tasklist", "/NH"], capture_output=True, text=True, timeout=5,
+                        creationflags=_sp.CREATE_NO_WINDOW)
         if any(name in r.stdout.lower() for name in _vm_exe_names):
             return True
     except Exception:
@@ -4376,7 +4377,8 @@ class App(QWidget):
         def _poll():
             try:
                 import subprocess as _sp
-                r = _sp.run(["tasklist", "/NH"], capture_output=True, text=True, timeout=5)
+                r = _sp.run(["tasklist", "/NH"], capture_output=True, text=True, timeout=5,
+                        creationflags=_sp.CREATE_NO_WINDOW)
                 running = any(
                     name in r.stdout.lower()
                     for name in ("voicemeeterb.exe", "voicemeeterpro_x64.exe", "voicemeeterpro.exe")
