@@ -262,7 +262,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.33"
+APP_VERSION = "1.3.34"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -3347,6 +3347,12 @@ class App(QWidget):
         self._sd_action_timer = QTimer(self)
         self._sd_action_timer.timeout.connect(self._drain_sd_action_queue)
         self._sd_action_timer.start(50)
+
+        # Voicemeeter Banana running check — poll every 5s, update warning label
+        self._vm_check_timer = QTimer(self)
+        self._vm_check_timer.timeout.connect(self._check_voicemeeter_running)
+        self._vm_check_timer.start(5000)
+        QTimer.singleShot(3000, self._check_voicemeeter_running)
         self._stream_deck.start(self)
         QTimer.singleShot(600, self._autostart_voice_fx)
 
@@ -3388,6 +3394,16 @@ class App(QWidget):
             "font-weight: 700; font-size: 12px; color: #3A7BFF; border: none; letter-spacing: 0.5px;"
         )
         layout.addWidget(title_lbl)
+
+        # Voicemeeter Banana warning banner (hidden when Banana is running)
+        self._vm_warning_label = QLabel("VAROITUS: Voicemeeter Banana ei ole käynnissä — mikrofoni ei kuulu!")
+        self._vm_warning_label.setWordWrap(True)
+        self._vm_warning_label.setStyleSheet(
+            "color: #ff3333; background: #2a0000; border: 1px solid #ff3333;"
+            " border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: 600;"
+        )
+        self._vm_warning_label.setVisible(False)
+        layout.addWidget(self._vm_warning_label)
 
         # Status log — 5 rows
         self.status_text = QTextEdit()
@@ -4354,6 +4370,21 @@ class App(QWidget):
         for idx, (bar, db_lbl, _) in self._mb_bars.items():
             bar.setValue(value)
             db_lbl.setText(db_short)
+
+    def _check_voicemeeter_running(self):
+        """Poll tasklist for Voicemeeter Banana; show/hide warning label on main thread."""
+        def _poll():
+            try:
+                import subprocess as _sp
+                r = _sp.run(["tasklist", "/NH"], capture_output=True, text=True, timeout=5)
+                running = any(
+                    name in r.stdout.lower()
+                    for name in ("voicemeeterb.exe", "voicemeeterpro_x64.exe", "voicemeeterpro.exe")
+                )
+            except Exception:
+                running = True  # assume ok on error, avoid false alarm
+            QTimer.singleShot(0, lambda: self._vm_warning_label.setVisible(not running))
+        threading.Thread(target=_poll, daemon=True).start()
 
     def append_status(self, message: str):
         self.sig_status.emit(message)
