@@ -262,7 +262,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.36"
+APP_VERSION = "1.3.37"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1362,6 +1362,10 @@ class SoundboardButton(QWidget):
         "QToolButton:hover { border: 2px solid #FFB800; color: #FFD060; }"
         "QToolButton:pressed { background: #0E0A00; border: 2px solid #FF9A00; }"
     )
+    _STYLE_FOLDER_DRAG = (
+        "QToolButton { background: #1A1400; border: 2px dashed #FFB800; border-radius: 10px;"
+        " color: #FFD060; font-size: 8px; font-weight: 700; padding-bottom: 2px; }"
+    )
     _STYLE_BACK = (
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 #141428, stop:1 #0A0A1A);"
@@ -1502,7 +1506,10 @@ class SoundboardButton(QWidget):
                 ext = os.path.splitext(url.toLocalFile())[1].lower()
                 if ext in self._IMAGE_EXTS or ext in self._AUDIO_EXTS:
                     event.acceptProposedAction()
-                    self._btn.setStyleSheet(self._STYLE_DRAG)
+                    if self._data.get("subfolder") and ext in self._IMAGE_EXTS:
+                        self._btn.setStyleSheet(self._STYLE_FOLDER_DRAG)
+                    else:
+                        self._btn.setStyleSheet(self._STYLE_DRAG)
                     return
         event.ignore()
 
@@ -1667,7 +1674,11 @@ class SoundboardButton(QWidget):
             self._btn.setToolTip("Palaa edelliselle sivulle")
             self._btn.setStyleSheet(self._STYLE_BACK)
         elif self._data.get("subfolder"):
-            self._btn.setIcon(QIcon(self._make_folder_pixmap(46)))
+            _img = self._data.get("image", "")
+            if _img and os.path.exists(_img):
+                self._btn.setIcon(QIcon(self._make_icon_pixmap(46)))
+            else:
+                self._btn.setIcon(QIcon(self._make_folder_pixmap(46)))
             self._btn.setText(display)
             self._btn.setToolTip(f"📁 Kansio: {name}")
             self._btn.setStyleSheet(self._STYLE_FOLDER)
@@ -2015,7 +2026,10 @@ class SoundboardButton(QWidget):
                         params={"q": q, "iax": "images", "ia": "images"},
                         timeout=10,
                     )
-                    vqd_m = _re.search(r'vqd=([\d-]+)', r0.text)
+                    vqd_m = (
+                        _re.search(r'"vqd"\s*:\s*"([^"]+)"', r0.text)
+                        or _re.search(r"vqd=([^&\"'\s]+)", r0.text)
+                    )
                     if not vqd_m:
                         raise ValueError("DDG token ei löydy")
                     vqd = vqd_m.group(1)
