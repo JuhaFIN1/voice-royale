@@ -262,7 +262,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.31"
+APP_VERSION = "1.3.32"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -499,10 +499,11 @@ def _ensure_voicemeeter_running() -> bool:
     if sys.platform != "win32":
         return False
     import subprocess as _sp, time as _t
+    # Voicemeeter exe names vary by version: old=voicemeeterb.exe, new=voicemeeter_x64.exe/voicemeeter.exe
+    _vm_exe_names = ["voicemeeterb.exe", "voicemeeter_x64.exe", "voicemeeter.exe"]
     try:
-        r = _sp.run(["tasklist", "/FI", "IMAGENAME eq voicemeeterb.exe", "/NH"],
-                    capture_output=True, text=True, timeout=5)
-        if "voicemeeterb.exe" in r.stdout.lower():
+        r = _sp.run(["tasklist", "/NH"], capture_output=True, text=True, timeout=5)
+        if any(name in r.stdout.lower() for name in _vm_exe_names):
             return True
     except Exception:
         pass
@@ -510,18 +511,51 @@ def _ensure_voicemeeter_running() -> bool:
         os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "VB", "Voicemeeter"),
         os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "VB", "Voicemeeter"),
     ]
+    # Find actual install path from registry (handles non-standard install locations)
+    try:
+        import winreg
+        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            for wow in ("", r"WOW6432Node\\"):
+                reg_path = rf"SOFTWARE\{wow}Microsoft\Windows\CurrentVersion\Uninstall"
+                try:
+                    with winreg.OpenKey(hive, reg_path) as base:
+                        i = 0
+                        while True:
+                            try:
+                                sub = winreg.EnumKey(base, i)
+                                if "voicemeeter" in sub.lower():
+                                    try:
+                                        with winreg.OpenKey(base, sub) as key:
+                                            for val in ("InstallLocation", "UninstallString", "DisplayIcon"):
+                                                try:
+                                                    v, _ = winreg.QueryValueEx(key, val)
+                                                    d = os.path.dirname(v.strip('"')) if val != "InstallLocation" else v
+                                                    if d and os.path.isdir(d) and d not in search_dirs:
+                                                        search_dirs.append(d)
+                                                except OSError:
+                                                    pass
+                                    except OSError:
+                                        pass
+                            except OSError:
+                                break
+                            i += 1
+                except OSError:
+                    pass
+    except Exception:
+        pass
     for d in search_dirs:
-        exe = os.path.join(d, "voicemeeterb.exe")
-        if os.path.isfile(exe):
-            try:
-                si = _sp.STARTUPINFO()
-                si.dwFlags |= _sp.STARTF_USESHOWWINDOW
-                si.wShowWindow = 2  # SW_SHOWMINIMIZED
-                _sp.Popen([exe], startupinfo=si)
-                _t.sleep(2.5)
-                return True
-            except Exception:
-                pass
+        for name in _vm_exe_names:
+            exe = os.path.join(d, name)
+            if os.path.isfile(exe):
+                try:
+                    si = _sp.STARTUPINFO()
+                    si.dwFlags |= _sp.STARTF_USESHOWWINDOW
+                    si.wShowWindow = 2  # SW_SHOWMINIMIZED
+                    _sp.Popen([exe], startupinfo=si)
+                    _t.sleep(2.5)
+                    return True
+                except Exception:
+                    pass
     return False
 
 
