@@ -262,7 +262,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.42"
+APP_VERSION = "1.3.43"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -2810,46 +2810,84 @@ class WakeListener:
             self._run_whisper()
 
     def _run_porcupine(self):
-        sample_rate = self._porcupine.sample_rate
+        porcupine_sr = self._porcupine.sample_rate  # always 16000
         frame_length = self._porcupine.frame_length
         device = self._device_index
+
+        def _get_native_sr(dev):
+            try:
+                idx = dev if dev is not None else sd.default.device[0]
+                return int(sd.query_devices(idx).get("default_samplerate", porcupine_sr))
+            except Exception:
+                return porcupine_sr
+
+        native_sr = _get_native_sr(device)
+
         for _attempt in range(2):
             try:
-                with sd.InputStream(
-                    device=device,
-                    channels=1,
-                    samplerate=sample_rate,
-                    blocksize=frame_length,
-                    dtype="int16",
-                ) as stream:
-                    self.on_status(f"👂 Porcupine listening (sr={sample_rate})")
-                    while not self._stop_flag.is_set():
-                        data, _overflow = stream.read(frame_length)
-                        pcm = data[:, 0] if data.ndim > 1 else data
-                        if self._level_callback is not None:
-                            peak = float(np.max(np.abs(pcm))) / 32768.0
-                            self._level_callback(peak)
-                        result = self._porcupine.process(pcm.tolist())
-                        if result >= 0:
-                            self.on_status("✨ Wake-word detected!")
-                            self.on_wake()
-                            time.sleep(0.3)
+                need_resample = native_sr != porcupine_sr
+                if need_resample:
+                    import scipy.signal
+                    native_frame = int(np.ceil(frame_length * native_sr / porcupine_sr))
+                    with sd.InputStream(
+                        device=device, channels=1, samplerate=native_sr,
+                        blocksize=native_frame, dtype="float32",
+                    ) as stream:
+                        self.on_status(f"👂 Porcupine listening (native={native_sr}→{porcupine_sr} Hz)")
+                        while not self._stop_flag.is_set():
+                            data, _overflow = stream.read(native_frame)
+                            samples = data[:, 0] if data.ndim > 1 else data.flatten()
+                            if self._level_callback is not None:
+                                self._level_callback(float(np.max(np.abs(samples))))
+                            resampled = scipy.signal.resample(samples, frame_length).astype(np.float32)
+                            pcm = (np.clip(resampled, -1.0, 1.0) * 32767).astype(np.int16)
+                            result = self._porcupine.process(pcm.tolist())
+                            if result >= 0:
+                                self.on_status("✨ Wake-word detected!")
+                                self.on_wake()
+                                time.sleep(0.3)
+                else:
+                    with sd.InputStream(
+                        device=device, channels=1, samplerate=porcupine_sr,
+                        blocksize=frame_length, dtype="int16",
+                    ) as stream:
+                        self.on_status(f"👂 Porcupine listening (sr={porcupine_sr})")
+                        while not self._stop_flag.is_set():
+                            data, _overflow = stream.read(frame_length)
+                            pcm = data[:, 0] if data.ndim > 1 else data
+                            if self._level_callback is not None:
+                                peak = float(np.max(np.abs(pcm))) / 32768.0
+                                self._level_callback(peak)
+                            result = self._porcupine.process(pcm.tolist())
+                            if result >= 0:
+                                self.on_status("✨ Wake-word detected!")
+                                self.on_wake()
+                                time.sleep(0.3)
                 return
             except Exception as e:
                 if _attempt == 0 and device is not None and "out of range" in str(e).lower():
                     self.on_status("Wake: mic not found — trying default device")
                     device = None
+                    native_sr = _get_native_sr(device)
                 else:
                     self.on_status(f"Wake listener stopped: {e}")
                     return
 
     def _run_whisper(self):
         """Streams mic continuously in 2.5s chunks, transcribes, checks for wake keyword."""
-        sample_rate = 16000
+        target_sr = 16000
         chunk_duration = 2.5
         silence_threshold = 0.008
         device = self._device_index
 
+        def _get_native_sr(dev):
+            try:
+                idx = dev if dev is not None else sd.default.device[0]
+                return int(sd.query_devices(idx).get("default_samplerate", target_sr))
+            except Exception:
+                return target_sr
+
+        native_sr = _get_native_sr(device)
         self.on_status(f"👂 Whisper mode listening for: '{self._keyword}'")
 
         while not self._stop_flag.is_set():
@@ -2868,7 +2906,7 @@ class WakeListener:
                 with sd.InputStream(
                     device=device,
                     channels=1,
-                    samplerate=sample_rate,
+                    samplerate=native_sr,
                     blocksize=1024,
                     dtype="float32",
                     callback=_cb,
@@ -2884,6 +2922,12 @@ class WakeListener:
                     continue
 
                 audio = np.concatenate(frames, axis=0).flatten()
+
+                if native_sr != target_sr:
+                    import scipy.signal
+                    new_len = int(len(audio) * target_sr / native_sr)
+                    audio = scipy.signal.resample(audio, new_len).astype(np.float32)
+
                 rms = float(np.sqrt(np.mean(audio ** 2)))
                 if rms < silence_threshold:
                     continue
@@ -2893,7 +2937,7 @@ class WakeListener:
                 with wave.open(wav_buf, "wb") as wf:
                     wf.setnchannels(1)
                     wf.setsampwidth(2)
-                    wf.setframerate(sample_rate)
+                    wf.setframerate(target_sr)
                     wf.writeframes(audio_int16.tobytes())
 
                 try:
@@ -2915,6 +2959,7 @@ class WakeListener:
                     if device is not None and "out of range" in str(e).lower():
                         self.on_status("Wake: mic not found — using default device")
                         device = None
+                        native_sr = _get_native_sr(device)
                     else:
                         self.on_status(f"Wake listener error: {e}")
                         time.sleep(1.0)
@@ -5126,12 +5171,16 @@ class App(QWidget):
         if dev is None:
             return
         try:
+            try:
+                native_sr = int(sd.query_devices(dev).get("default_samplerate", 16000))
+            except Exception:
+                native_sr = 16000
             def _cb(indata, frames, time_info, status):
                 peak = float(np.max(np.abs(indata)))
                 if peak > self._mic_peak_ref[0]:
                     self._mic_peak_ref[0] = peak
             self._mic_monitor_stream = sd.InputStream(
-                device=dev, channels=1, samplerate=16000,
+                device=dev, channels=1, samplerate=native_sr,
                 blocksize=1024, dtype="float32", callback=_cb, latency="low",
             )
             self._mic_monitor_stream.start()
