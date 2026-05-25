@@ -63,7 +63,7 @@ import sounddevice as sd
 from dotenv import load_dotenv
 from openai import OpenAI
 from PyQt6.QtCore import QEvent, QMimeData, QObject, QPoint, QRectF, QSize, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QDrag, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtGui import QColor, QDrag, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygon
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -262,7 +262,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.41"
+APP_VERSION = "1.3.42"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1101,7 +1101,7 @@ class StreamDeckHttpServer:
         "lang_Norwegian", "lang_Danish", "lang_Romanian", "lang_Latvian",
         "lang_Lithuanian", "lang_Japanese", "lang_Chinese", "lang_Hungarian",
         "lang_French", "lang_Spanish", "lang_Portuguese",
-        "sb_page_next", "sb_page_prev",
+        "sb_page_goto_0",
         "fx_Normal", "fx_Pitch +4", "fx_Pitch -4", "fx_Robot", "fx_Deep", "fx_Helium",
     ]
 
@@ -2702,6 +2702,41 @@ def play_wav_bytes(wav_bytes: bytes, device_indices=None, level_callback=None, v
         raise RuntimeError(f"Audio playback failed: {e}") from e
 
 
+class _OctagonStopButton(QPushButton):
+    """Soundboard stop button rendered as a red octagon (stop-sign shape)."""
+
+    def paintEvent(self, event):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        cut = min(w, h) // 5
+        pts = [QPoint(x, y) for x, y in [
+            (cut, 0), (w - cut, 0),
+            (w, cut), (w, h - cut),
+            (w - cut, h), (cut, h),
+            (0, h - cut), (0, cut),
+        ]]
+        poly = QPolygon(pts)
+        if self.isDown():
+            fill = QColor("#FF2222")
+        elif self.underMouse():
+            fill = QColor("#BB0000")
+        else:
+            fill = QColor("#880000")
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(fill)
+        p.drawPolygon(poly)
+        pen = QPen(QColor("#FFFFFF"), 2)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPolygon(poly)
+        font = QFont("Arial", 13, QFont.Weight.Black)
+        p.setFont(font)
+        p.setPen(QColor("#FFFFFF"))
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "STOP")
+        p.end()
+
+
 # =========================
 # WAKE-WORD LISTENER (Picovoice Porcupine with Whisper fallback)
 # =========================
@@ -3641,7 +3676,7 @@ class App(QWidget):
 
         self._sb_edit_btn = QPushButton("Edit")
         self._sb_edit_btn.setCheckable(True)
-        self._sb_edit_btn.setFixedWidth(46)
+        self._sb_edit_btn.setFixedSize(46, 24)
         self._sb_edit_btn.setToolTip("Muokkaustila: vedä kuva/ääni napin päälle tai oikeaklikkaa")
         self._sb_edit_btn.setStyleSheet(
             "QPushButton { background: #1E1E2A; color: #666688; border: 1px solid #333344;"
@@ -3728,16 +3763,10 @@ class App(QWidget):
             row, col = divmod(i, 14)
             grid.addWidget(btn, row, col)
 
-        _stop_btn = QPushButton("■  STOP")
+        _stop_btn = _OctagonStopButton()
         _stop_btn.setFixedSize(72, 68)
         _stop_btn.setToolTip("Pysäytä soitto heti")
         _stop_btn.clicked.connect(self._sb_stop_playback)
-        _stop_btn.setStyleSheet(
-            "QPushButton { background: #2A0000; color: #FF3333; border: 2px solid #6B0000;"
-            " border-radius: 10px; font-size: 12px; font-weight: 900; letter-spacing: 1px; }"
-            "QPushButton:hover { background: #4A0000; border-color: #FF3333; color: #FF6666; }"
-            "QPushButton:pressed { background: #FF1111; color: #fff; border-color: #FF1111; }"
-        )
         grid.addWidget(_stop_btn, 3, 13)
 
         scroll = QScrollArea()
@@ -5344,12 +5373,13 @@ class App(QWidget):
             idx = self.langbox.findText(lang)
             if idx >= 0:
                 self.langbox.setCurrentIndex(idx)
-        elif action == "sb_page_next":
-            n = self._sb_tabs.count()
-            self._sb_tabs.setCurrentIndex((self._sb_tabs.currentIndex() + 1) % n)
-        elif action == "sb_page_prev":
-            n = self._sb_tabs.count()
-            self._sb_tabs.setCurrentIndex((self._sb_tabs.currentIndex() - 1) % n)
+        elif action.startswith("sb_page_goto_"):
+            try:
+                idx = int(action[13:])
+                if 0 <= idx < self._sb_tabs.count():
+                    self._sb_tabs.setCurrentIndex(idx)
+            except ValueError:
+                pass
         elif action.startswith("soundboard_"):
             parts = action[11:].split("_")
             if len(parts) == 2:
@@ -5414,18 +5444,14 @@ class App(QWidget):
         if action.startswith("lang_"):
             lang = action[5:]
             return (lang[:8], self.langbox.currentText() == lang)
-        if action == "sb_page_next":
-            n = self._sb_tabs.count()
-            cur = self._sb_tabs.currentIndex()
-            nxt = (cur + 1) % n
-            name = self._sb_tabs.tabText(nxt).strip()
-            return (f"-> {name[:8]}", False)
-        if action == "sb_page_prev":
-            n = self._sb_tabs.count()
-            cur = self._sb_tabs.currentIndex()
-            prv = (cur - 1) % n
-            name = self._sb_tabs.tabText(prv).strip()
-            return (f"<- {name[:8]}", False)
+        if action.startswith("sb_page_goto_"):
+            try:
+                idx = int(action[13:])
+                name = self._sb_tabs.tabText(idx).strip() if idx < self._sb_tabs.count() else f"P{idx+1}"
+                cur = self._sb_tabs.currentIndex()
+                return (name[:10], cur == idx)
+            except ValueError:
+                return ("GO", False)
         if action.startswith("soundboard_"):
             parts = action[11:].split("_")
             if len(parts) == 2:
@@ -6227,8 +6253,7 @@ def open_settings_dialog(parent_app: "App") -> None:
         "stop_recording": "Pysäytä",
         "tts_toggle": "TTS-backend vaihto",
         "settings": "Avaa asetukset",
-        "sb_page_next": "Soundboard: seuraava sivu",
-        "sb_page_prev": "Soundboard: edellinen sivu",
+        "sb_page_goto_N": "Soundboard: siirry sivulle N (0-pohjainen indeksi)",
         "lang_*": "Kieli: English, Finnish, Swedish…",
         "soundboard_P_S": "Soundboard: sivu P, paikka S",
         "fx_*": "Voice FX: Normal, Robot, Deep, Helium…",

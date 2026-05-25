@@ -18,8 +18,7 @@ const ACTION_MAP = {
     "com.voiceroyale.stop":           "stop_recording",
     "com.voiceroyale.lang":           null,  // lang_{language}
     "com.voiceroyale.soundboard":     null,  // soundboard_{page}_{slot}
-    "com.voiceroyale.sb.page.next":   "sb_page_next",
-    "com.voiceroyale.sb.page.prev":   "sb_page_prev",
+    "com.voiceroyale.sb.page.goto":    null,  // sb_page_goto_{page}
     "com.voiceroyale.fx":             null,  // fx_{preset}
     "com.voiceroyale.tts.toggle":     "tts_toggle",
     "com.voiceroyale.settings":       "settings",
@@ -110,6 +109,11 @@ async function onKeyDown(action, context, payload) {
         case "com.voiceroyale.fx":
             vrAction = `fx_${ctx.preset || "Normal"}`;
             break;
+        case "com.voiceroyale.sb.page.goto": {
+            const page = ctx.page !== undefined ? Number(ctx.page) : 0;
+            vrAction = `sb_page_goto_${page}`;
+            break;
+        }
         default:
             vrAction = ACTION_MAP[action];
             if (!vrAction) return;
@@ -183,15 +187,14 @@ function applyState(context, action, state) {
             setTitle(context, label);
             break;
         }
-        case "com.voiceroyale.sb.page.next": {
-            const cur = (state.soundboard_pages || []).findIndex
-                ? state.soundboard_page || 0 : 0;
-            setTitle(context, `SB >${cur + 2}`);
-            break;
-        }
-        case "com.voiceroyale.sb.page.prev": {
+        case "com.voiceroyale.sb.page.goto": {
+            const ctx = settings[context] || {};
+            const page = ctx.page !== undefined ? Number(ctx.page) : 0;
+            const pages = state.soundboard_pages || [];
+            const name = (pages[page] && pages[page].name) ? pages[page].name : `P${page + 1}`;
             const cur = state.soundboard_page || 0;
-            setTitle(context, `SB <${cur}`);
+            setState(context, cur === page ? 1 : 0);
+            setTitle(context, name.substring(0, 10));
             break;
         }
     }

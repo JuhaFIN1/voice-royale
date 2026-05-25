@@ -7,7 +7,7 @@ All logic in one file: `ai_voice_app.py` (~8400 lines).
 
 Working directory: `E:\CLOUDS\AI-SYSTEMS\ai-voice-router\`
 GitHub: https://github.com/JuhaFIN1/voice-royale
-Current version: `APP_VERSION = "1.3.36"` (constant near top of file; CI auto-patches from git tag)
+Current version: `APP_VERSION = "1.3.42"` (constant near top of file; CI auto-patches from git tag)
 
 ---
 
@@ -93,7 +93,7 @@ Voice Royale TTS/Soundboard → Voicemeeter Input (Strip[2]) → B1 bus ──�
 | `POST /action/{name}` | Execute action (no body, no Content-Type) |
 | `GET /soundboard/image/{page}/{slot}` | Base64 PNG or null |
 
-**Action names:** `record_toggle`, `wake_listen_toggle`, `speak`, `stop_recording`, `settings`, `tts_toggle`, `sb_page_next`, `sb_page_prev`, `lang_{language}`, `fx_{preset}`, `soundboard_{page}_{slot}`
+**Action names:** `record_toggle`, `wake_listen_toggle`, `speak`, `stop_recording`, `settings`, `tts_toggle`, `sb_page_goto_{N}`, `lang_{language}`, `fx_{preset}`, `soundboard_{page}_{slot}`
 
 **Thread-safety:** Use `queue.Queue` + QTimer poll from bg threads. `QTimer.singleShot(0, cb)` from bg thread does NOT work in PyQt6.
 
@@ -113,9 +113,10 @@ Update all **five** places: `LANGS`, `LANG_FLAG_CODES`, `EDGE_VOICES`, `_GOOGLE_
 - Hindi/Hebrew/Croatian = `None` in `_DEEPL_LANG_MAP`
 
 ### Soundboard
-- 55 buttons per page + fixed ■ STOP (grid row 3, col 13)
+- 55 buttons per page + `_OctagonStopButton` (red octagon stop-sign, grid row 3, col 13)
 - `_sb_play_id` (int) counter prevents concurrent play crashes
 - `SoundboardButton._edit_mode` is a class-level flag
+- Edit button: `setFixedSize(46, 24)` to fit inside 28px corner widget
 
 ### Stop events
 - `_sb_stop_event` — soundboard playback

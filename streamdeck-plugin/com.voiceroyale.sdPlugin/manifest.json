@@ -83,24 +83,16 @@
             "PropertyInspectorPath": "propertyinspector/soundboard.html"
         },
         {
-            "Name": "Next Soundboard Page",
-            "UUID": "com.voiceroyale.sb.page.next",
+            "Name": "Go to Soundboard Page",
+            "UUID": "com.voiceroyale.sb.page.goto",
             "Icon": "icons/plugin",
-            "Tooltip": "Switch to the next soundboard page",
+            "Tooltip": "Jump to a specific soundboard page or folder",
             "SupportedInMultiActions": false,
             "States": [
-                { "Image": "icons/plugin", "Title": "SB Next" }
-            ]
-        },
-        {
-            "Name": "Prev Soundboard Page",
-            "UUID": "com.voiceroyale.sb.page.prev",
-            "Icon": "icons/plugin",
-            "Tooltip": "Switch to the previous soundboard page",
-            "SupportedInMultiActions": false,
-            "States": [
-                { "Image": "icons/plugin", "Title": "SB Prev" }
-            ]
+                { "Image": "icons/plugin", "Title": "Go to Page" },
+                { "Image": "icons/plugin", "Title": "● Active" }
+            ],
+            "PropertyInspectorPath": "propertyinspector/sbpage.html"
         },
         {
             "Name": "Voice FX Preset",
