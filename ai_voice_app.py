@@ -25,7 +25,6 @@ REQUIRED = {
     "pyttsx3": "pyttsx3",
     "edge_tts": "edge-tts",
     "deep_translator": "deep-translator",
-    "duckduckgo_search": "duckduckgo-search",
 }
 
 
@@ -263,7 +262,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.40"
+APP_VERSION = "1.3.41"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -280,6 +279,7 @@ DEFAULT_SETTINGS = {
     "default_tts_backend": DEFAULT_TTS_BACKEND,
     "translation_backend": "Google (free)",
     "deepl_api_key": "",
+    "pixabay_api_key": "",
     "wake_command_seconds": 6.0,
     "custom_languages": [],
     "soundboard_pages": [
@@ -1317,10 +1317,15 @@ class SoundboardButton(QWidget):
     bulk_import_requested = pyqtSignal(int, list)     # start_slot, [paths]
 
     _edit_mode: bool = False
+    _pixabay_api_key: str = ""
 
     @classmethod
     def set_edit_mode(cls, enabled: bool):
         cls._edit_mode = enabled
+
+    @classmethod
+    def set_pixabay_key(cls, key: str):
+        cls._pixabay_api_key = key
 
     _STYLE_IDLE = (
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
@@ -2033,11 +2038,24 @@ class SoundboardButton(QWidget):
 
             def _worker():
                 try:
-                    from duckduckgo_search import DDGS
-                    with DDGS() as ddgs:
-                        results = list(ddgs.images(q, max_results=24))
-                    pairs = [(r["image"], r["thumbnail"])
-                             for r in results if r.get("image") and r.get("thumbnail")]
+                    api_key = SoundboardButton._pixabay_api_key
+                    if not api_key:
+                        rq.put(("err", "Pixabay API-avain puuttuu — lisää se Asetuksista (Käännös & TTS -välilehti)"))
+                        return
+                    import urllib.parse
+                    url = (
+                        f"https://pixabay.com/api/?key={api_key}"
+                        f"&q={urllib.parse.quote(q)}&image_type=photo"
+                        f"&per_page=24&safesearch=true"
+                    )
+                    r = requests.get(url, timeout=10)
+                    r.raise_for_status()
+                    hits = r.json().get("hits", [])
+                    pairs = [
+                        (h["largeImageURL"], h["webformatURL"])
+                        for h in hits
+                        if h.get("largeImageURL") and h.get("webformatURL")
+                    ]
                     if not pairs:
                         rq.put(("err", "Ei kuvatuloksia — kokeile eri hakusanaa"))
                         return
@@ -3220,6 +3238,7 @@ class App(QWidget):
         # Load app settings first so custom languages are available for icon building
         self.settings = load_settings()
         _apply_custom_languages_to_globals(self.settings.get("custom_languages", []))
+        SoundboardButton.set_pixabay_key(self.settings.get("pixabay_api_key", ""))
 
         # Build language icons (used by langbox AND history list)
         self.lang_icons = self.build_language_icons()
@@ -4734,6 +4753,7 @@ class App(QWidget):
     def apply_settings_changes(self):
         """Re-apply settings after the dialog saves them."""
         _apply_custom_languages_to_globals(self.settings.get("custom_languages", []))
+        SoundboardButton.set_pixabay_key(self.settings.get("pixabay_api_key", ""))
         self.rebuild_langbox()
         new_lang = self.settings.get("default_target_lang", "Auto")
         if self.langbox.findText(new_lang) >= 0:
@@ -5782,6 +5802,15 @@ def open_settings_dialog(parent_app: "App") -> None:
         deepl_key_widget.setVisible(is_deepl)
     trans_backend_combo.currentTextChanged.connect(lambda _: _update_deepl_visibility())
     _update_deepl_visibility()
+
+    pixabay_key_widget, pixabay_key_edit = _secret_row(
+        settings.get("pixabay_api_key", ""), "Pixabay API-avain"
+    )
+    f1.addRow(_lbl("Pixabay API-avain:"), pixabay_key_widget)
+    f1.addRow("", _desc(
+        "Kuvahaku soundboard-napeille. Ilmainen, 500 pyyntöä/tunti.\n"
+        "Rekisteröidy: pixabay.com → API → Get API Key."
+    ))
 
     f1.addRow(_header("Puhesynteesi (TTS)"))
 
@@ -6863,6 +6892,7 @@ def open_settings_dialog(parent_app: "App") -> None:
             "default_tts_backend": backend_combo.currentText(),
             "translation_backend": trans_backend_combo.currentText(),
             "deepl_api_key": deepl_key_edit.text().strip(),
+            "pixabay_api_key": pixabay_key_edit.text().strip(),
         }
         try:
             new_settings["wake_command_seconds"] = float(seconds_edit.text())
