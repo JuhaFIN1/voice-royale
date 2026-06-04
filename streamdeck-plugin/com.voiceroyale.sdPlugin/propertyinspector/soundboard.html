@@ -8,6 +8,8 @@
   select { width: 100%; padding: 6px 8px; background: #2a2a2a; color: #eee;
     border: 1px solid #444; border-radius: 4px; font-size: 13px; box-sizing: border-box; margin-bottom: 14px; }
   select:focus { outline: none; border-color: #5b9bd5; }
+  optgroup { color: #ffb800; font-style: normal; font-weight: bold; }
+  optgroup option { color: #eee; font-weight: normal; padding-left: 8px; }
   .status { color: #888; font-size: 11px; margin-bottom: 8px; min-height: 16px; }
   button { background: #2a2a2a; color: #aaa; border: 1px solid #444; border-radius: 4px;
     padding: 4px 12px; font-size: 11px; cursor: pointer; }
@@ -32,7 +34,7 @@ let ws = null;
 let actionUUID = null;
 let pages = [];
 let curPage = 0;
-let curSlot = 0;
+let curSlot = '0';
 
 const pageEl = document.getElementById('page');
 const slotEl = document.getElementById('slot');
@@ -92,20 +94,37 @@ function buildSlotDropdown() {
     const pg = pages[pi] || { slots: [] };
     slotEl.innerHTML = '';
     pg.slots.forEach((s, i) => {
-        const o = document.createElement('option');
-        o.value = i;
-        const mark = s.has_file ? ' ♪' : '';
-        const imgMark = s.has_image ? ' 🖼' : '';
-        o.textContent = `${i + 1}. ${s.name}${mark}${imgMark}`;
-        slotEl.appendChild(o);
+        if (s.is_folder && s.folder_slots && s.folder_slots.length > 0) {
+            // Subfolder: show as optgroup with sub-slots
+            const grp = document.createElement('optgroup');
+            grp.label = `📁 ${i + 1}. ${s.name}`;
+            s.folder_slots.forEach(fs => {
+                const o = document.createElement('option');
+                o.value = `f${i}_${fs.index}`;
+                const mark = fs.has_file ? ' ♪' : '';
+                o.textContent = `  ${fs.index + 1}. ${fs.name}${mark}`;
+                grp.appendChild(o);
+            });
+            slotEl.appendChild(grp);
+        } else {
+            const o = document.createElement('option');
+            o.value = String(i);
+            const mark = s.has_file ? ' ♪' : '';
+            const imgMark = s.has_image ? ' 🖼' : '';
+            o.textContent = `${i + 1}. ${s.name}${mark}${imgMark}`;
+            slotEl.appendChild(o);
+        }
     });
     slotEl.value = curSlot;
-    if (slotEl.value == '') slotEl.value = 0;
+    if (slotEl.value == '') {
+        // Try selecting first available option
+        if (slotEl.options.length > 0) slotEl.selectedIndex = 0;
+    }
 }
 
 function applySettings(s) {
     curPage = s.page !== undefined ? Number(s.page) : 0;
-    curSlot = s.slot !== undefined ? Number(s.slot) : 0;
+    curSlot = s.slot !== undefined ? String(s.slot) : '0';
     if (pages.length) {
         pageEl.value = curPage;
         buildSlotDropdown();
@@ -116,7 +135,7 @@ function applySettings(s) {
 // ─── Save settings via WebSocket ─────────────────────────────────────────────
 function save() {
     curPage = Number(pageEl.value) || 0;
-    curSlot = Number(slotEl.value) || 0;
+    curSlot = slotEl.value || '0';
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
             event: 'setSettings',
