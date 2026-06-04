@@ -262,7 +262,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.43"
+APP_VERSION = "1.3.44"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1331,55 +1331,62 @@ class SoundboardButton(QWidget):
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 #222228, stop:1 #14141A);"
         " border: 2px solid #333344; border-radius: 10px;"
-        " color: #7A7A9A; font-size: 8px; font-weight: 700;"
+        " color: #7A7A9A; font-size: 9px; font-weight: 700;"
         " padding-bottom: 2px; }"
         "QToolButton:hover { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 #2A2A38, stop:1 #1C1C26);"
         " border: 2px solid #9A4DFF; color: #E0E0FF; }"
         "QToolButton:pressed { background: #0e0e18; border: 2px solid #3A7BFF; }"
+        "QToolButton:focus { border: 2px solid #333344; outline: none; }"
     )
     _STYLE_PLAY = (
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 #0a2818, stop:1 #06160C);"
         " border: 2px solid #00FF6A; border-radius: 10px;"
-        " color: #00FF6A; font-size: 8px; font-weight: 700; padding-bottom: 2px; }"
+        " color: #00FF6A; font-size: 9px; font-weight: 700; padding-bottom: 2px; }"
+        "QToolButton:focus { outline: none; }"
     )
     _STYLE_DRAG = (
         "QToolButton { background: #080C1A; border: 2px dashed #3A7BFF; border-radius: 10px;"
-        " color: #3A7BFF; font-size: 8px; font-weight: 700; padding-bottom: 2px; }"
+        " color: #3A7BFF; font-size: 9px; font-weight: 700; padding-bottom: 2px; }"
+        "QToolButton:focus { outline: none; }"
     )
     _STYLE_LINK = (
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 #0A1428, stop:1 #060C18);"
         " border: 2px solid #1A3A70; border-radius: 10px;"
-        " color: #3A7BFF; font-size: 8px; font-weight: 700;"
+        " color: #3A7BFF; font-size: 9px; font-weight: 700;"
         " padding-bottom: 2px; }"
         "QToolButton:hover { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 #142040, stop:1 #0A1828);"
         " border: 2px solid #3A7BFF; color: #6AA0FF; }"
         "QToolButton:pressed { background: #060C18; border: 2px solid #9A4DFF; }"
+        "QToolButton:focus { outline: none; }"
     )
     _STYLE_FOLDER = (
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 #1A1400, stop:1 #0E0A00);"
         " border: 2px solid #7A5A00; border-radius: 10px;"
-        " color: #FFB800; font-size: 8px; font-weight: 700;"
+        " color: #FFB800; font-size: 9px; font-weight: 700;"
         " padding-bottom: 2px; }"
         "QToolButton:hover { border: 2px solid #FFB800; color: #FFD060; }"
         "QToolButton:pressed { background: #0E0A00; border: 2px solid #FF9A00; }"
+        "QToolButton:focus { outline: none; }"
     )
     _STYLE_FOLDER_DRAG = (
         "QToolButton { background: #1A1400; border: 2px dashed #FFB800; border-radius: 10px;"
-        " color: #FFD060; font-size: 8px; font-weight: 700; padding-bottom: 2px; }"
+        " color: #FFD060; font-size: 9px; font-weight: 700; padding-bottom: 2px; }"
+        "QToolButton:focus { outline: none; }"
     )
     _STYLE_BACK = (
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 #141428, stop:1 #0A0A1A);"
         " border: 2px solid #444466; border-radius: 10px;"
-        " color: #8888BB; font-size: 9px; font-weight: 700;"
+        " color: #8888BB; font-size: 10px; font-weight: 700;"
         " padding-bottom: 2px; }"
         "QToolButton:hover { border: 2px solid #9A4DFF; color: #C0C0FF; }"
         "QToolButton:pressed { background: #0A0A1A; border: 2px solid #3A7BFF; }"
+        "QToolButton:focus { outline: none; }"
     )
 
     def __init__(self, page_index: int, slot_index: int, parent=None):
@@ -1388,15 +1395,16 @@ class SoundboardButton(QWidget):
         self.slot_index = slot_index
         self._data = {"name": f"Slot {slot_index + 1}", "file": "", "image": "", "link_page_name": ""}
         self._drag_start: QPoint | None = None
-        self.setFixedSize(72, 68)
+        self.setFixedSize(96, 90)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
 
         self._btn = QToolButton()
-        self._btn.setFixedSize(72, 68)
+        self._btn.setFixedSize(96, 90)
+        self._btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-        self._btn.setIconSize(QSize(46, 42))
+        self._btn.setIconSize(QSize(62, 56))
         self._btn.setStyleSheet(self._STYLE_IDLE)
         self._btn.clicked.connect(lambda: self.clicked_play.emit(self.slot_index))
         self._btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -2978,6 +2986,223 @@ class _TextboxRecordBtnFilter(QObject):
         return False
 
 
+class SoundboardPageContainer(QWidget):
+    """Soundboard page container — paints colored group backgrounds behind buttons."""
+
+    _COLS = 14
+    _BTN_W = 96
+    _BTN_H = 90
+    _SPACING = 6
+    _MARGIN = 6
+    _TOP = 26        # extra top margin so group titles have space at top
+
+    _PRESET_COLORS = [
+        ("#3A7BFF", "Sininen"),
+        ("#9A4DFF", "Violetti"),
+        ("#FF4D4D", "Punainen"),
+        ("#00CC6A", "Vihreä"),
+        ("#FFB800", "Keltainen"),
+        ("#FF7A00", "Oranssi"),
+        ("#00CCCC", "Sinivihreä"),
+        ("#FF4DA6", "Pinkki"),
+    ]
+
+    def __init__(self, page_index: int, groups: list, save_callback):
+        super().__init__()
+        self._page_index = page_index
+        self._groups: list[dict] = list(groups)
+        self._save_cb = save_callback
+
+    def set_groups(self, groups: list):
+        self._groups = list(groups)
+        self.update()
+
+    def get_groups(self) -> list:
+        return list(self._groups)
+
+    def _row_rect(self, row_start: int, row_end: int) -> "QRect":
+        from PyQt6.QtCore import QRect as _QRect
+        x = self._MARGIN - 4
+        y = self._TOP + row_start * (self._BTN_H + self._SPACING) - 20
+        w = self._COLS * (self._BTN_W + self._SPACING) - self._SPACING + 8
+        h = (row_end - row_start + 1) * (self._BTN_H + self._SPACING) - self._SPACING + 24
+        return _QRect(x, max(0, y), w, h)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self._groups:
+            return
+        from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QFontMetrics
+        from PyQt6.QtCore import QRect
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        for grp in self._groups:
+            row_start = max(0, grp.get("row_start", 0))
+            row_end = min(3, max(row_start, grp.get("row_end", row_start)))
+            color_str = grp.get("color", "#3A7BFF")
+            name = grp.get("name", "")
+            rect = self._row_rect(row_start, row_end)
+            color = QColor(color_str)
+            bg = QColor(color.red(), color.green(), color.blue(), 38)
+            painter.fillRect(rect, bg)
+            pen = QPen(QColor(color.red(), color.green(), color.blue(), 130))
+            pen.setWidth(1)
+            painter.setPen(pen)
+            painter.drawRect(rect)
+            if name:
+                font = QFont()
+                font.setBold(True)
+                font.setPointSize(7)
+                painter.setFont(font)
+                fm = QFontMetrics(font)
+                tw = fm.horizontalAdvance(name) + 10
+                badge_rect = QRect(rect.x() + 4, rect.y(), tw, 16)
+                painter.fillRect(badge_rect, QColor(color.red(), color.green(), color.blue(), 200))
+                painter.setPen(QColor(255, 255, 255, 230))
+                painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, name)
+
+    def open_groups_dialog(self):
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QListWidget,
+                                      QDialogButtonBox, QLabel, QLineEdit,
+                                      QComboBox, QListWidgetItem)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Soundboard ryhmät")
+        dlg.setMinimumWidth(420)
+        dlg.setStyleSheet(
+            "QDialog { background: #1a1a2a; color: #ccc; }"
+            "QLabel { color: #aaa; font-size: 11px; }"
+        )
+        lay = QVBoxLayout(dlg)
+        lay.setSpacing(8)
+
+        list_w = QListWidget()
+        list_w.setStyleSheet(
+            "QListWidget { background: #111; color: #ccc; border: 1px solid #333;"
+            " border-radius: 4px; padding: 2px; }"
+            "QListWidget::item:selected { background: #1e1e2a; }"
+        )
+        lay.addWidget(QLabel("Ryhmät (värikoodit soundboardin taustalle):"))
+        lay.addWidget(list_w)
+
+        _btn_ss = ("QPushButton { background: #252535; color: #ccc; border: 1px solid #333;"
+                   " border-radius: 4px; padding: 4px 10px; }"
+                   "QPushButton:hover { background: #353545; color: #fff; }")
+        btn_row = QHBoxLayout()
+        add_btn = QPushButton("+ Lisää")
+        edit_btn = QPushButton("Muokkaa")
+        del_btn = QPushButton("Poista")
+        for b in (add_btn, edit_btn, del_btn):
+            b.setStyleSheet(_btn_ss)
+            btn_row.addWidget(b)
+        lay.addLayout(btn_row)
+
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        bb.rejected.connect(dlg.accept)
+        lay.addWidget(bb)
+
+        def _refresh_list():
+            list_w.clear()
+            for grp in self._groups:
+                item = QListWidgetItem(
+                    f"Rivit {grp['row_start']+1}–{grp['row_end']+1}: {grp['name']}"
+                )
+                item.setForeground(QColor(grp.get("color", "#3A7BFF")))
+                list_w.addItem(item)
+
+        _refresh_list()
+
+        _input_ss = ("QLineEdit,QComboBox { background: #111; color: #eee;"
+                     " border: 1px solid #333; padding: 4px; border-radius: 3px; }")
+
+        def _grp_editor(existing=None):
+            sub = QDialog(dlg)
+            sub.setWindowTitle("Muokkaa ryhmää" if existing else "Uusi ryhmä")
+            sub.setStyleSheet("QDialog { background: #1a1a2a; color: #ccc; }"
+                              "QLabel { color: #aaa; font-size: 11px; }")
+            sl = QVBoxLayout(sub)
+            sl.setSpacing(6)
+
+            name_ed = QLineEdit(existing.get("name", "") if existing else "")
+            name_ed.setStyleSheet(_input_ss)
+            name_ed.setPlaceholderText("Ryhmän nimi")
+            sl.addWidget(QLabel("Nimi:"))
+            sl.addWidget(name_ed)
+
+            row_s_combo = QComboBox()
+            row_e_combo = QComboBox()
+            for r in range(4):
+                row_s_combo.addItem(f"Rivi {r + 1}", r)
+                row_e_combo.addItem(f"Rivi {r + 1}", r)
+            row_s_combo.setCurrentIndex(existing.get("row_start", 0) if existing else 0)
+            row_e_combo.setCurrentIndex(existing.get("row_end", 0) if existing else 0)
+            row_s_combo.setStyleSheet(_input_ss)
+            row_e_combo.setStyleSheet(_input_ss)
+            sl.addWidget(QLabel("Alkurivi:"))
+            sl.addWidget(row_s_combo)
+            sl.addWidget(QLabel("Loppurivi:"))
+            sl.addWidget(row_e_combo)
+
+            color_combo = QComboBox()
+            for hex_c, lbl in self._PRESET_COLORS:
+                color_combo.addItem(lbl, hex_c)
+            cur_color = existing.get("color", "#3A7BFF") if existing else "#3A7BFF"
+            idx = next((i for i, (h, _) in enumerate(self._PRESET_COLORS) if h == cur_color), 0)
+            color_combo.setCurrentIndex(idx)
+            color_combo.setStyleSheet(_input_ss)
+            sl.addWidget(QLabel("Väri:"))
+            sl.addWidget(color_combo)
+
+            sbb = QDialogButtonBox(
+                QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+            )
+            sbb.accepted.connect(sub.accept)
+            sbb.rejected.connect(sub.reject)
+            sl.addWidget(sbb)
+
+            if sub.exec() == QDialog.DialogCode.Accepted:
+                return {
+                    "name": name_ed.text().strip() or "Ryhmä",
+                    "color": color_combo.currentData(),
+                    "row_start": row_s_combo.currentData(),
+                    "row_end": max(row_s_combo.currentData(), row_e_combo.currentData()),
+                }
+            return None
+
+        def _on_add():
+            g = _grp_editor()
+            if g:
+                self._groups.append(g)
+                self.update()
+                _refresh_list()
+                if self._save_cb:
+                    self._save_cb()
+
+        def _on_edit():
+            idx = list_w.currentRow()
+            if 0 <= idx < len(self._groups):
+                g = _grp_editor(self._groups[idx])
+                if g:
+                    self._groups[idx] = g
+                    self.update()
+                    _refresh_list()
+                    if self._save_cb:
+                        self._save_cb()
+
+        def _on_del():
+            idx = list_w.currentRow()
+            if 0 <= idx < len(self._groups):
+                self._groups.pop(idx)
+                self.update()
+                _refresh_list()
+                if self._save_cb:
+                    self._save_cb()
+
+        add_btn.clicked.connect(_on_add)
+        edit_btn.clicked.connect(_on_edit)
+        del_btn.clicked.connect(_on_del)
+        dlg.exec()
+
+
 # APPLICATION
 # =========================
 class App(QWidget):
@@ -3358,6 +3583,7 @@ class App(QWidget):
         self._voice_fx = VoiceEffectProcessor(self.append_status)
         self._current_fx_preset = "Normal"
         self._soundboard_buttons: list[list[SoundboardButton]] = []
+        self._sb_page_containers: list["SoundboardPageContainer"] = []
         self._sb_nav_stack: dict[int, list] = {}  # page_index -> [(parent_slots, folder_slot_idx), ...]
         self._fx_preset_buttons: dict[str, QPushButton] = {}
         self._mb_bars: dict[int, tuple] = {}  # device_index -> (bar, db_lbl)
@@ -3679,6 +3905,8 @@ class App(QWidget):
 
         return frame
 
+    # ---- Soundboard group overlay container ----
+
     def _build_soundboard_card(self) -> QWidget:
         frame = QWidget()
         frame.setObjectName("card")
@@ -3791,10 +4019,11 @@ class App(QWidget):
             slots.append({"name": f"Slot {len(slots)+1}", "file": "", "image": ""})
 
         page_btns: list[SoundboardButton] = []
-        container = QWidget()
+        container = SoundboardPageContainer(pi, page_data.get("groups", []), self._save_soundboard)
         grid = QGridLayout(container)
         grid.setSpacing(6)
-        grid.setContentsMargins(6, 6, 6, 6)
+        # Extra top margin (26px) gives space for group title badges
+        grid.setContentsMargins(6, 26, 6, 6)
 
         for i in range(55):
             btn = SoundboardButton(pi, i)
@@ -3809,17 +4038,29 @@ class App(QWidget):
             grid.addWidget(btn, row, col)
 
         _stop_btn = _OctagonStopButton()
-        _stop_btn.setFixedSize(72, 68)
+        _stop_btn.setFixedSize(96, 90)
         _stop_btn.setToolTip("Pysäytä soitto heti")
         _stop_btn.clicked.connect(self._sb_stop_playback)
         grid.addWidget(_stop_btn, 3, 13)
 
+        # Minimum width forces the grid to keep full size so QScrollArea can scroll horizontally
+        _min_w = 14 * (96 + 6) - 6 + 12
+        container.setMinimumWidth(_min_w)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setWidget(container)
-        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll.setStyleSheet(
+            "QScrollArea { border: none; background: transparent; }"
+            "QScrollBar:horizontal { height: 8px; background: #111; border-radius: 4px; }"
+            "QScrollBar::handle:horizontal { background: #444; border-radius: 4px; min-width: 30px; }"
+            "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }"
+        )
 
         self._soundboard_buttons.append(page_btns)
+        self._sb_page_containers.append(container)
         self._sb_nav_stack[pi] = []
         self._sb_tabs.addTab(scroll, name)
 
@@ -3836,6 +4077,8 @@ class App(QWidget):
             return
         self._sb_tabs.removeTab(index)
         self._soundboard_buttons.pop(index)
+        if index < len(self._sb_page_containers):
+            self._sb_page_containers.pop(index)
         # Rebuild nav stack with corrected indices
         new_stack = {}
         for old_pi, entries in self._sb_nav_stack.items():
@@ -3856,6 +4099,7 @@ class App(QWidget):
             return
         menu = QMenu(self)
         rename_act = menu.addAction("Nimeä uudelleen…")
+        grp_act = menu.addAction("Muokkaa ryhmiä…")
         menu.addSeparator()
         delete_act = menu.addAction("Poista sivu")
         delete_act.setEnabled(self._sb_tabs.count() > 1)
@@ -3866,6 +4110,9 @@ class App(QWidget):
             if ok and text.strip():
                 self._sb_tabs.setTabText(index, text.strip())
                 self._save_soundboard()
+        elif act == grp_act:
+            if index < len(self._sb_page_containers):
+                self._sb_page_containers[index].open_groups_dialog()
         elif act == delete_act:
             self._sb_remove_page(index)
 
@@ -3992,6 +4239,9 @@ class App(QWidget):
     def _sb_tab_moved(self, from_idx: int, to_idx: int):
         page = self._soundboard_buttons.pop(from_idx)
         self._soundboard_buttons.insert(to_idx, page)
+        if from_idx < len(self._sb_page_containers):
+            cont = self._sb_page_containers.pop(from_idx)
+            self._sb_page_containers.insert(to_idx, cont)
         # Remap nav stack keys to reflect new indices
         new_stack = {}
         for old_pi, entries in self._sb_nav_stack.items():
@@ -5294,6 +5544,48 @@ class App(QWidget):
 
         threading.Thread(target=_play, daemon=True).start()
 
+    def _play_soundboard_nested(self, page_idx: int, folder_slot_idx: int, sub_slot_idx: int):
+        """Play a sub-slot inside a subfolder directly from settings (Stream Deck support)."""
+        page_slots = self._get_page_root_slots(page_idx)
+        if folder_slot_idx >= len(page_slots):
+            return
+        folder_slot = page_slots[folder_slot_idx]
+        if not folder_slot.get("subfolder"):
+            return
+        folder_slots = folder_slot.get("folder_slots", [])
+        if sub_slot_idx >= len(folder_slots):
+            return
+        sub_slot = folder_slots[sub_slot_idx]
+        path = sub_slot.get("file", "")
+        if not path or not os.path.exists(path):
+            self.append_status(f"SD subfolder p{page_idx+1} f{folder_slot_idx+1} s{sub_slot_idx+1}: ei ääntä")
+            return
+
+        self._sb_stop_event.set()
+        self._sb_stop_event = threading.Event()
+        my_stop_event = self._sb_stop_event
+        self._sb_play_id += 1
+        my_play_id = self._sb_play_id
+
+        final_vol = max(0.0, self.settings.get("soundboard_volume", 1.0) * sub_slot.get("volume", 1.0))
+
+        def _level_cb(level: float):
+            self.update_output_level(level if self._sb_play_id == my_play_id else 0.0)
+
+        def _play():
+            try:
+                wav = self._load_audio_as_wav(path)
+                if self._sb_play_id == my_play_id:
+                    play_wav_bytes(wav, device_indices=self.get_selected_devices(),
+                                   level_callback=_level_cb, volume=final_vol,
+                                   stop_event=my_stop_event)
+                self.update_output_level(0.0)
+            except Exception as e:
+                if self._sb_play_id == my_play_id:
+                    self.append_status(f"SD subfolder error: {e}")
+
+        threading.Thread(target=_play, daemon=True).start()
+
     def _load_audio_as_wav(self, path: str) -> bytes:
         if path.lower().endswith(".wav"):
             with open(path, "rb") as f:
@@ -5315,12 +5607,13 @@ class App(QWidget):
         for pi in range(len(self._soundboard_buttons)):
             stack = self._sb_nav_stack.get(pi, [])
             if stack:
-                # Retrieve the original tab name from the bottom of the stack
                 name = stack[0][2]
             else:
                 name = self._sb_tabs.tabText(pi)
             slots = self._get_page_root_slots(pi)
-            pages.append({"name": name, "slots": slots})
+            groups = (self._sb_page_containers[pi].get_groups()
+                      if pi < len(self._sb_page_containers) else [])
+            pages.append({"name": name, "slots": slots, "groups": groups})
         self.settings["soundboard_pages"] = pages
         save_settings(self.settings)
 
@@ -5431,12 +5724,16 @@ class App(QWidget):
                 pass
         elif action.startswith("soundboard_"):
             parts = action[11:].split("_")
-            if len(parts) == 2:
-                # uusi muoto: soundboard_{page}_{slot}
-                self._play_soundboard_slot(int(parts[0]), int(parts[1]))
-            else:
-                # vanha muoto: soundboard_{slot} -> käyttää nykyistä sivua
-                self._play_soundboard_slot(self._sb_tabs.currentIndex(), int(parts[0]))
+            try:
+                if len(parts) == 3:
+                    # soundboard_{page}_{folder_slot}_{sub_slot}
+                    self._play_soundboard_nested(int(parts[0]), int(parts[1]), int(parts[2]))
+                elif len(parts) == 2:
+                    self._play_soundboard_slot(int(parts[0]), int(parts[1]))
+                else:
+                    self._play_soundboard_slot(self._sb_tabs.currentIndex(), int(parts[0]))
+            except (ValueError, IndexError):
+                pass
         elif action.startswith("fx_"):
             self._select_fx_preset(action[3:])
         else:
@@ -5452,11 +5749,25 @@ class App(QWidget):
                 slots = []
                 for si, slot in enumerate(page_data.get("slots", [])):
                     img = slot.get("image", "")
+                    is_folder = bool(slot.get("subfolder"))
+                    folder_slots_info = []
+                    if is_folder:
+                        for fi, fs in enumerate(slot.get("folder_slots", [])):
+                            if fs.get("file") or (
+                                fs.get("name") and not fs.get("name", "").startswith("Slot ")
+                            ):
+                                folder_slots_info.append({
+                                    "index": fi,
+                                    "name": fs.get("name", f"Slot {fi+1}"),
+                                    "has_file": bool(fs.get("file")),
+                                })
                     slots.append({
                         "name": slot.get("name", f"Slot {si+1}"),
                         "has_file": bool(slot.get("file")),
                         "has_image": bool(img and os.path.exists(img)),
                         "image_path": img if img and os.path.exists(img) else "",
+                        "is_folder": is_folder,
+                        "folder_slots": folder_slots_info,
                     })
                 pages.append({"name": page_data.get("name", f"Page {pi+1}"), "slots": slots})
             self._sd_state = {

@@ -99,8 +99,14 @@ async function onKeyDown(action, context, payload) {
     switch (action) {
         case "com.voiceroyale.soundboard": {
             const page = ctx.page !== undefined ? Number(ctx.page) : 0;
-            const slot = ctx.slot !== undefined ? Number(ctx.slot) : 0;
-            vrAction = `soundboard_${page}_${slot}`;
+            const slot = ctx.slot !== undefined ? String(ctx.slot) : '0';
+            if (slot.startsWith('f')) {
+                // subfolder: f{folder_idx}_{sub_idx} → soundboard_{page}_{folder}_{sub}
+                const parts = slot.slice(1).split('_');
+                vrAction = `soundboard_${page}_${parts[0]}_${parts[1]}`;
+            } else {
+                vrAction = `soundboard_${page}_${Number(slot)}`;
+            }
             break;
         }
         case "com.voiceroyale.lang":
@@ -180,10 +186,25 @@ function applyState(context, action, state) {
         case "com.voiceroyale.soundboard": {
             const ctx = settings[context] || {};
             const page = ctx.page !== undefined ? Number(ctx.page) : 0;
-            const slot = ctx.slot !== undefined ? Number(ctx.slot) : 0;
+            const slot = ctx.slot !== undefined ? String(ctx.slot) : '0';
             const pages = state.soundboard_pages || [];
-            const slots = (pages[page] && pages[page].slots) ? pages[page].slots : [];
-            const label = (slots[slot] && slots[slot].name) ? slots[slot].name : `S${slot + 1}`;
+            const pageSlots = (pages[page] && pages[page].slots) ? pages[page].slots : [];
+            let label;
+            if (slot.startsWith('f')) {
+                const parts = slot.slice(1).split('_');
+                const fi = Number(parts[0]);
+                const si = Number(parts[1]);
+                const folderSlot = pageSlots[fi];
+                if (folderSlot && folderSlot.folder_slots) {
+                    const sub = folderSlot.folder_slots.find(fs => fs.index === si);
+                    label = sub ? sub.name : `S${si + 1}`;
+                } else {
+                    label = `S${si + 1}`;
+                }
+            } else {
+                const si = Number(slot);
+                label = (pageSlots[si] && pageSlots[si].name) ? pageSlots[si].name : `S${si + 1}`;
+            }
             setTitle(context, label);
             break;
         }
