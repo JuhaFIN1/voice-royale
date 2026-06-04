@@ -7,7 +7,7 @@ All logic in one file: `ai_voice_app.py` (~8400 lines).
 
 Working directory: `E:\CLOUDS\AI-SYSTEMS\ai-voice-router\`
 GitHub: https://github.com/JuhaFIN1/voice-royale
-Current version: `APP_VERSION = "1.3.42"` (constant near top of file; CI auto-patches from git tag)
+Current version: `APP_VERSION = "1.3.44"` (constant near top of file; CI auto-patches from git tag)
 
 ---
 
@@ -93,7 +93,9 @@ Voice Royale TTS/Soundboard → Voicemeeter Input (Strip[2]) → B1 bus ──�
 | `POST /action/{name}` | Execute action (no body, no Content-Type) |
 | `GET /soundboard/image/{page}/{slot}` | Base64 PNG or null |
 
-**Action names:** `record_toggle`, `wake_listen_toggle`, `speak`, `stop_recording`, `settings`, `tts_toggle`, `sb_page_goto_{N}`, `lang_{language}`, `fx_{preset}`, `soundboard_{page}_{slot}`
+**Action names:** `record_toggle`, `wake_listen_toggle`, `speak`, `stop_recording`, `settings`, `tts_toggle`, `sb_page_goto_{N}`, `lang_{language}`, `fx_{preset}`, `soundboard_{page}_{slot}`, `soundboard_{page}_{folder_slot}_{sub_slot}` (subfolder)
+
+**SD subfolder:** Property inspector encodes subfolder slot as `f{fi}_{si}` (e.g. `f3_7`). Plugin.html constructs action `soundboard_{page}_{fi}_{si}`. Backend: `_play_soundboard_nested(page, folder_slot, sub_slot)` reads from settings directly (no UI navigation).
 
 **Thread-safety:** Use `queue.Queue` + QTimer poll from bg threads. `QTimer.singleShot(0, cb)` from bg thread does NOT work in PyQt6.
 
@@ -114,8 +116,11 @@ Update all **five** places: `LANGS`, `LANG_FLAG_CODES`, `EDGE_VOICES`, `_GOOGLE_
 
 ### Soundboard
 - 55 buttons per page + `_OctagonStopButton` (red octagon stop-sign, grid row 3, col 13)
+- **Button size: 96×90** (icon 62×56). Horizontal scroll via `setMinimumWidth` on `SoundboardPageContainer`.
+- **Groups:** `SoundboardPageContainer(QWidget)` — `paintEvent` draws colored group overlays + title badges. Groups in `soundboard_pages[].groups: [{name, color, row_start, row_end}]`. Right-click tab → "Muokkaa ryhmiä…"
 - `_sb_play_id` (int) counter prevents concurrent play crashes
 - `SoundboardButton._edit_mode` is a class-level flag
+- `SoundboardButton` — `setFocusPolicy(NoFocus)` + `:focus { outline:none }` in all `_STYLE_*` (prevents blue border after drag/delete)
 - Edit button: `setFixedSize(46, 24)` to fit inside 28px corner widget
 
 ### Stop events
