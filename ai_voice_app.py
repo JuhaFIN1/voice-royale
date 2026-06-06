@@ -262,7 +262,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.45"
+APP_VERSION = "1.3.46"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
