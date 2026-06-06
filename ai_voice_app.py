@@ -1338,6 +1338,32 @@ class SoundboardButton(QWidget):
     def set_pixabay_key(cls, key: str):
         cls._pixabay_api_key = key
 
+    @staticmethod
+    def _wrap_label(name: str) -> str:
+        """Break name into max 2 lines of ~12 chars each."""
+        if len(name) <= 12:
+            return name
+        words = name.split()
+        if len(words) == 1:
+            return name[:11] + "…"
+        line1 = ""
+        split_idx = len(words)
+        for i, w in enumerate(words):
+            test = (line1 + (" " if line1 else "") + w)
+            if len(test) <= 12:
+                line1 = test
+            else:
+                split_idx = i
+                break
+        if not line1:
+            return name[:11] + "…"
+        if split_idx == len(words):
+            return line1
+        line2 = " ".join(words[split_idx:])
+        if len(line2) > 13:
+            line2 = line2[:12] + "…"
+        return line1 + "\n" + line2
+
     _STYLE_IDLE = (
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 #222228, stop:1 #14141A);"
@@ -1415,7 +1441,7 @@ class SoundboardButton(QWidget):
         self._btn.setFixedSize(96, 90)
         self._btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-        self._btn.setIconSize(QSize(62, 56))
+        self._btn.setIconSize(QSize(62, 46))
         self._btn.setStyleSheet(self._STYLE_IDLE)
         self._btn.clicked.connect(lambda: self.clicked_play.emit(self.slot_index))
         self._btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -1711,7 +1737,7 @@ class SoundboardButton(QWidget):
     def _refresh(self):
         link_name = self._data.get("link_page_name", "")
         name = self._data.get("name") or f"Slot {self.slot_index + 1}"
-        display = name if len(name) <= 9 else name[:8] + "…"
+        display = self._wrap_label(name)
         if self._data.get("_back"):
             self._btn.setIcon(QIcon())
             self._btn.setText("◀ Takaisin")
@@ -3595,6 +3621,7 @@ class App(QWidget):
         self._current_fx_preset = "Normal"
         self._soundboard_buttons: list[list[SoundboardButton]] = []
         self._sb_page_containers: list["SoundboardPageContainer"] = []
+        self._sb_back_btns: list = []   # pinned Back button per page
         self._sb_nav_stack: dict[int, list] = {}  # page_index -> [(parent_slots, folder_slot_idx), ...]
         self._fx_preset_buttons: dict[str, QPushButton] = {}
         self._mb_bars: dict[int, tuple] = {}  # device_index -> (bar, db_lbl)
@@ -4048,12 +4075,6 @@ class App(QWidget):
             row, col = divmod(i, 14)
             grid.addWidget(btn, row, col)
 
-        _stop_btn = _OctagonStopButton()
-        _stop_btn.setFixedSize(96, 90)
-        _stop_btn.setToolTip("Pysäytä soitto heti")
-        _stop_btn.clicked.connect(self._sb_stop_playback)
-        grid.addWidget(_stop_btn, 3, 13)
-
         # Minimum width forces the grid to keep full size so QScrollArea can scroll horizontally
         _min_w = 14 * (96 + 6) - 6 + 12
         container.setMinimumWidth(_min_w)
@@ -4061,7 +4082,7 @@ class App(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(container)
         scroll.setStyleSheet(
             "QScrollArea { border: none; background: transparent; }"
@@ -4070,10 +4091,58 @@ class App(QWidget):
             "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }"
         )
 
+        # Fixed toolbar below scroll: [Takaisin] [stretch] [Soita random] [STOP]
+        _tb = QWidget()
+        _tb.setFixedHeight(36)
+        _tb.setStyleSheet("background: #0a0a12; border-top: 1px solid #1a1a2a;")
+        _tb_lay = QHBoxLayout(_tb)
+        _tb_lay.setContentsMargins(6, 3, 6, 3)
+        _tb_lay.setSpacing(6)
+
+        _back_btn = QPushButton("◀ Takaisin")
+        _back_btn.setFixedHeight(28)
+        _back_btn.setVisible(False)
+        _back_btn.setStyleSheet(
+            "QPushButton { background: #141428; color: #8888BB; border: 1px solid #333355;"
+            " border-radius: 4px; font-size: 10px; font-weight: 700; padding: 0 10px; }"
+            "QPushButton:hover { border-color: #9A4DFF; color: #C0C0FF; }"
+            "QPushButton:pressed { background: #0A0A1A; }"
+        )
+        _back_btn.clicked.connect(lambda: self._sb_go_back(self._sb_tabs.currentIndex()))
+
+        _rand_btn = QPushButton("▶ Soita random")
+        _rand_btn.setFixedHeight(28)
+        _rand_btn.setStyleSheet(
+            "QPushButton { background: #141428; color: #6688AA; border: 1px solid #2a3a50;"
+            " border-radius: 4px; font-size: 10px; font-weight: 700; padding: 0 10px; }"
+            "QPushButton:hover { border-color: #3A7BFF; color: #88BBFF; }"
+            "QPushButton:pressed { background: #0A0A1A; }"
+        )
+        _rand_btn.clicked.connect(lambda: self._sb_play_random(self._sb_tabs.currentIndex()))
+
+        _stop_btn = _OctagonStopButton()
+        _stop_btn.setFixedSize(72, 28)
+        _stop_btn.setToolTip("Pysäytä soitto heti")
+        _stop_btn.clicked.connect(self._sb_stop_playback)
+
+        _tb_lay.addWidget(_back_btn)
+        _tb_lay.addStretch()
+        _tb_lay.addWidget(_rand_btn)
+        _tb_lay.addWidget(_stop_btn)
+
+        # Wrap scroll + toolbar in a single widget for the tab
+        _page_wrap = QWidget()
+        _pw_lay = QVBoxLayout(_page_wrap)
+        _pw_lay.setContentsMargins(0, 0, 0, 0)
+        _pw_lay.setSpacing(0)
+        _pw_lay.addWidget(scroll)
+        _pw_lay.addWidget(_tb)
+
         self._soundboard_buttons.append(page_btns)
         self._sb_page_containers.append(container)
+        self._sb_back_btns.append(_back_btn)
         self._sb_nav_stack[pi] = []
-        self._sb_tabs.addTab(scroll, name)
+        self._sb_tabs.addTab(_page_wrap, name)
 
     def _sb_add_page(self):
         if self._sb_tabs.count() >= 10:
@@ -4090,6 +4159,8 @@ class App(QWidget):
         self._soundboard_buttons.pop(index)
         if index < len(self._sb_page_containers):
             self._sb_page_containers.pop(index)
+        if index < len(self._sb_back_btns):
+            self._sb_back_btns.pop(index)
         # Rebuild nav stack with corrected indices
         new_stack = {}
         for old_pi, entries in self._sb_nav_stack.items():
@@ -4197,11 +4268,12 @@ class App(QWidget):
         sub_slots = list(folder_data.get("folder_slots", []))
         while len(sub_slots) < 55:
             sub_slots.append({"name": f"Slot {len(sub_slots)+1}", "file": "", "image": "", "link_page_name": ""})
-        # Place back button at slot 42 (row 3, col 0 = bottom-left)
-        sub_slots[42] = {"_back": True, "name": "Takaisin", "file": "", "image": "", "link_page_name": ""}
         # Push current state onto nav stack (include current tab name for restoration)
         prev_tab_name = self._sb_tabs.tabText(page_index)
         self._sb_nav_stack[page_index].append((cur_slots, slot_index, prev_tab_name))
+        # Show pinned back button in toolbar
+        if page_index < len(self._sb_back_btns):
+            self._sb_back_btns[page_index].setVisible(True)
         # Load subfolder content into buttons
         for i, btn in enumerate(page_btns):
             btn.set_data(sub_slots[i])
@@ -4233,6 +4305,9 @@ class App(QWidget):
             btn.set_data(parent_slots[i])
         # Restore tab name to what it was before entering this folder
         self._sb_tabs.setTabText(page_index, prev_tab_name)
+        # Hide pinned back button if we're back at root level
+        if not stack and page_index < len(self._sb_back_btns):
+            self._sb_back_btns[page_index].setVisible(False)
         self._save_soundboard()
 
     def _sb_stop_playback(self):
@@ -4253,6 +4328,9 @@ class App(QWidget):
         if from_idx < len(self._sb_page_containers):
             cont = self._sb_page_containers.pop(from_idx)
             self._sb_page_containers.insert(to_idx, cont)
+        if from_idx < len(self._sb_back_btns):
+            back = self._sb_back_btns.pop(from_idx)
+            self._sb_back_btns.insert(to_idx, back)
         # Remap nav stack keys to reflect new indices
         new_stack = {}
         for old_pi, entries in self._sb_nav_stack.items():
@@ -4268,6 +4346,27 @@ class App(QWidget):
         for pi, page_btns in enumerate(self._soundboard_buttons):
             for btn in page_btns:
                 btn.page_index = pi
+
+    def _sb_play_random(self, page_index: int):
+        """Play a random sound from the current page (or subfolder)."""
+        if SoundboardButton._edit_mode:
+            return
+        if page_index >= len(self._soundboard_buttons):
+            return
+        page_btns = self._soundboard_buttons[page_index]
+        available = [
+            btn for btn in page_btns
+            if btn.get_data().get("file")
+            and os.path.exists(btn.get_data().get("file", ""))
+            and not btn.get_data().get("_back")
+            and not btn.get_data().get("subfolder")
+        ]
+        if not available:
+            self.append_status("Soundboard: ei soitettavia ääniä tällä sivulla")
+            return
+        import random as _rand
+        chosen = _rand.choice(available)
+        self._play_soundboard_slot(page_index, chosen.slot_index)
 
     def _sb_do_tab_switch(self):
         if self._sb_hover_tab >= 0:
