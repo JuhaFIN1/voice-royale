@@ -1161,20 +1161,31 @@ class StreamDeckHttpServer:
                     img_b64 = None
                     if len(parts) == 2:
                         try:
-                            pi, si = int(parts[0]), int(parts[1])
+                            pi = int(parts[0])
+                            slot_str = parts[1]
                             st = app._get_sd_state()
                             pages_st = st.get("soundboard_pages", [])
+                            ip = ""
                             if pi < len(pages_st):
                                 sl = pages_st[pi].get("slots", [])
-                                if si < len(sl):
-                                    ip = sl[si].get("image_path", "")
-                                    if ip and os.path.exists(ip):
-                                        import base64 as _b64
-                                        with open(ip, "rb") as _f:
-                                            raw = _b64.b64encode(_f.read()).decode()
-                                        _ext = os.path.splitext(ip)[1].lower()
-                                        _mime = "image/jpeg" if _ext in (".jpg", ".jpeg") else "image/png"
-                                        img_b64 = f"data:{_mime};base64,{raw}"
+                                if slot_str.startswith("f"):
+                                    sub_parts = slot_str[1:].split("_")
+                                    fi, si = int(sub_parts[0]), int(sub_parts[1])
+                                    if fi < len(sl):
+                                        fs_list = sl[fi].get("folder_slots", [])
+                                        fs = next((x for x in fs_list if x.get("index") == si), None)
+                                        ip = fs.get("image_path", "") if fs else ""
+                                else:
+                                    si = int(slot_str)
+                                    if si < len(sl):
+                                        ip = sl[si].get("image_path", "")
+                            if ip and os.path.exists(ip):
+                                import base64 as _b64
+                                with open(ip, "rb") as _f:
+                                    raw = _b64.b64encode(_f.read()).decode()
+                                _ext = os.path.splitext(ip)[1].lower()
+                                _mime = "image/jpeg" if _ext in (".jpg", ".jpeg") else "image/png"
+                                img_b64 = f"data:{_mime};base64,{raw}"
                         except Exception:
                             pass
                     self._json({"image": img_b64})
@@ -5756,10 +5767,12 @@ class App(QWidget):
                             if fs.get("file") or (
                                 fs.get("name") and not fs.get("name", "").startswith("Slot ")
                             ):
+                                fs_img = fs.get("image", "")
                                 folder_slots_info.append({
                                     "index": fi,
                                     "name": fs.get("name", f"Slot {fi+1}"),
                                     "has_file": bool(fs.get("file")),
+                                    "image_path": fs_img if fs_img and os.path.exists(fs_img) else "",
                                 })
                     slots.append({
                         "name": slot.get("name", f"Slot {si+1}"),

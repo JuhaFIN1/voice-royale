@@ -226,7 +226,7 @@ async function fetchSoundboardImage(context) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const ctx = settings[context] || {};
     const page = ctx.page !== undefined ? Number(ctx.page) : 0;
-    const slot = ctx.slot !== undefined ? Number(ctx.slot) : 0;
+    const slot = ctx.slot !== undefined ? String(ctx.slot) : '0';
     const key = `${page}_${slot}`;
     if (imageKeys[context] === key) return;  // already loaded
 
