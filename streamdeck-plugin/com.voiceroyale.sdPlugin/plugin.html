@@ -206,6 +206,7 @@ function applyState(context, action, state) {
                 label = (pageSlots[si] && pageSlots[si].name) ? pageSlots[si].name : `S${si + 1}`;
             }
             setTitle(context, label);
+            fetchSoundboardImage(context);
             break;
         }
         case "com.voiceroyale.sb.page.goto": {
@@ -234,7 +235,7 @@ async function fetchSoundboardImage(context) {
         const resp = await fetch(`${VR_BASE}/soundboard/image/${page}/${slot}`, { cache: "no-store" });
         if (!resp.ok) return;
         const data = await resp.json();
-        imageKeys[context] = key;
+        if (data.image) imageKeys[context] = key;
         ws.send(JSON.stringify({
             event: "setImage",
             context,
