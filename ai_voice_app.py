@@ -267,7 +267,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.55"
+APP_VERSION = "1.3.56"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1296,7 +1296,7 @@ def _get_local_ip() -> str:
 def _make_test_beep_wav() -> bytes:
     """Generate a short 440 Hz beep as WAV bytes."""
     import math, struct, io as _io, wave as _wave
-    sr, dur, freq = 16000, 0.6, 440
+    sr, dur, freq = 44100, 0.8, 440
     n = int(sr * dur)
     samples = [int(32767 * 0.5 * math.sin(2 * math.pi * freq * i / sr)) for i in range(n)]
     buf = _io.BytesIO()
@@ -7959,27 +7959,46 @@ def open_settings_dialog(parent_app: "App") -> None:
             "QPushButton:hover { border-color: #00FF6A; color: #5AFFAA; }"
         )
 
+        import queue as _q_ha_test
+        _ha_test_q = _q_ha_test.Queue()
+        _ha_test_timer = QTimer(parent_app)
+
+        def _poll_ha_test():
+            try:
+                ok, msg, style = _ha_test_q.get_nowait()
+            except Exception:
+                return
+            _ha_test_timer.stop()
+            test_btn.setEnabled(True)
+            test_btn.setText("▶ Testi")
+            ha_status_lbl.setStyleSheet(style)
+            ha_status_lbl.setText(msg)
+
+        _ha_test_timer.timeout.connect(_poll_ha_test)
+
         def _do_test(eid=entity_id):
             test_btn.setEnabled(False)
             test_btn.setText("…")
+            local_ip = _get_local_ip()
+            test_url = f"http://{local_ip}:{StreamDeckHttpServer.PORT}/ha_test_audio"
+            cur = {"ha_url": ha_url_edit.text().strip(), "ha_token": ha_token_edit.text().strip()}
+
             def _run():
                 try:
-                    local_ip = _get_local_ip()
-                    test_url = f"http://{local_ip}:{StreamDeckHttpServer.PORT}/ha_test_audio"
-                    cur = {"ha_url": ha_url_edit.text().strip(), "ha_token": ha_token_edit.text().strip()}
                     _ha_api("POST", "/services/media_player/play_media", cur, {
                         "entity_id": eid,
                         "media_content_id": test_url,
                         "media_content_type": "music",
                     })
-                    QTimer.singleShot(0, lambda: (test_btn.setEnabled(True), test_btn.setText("▶ Testi"),
-                                                  ha_status_lbl.setStyleSheet("color: #00cc6a; font-size:12px;"),
-                                                  ha_status_lbl.setText(f"✓ Testi lähetetty → {eid}")))
+                    _ha_test_q.put((True,
+                        f"✓ Testi lähetetty → {eid}",
+                        "color: #00cc6a; font-size:12px;"))
                 except Exception as exc:
-                    QTimer.singleShot(0, lambda e=str(exc): (
-                        test_btn.setEnabled(True), test_btn.setText("▶ Testi"),
-                        ha_status_lbl.setStyleSheet("color: #ff4444; font-size:12px;"),
-                        ha_status_lbl.setText(f"✗ {e}")))
+                    _ha_test_q.put((False,
+                        f"✗ {exc}",
+                        "color: #ff4444; font-size:12px;"))
+
+            _ha_test_timer.start(100)
             threading.Thread(target=_run, daemon=True).start()
 
         test_btn.clicked.connect(_do_test)
