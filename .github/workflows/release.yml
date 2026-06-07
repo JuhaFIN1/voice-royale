@@ -41,7 +41,7 @@ jobs:
             --onedir `
             --name "Voice Royale" `
             --icon "iconimage.ico" `
-            --add-data "juhalempiainensoftware.png;." `
+            --add-data "BluexDEV_logo.png;." `
             --add-data "iconimage.ico;." `
             --hidden-import scipy.signal `
             --hidden-import pyttsx3.drivers `
@@ -129,7 +129,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller Pillow
-          pip install PyQt6 requests python-dotenv sounddevice numpy keyboard openai pyttsx3 edge-tts scipy deep-translator
+          pip install PyQt6 requests python-dotenv sounddevice numpy openai pyttsx3 edge-tts scipy deep-translator duckduckgo-search
           pip install pvporcupine || true
 
       - name: Convert icon to icns
@@ -150,7 +150,7 @@ jobs:
             --onedir \
             --name "Voice Royale" \
             --osx-bundle-identifier "com.voiceroyale.app" \
-            --add-data "juhalempiainensoftware.png:." \
+            --add-data "BluexDEV_logo.png:." \
             --add-data "iconimage.ico:." \
             --hidden-import scipy.signal \
             --hidden-import pyttsx3.drivers \
@@ -161,6 +161,7 @@ jobs:
             --collect-all _sounddevice_data \
             --collect-all certifi \
             --collect-all pyttsx3 \
+            --collect-all duckduckgo_search \
             --icon "iconimage.icns" \
             --noconfirm \
             ai_voice_app.py
@@ -171,8 +172,18 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Voice Royale needs microphone access for voice recognition.'" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :NSInputMonitoringUsageDescription string 'Voice Royale needs input monitoring for global hotkeys.'" "$PLIST" || true
 
-      - name: Ad-hoc sign app bundle
-        run: codesign --deep --force -s - "dist/Voice Royale.app" || true
+      - name: Create entitlements and sign app bundle
+        run: |
+          cat > entitlements.plist << 'ENTEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>com.apple.security.device.audio-input</key><true/>
+            <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+            <key>com.apple.security.cs.disable-library-validation</key><true/>
+          </dict></plist>
+          ENTEOF
+          codesign --deep --force -s - --entitlements entitlements.plist "dist/Voice Royale.app" || true
 
       - name: Build Stream Deck plugin package
         run: |
@@ -227,7 +238,7 @@ jobs:
           X86_PY="/usr/local/opt/python@3.11/bin/python3.11"
           arch -x86_64 $X86_PY -m pip install --upgrade pip
           arch -x86_64 $X86_PY -m pip install pyinstaller Pillow
-          arch -x86_64 $X86_PY -m pip install PyQt6 requests python-dotenv sounddevice numpy keyboard openai pyttsx3 edge-tts scipy deep-translator
+          arch -x86_64 $X86_PY -m pip install PyQt6 requests python-dotenv sounddevice numpy openai pyttsx3 edge-tts scipy deep-translator duckduckgo-search
           arch -x86_64 $X86_PY -m pip install pvporcupine || true
 
       - name: Convert icon to icns
@@ -249,7 +260,7 @@ jobs:
             --onedir \
             --name "Voice Royale" \
             --osx-bundle-identifier "com.voiceroyale.app" \
-            --add-data "juhalempiainensoftware.png:." \
+            --add-data "BluexDEV_logo.png:." \
             --add-data "iconimage.ico:." \
             --hidden-import scipy.signal \
             --hidden-import pyttsx3.drivers \
@@ -260,6 +271,7 @@ jobs:
             --collect-all _sounddevice_data \
             --collect-all certifi \
             --collect-all pyttsx3 \
+            --collect-all duckduckgo_search \
             --icon "iconimage.icns" \
             --noconfirm \
             ai_voice_app.py
@@ -270,8 +282,18 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Voice Royale needs microphone access for voice recognition.'" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :NSInputMonitoringUsageDescription string 'Voice Royale needs input monitoring for global hotkeys.'" "$PLIST" || true
 
-      - name: Ad-hoc sign app bundle
-        run: codesign --deep --force -s - "dist/Voice Royale.app" || true
+      - name: Create entitlements and sign app bundle
+        run: |
+          cat > entitlements.plist << 'ENTEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>com.apple.security.device.audio-input</key><true/>
+            <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+            <key>com.apple.security.cs.disable-library-validation</key><true/>
+          </dict></plist>
+          ENTEOF
+          codesign --deep --force -s - --entitlements entitlements.plist "dist/Voice Royale.app" || true
 
       - name: Create DMG
         run: |

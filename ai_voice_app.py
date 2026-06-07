@@ -20,12 +20,14 @@ REQUIRED = {
     "sounddevice": "sounddevice",
     "numpy": "numpy",
     "scipy": "scipy",
-    "keyboard": "keyboard",
     "openai": "openai",
     "pyttsx3": "pyttsx3",
     "edge_tts": "edge-tts",
     "deep_translator": "deep-translator",
 }
+# keyboard requires root/accessibility permissions on macOS and crashes on import without them
+if sys.platform != "darwin":
+    REQUIRED["keyboard"] = "keyboard"
 
 
 def install_deps():
@@ -55,7 +57,10 @@ import wave
 import webbrowser
 
 import edge_tts
-import keyboard
+try:
+    import keyboard as _keyboard_mod
+except Exception:
+    _keyboard_mod = None
 import numpy as np
 import pyttsx3
 import requests
@@ -262,7 +267,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.46"
+APP_VERSION = "1.3.47"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -288,6 +293,7 @@ DEFAULT_SETTINGS = {
     "stream_deck_enabled": True,
     "stream_deck_mapping": {},   # tyhjä = käytä DEFAULT_MAPPING
     "soundboard_volume": 1.0,
+    "sb_icon_size": "large",
     "voice_fx_output_device": None,
     "voice_fx_monitor_device": None,
     "voice_fx_hear_myself": False,
@@ -1364,11 +1370,18 @@ class SoundboardButton(QWidget):
             line2 = line2[:12] + "…"
         return line1 + "\n" + line2
 
+    # Size class vars — updated by set_size_mode()
+    _BTN_W: int = 96
+    _BTN_H: int = 90
+    _ICON_W: int = 62
+    _ICON_H: int = 46
+    _FONT_SIZE: int = 10
+
     _STYLE_IDLE = (
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 #222228, stop:1 #14141A);"
         " border: 2px solid #333344; border-radius: 10px;"
-        " color: #7A7A9A; font-size: 9px; font-weight: 700;"
+        " color: #7A7A9A; font-size: 10px; font-weight: 700;"
         " padding-bottom: 2px; }"
         "QToolButton:hover { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 #2A2A38, stop:1 #1C1C26);"
@@ -1380,19 +1393,19 @@ class SoundboardButton(QWidget):
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 #0a2818, stop:1 #06160C);"
         " border: 2px solid #00FF6A; border-radius: 10px;"
-        " color: #00FF6A; font-size: 9px; font-weight: 700; padding-bottom: 2px; }"
+        " color: #00FF6A; font-size: 10px; font-weight: 700; padding-bottom: 2px; }"
         "QToolButton:focus { outline: none; }"
     )
     _STYLE_DRAG = (
         "QToolButton { background: #080C1A; border: 2px dashed #3A7BFF; border-radius: 10px;"
-        " color: #3A7BFF; font-size: 9px; font-weight: 700; padding-bottom: 2px; }"
+        " color: #3A7BFF; font-size: 10px; font-weight: 700; padding-bottom: 2px; }"
         "QToolButton:focus { outline: none; }"
     )
     _STYLE_LINK = (
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 #0A1428, stop:1 #060C18);"
         " border: 2px solid #1A3A70; border-radius: 10px;"
-        " color: #3A7BFF; font-size: 9px; font-weight: 700;"
+        " color: #3A7BFF; font-size: 10px; font-weight: 700;"
         " padding-bottom: 2px; }"
         "QToolButton:hover { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 #142040, stop:1 #0A1828);"
@@ -1404,7 +1417,7 @@ class SoundboardButton(QWidget):
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 #1A1400, stop:1 #0E0A00);"
         " border: 2px solid #7A5A00; border-radius: 10px;"
-        " color: #FFB800; font-size: 9px; font-weight: 700;"
+        " color: #FFB800; font-size: 10px; font-weight: 700;"
         " padding-bottom: 2px; }"
         "QToolButton:hover { border: 2px solid #FFB800; color: #FFD060; }"
         "QToolButton:pressed { background: #0E0A00; border: 2px solid #FF9A00; }"
@@ -1412,7 +1425,7 @@ class SoundboardButton(QWidget):
     )
     _STYLE_FOLDER_DRAG = (
         "QToolButton { background: #1A1400; border: 2px dashed #FFB800; border-radius: 10px;"
-        " color: #FFD060; font-size: 9px; font-weight: 700; padding-bottom: 2px; }"
+        " color: #FFD060; font-size: 10px; font-weight: 700; padding-bottom: 2px; }"
         "QToolButton:focus { outline: none; }"
     )
     _STYLE_BACK = (
@@ -1426,22 +1439,40 @@ class SoundboardButton(QWidget):
         "QToolButton:focus { outline: none; }"
     )
 
+    @classmethod
+    def set_size_mode(cls, mode: str):
+        if mode == "small":
+            cls._BTN_W, cls._BTN_H = 82, 58
+            cls._ICON_W, cls._ICON_H = 52, 34
+            cls._FONT_SIZE = 8
+        else:
+            cls._BTN_W, cls._BTN_H = 96, 90
+            cls._ICON_W, cls._ICON_H = 62, 46
+            cls._FONT_SIZE = 10
+        fs = cls._FONT_SIZE
+        for attr in ("_STYLE_IDLE", "_STYLE_PLAY", "_STYLE_DRAG", "_STYLE_LINK",
+                     "_STYLE_FOLDER", "_STYLE_FOLDER_DRAG", "_STYLE_BACK"):
+            s = getattr(cls, attr)
+            for old in (7, 8, 9, 10, 11):
+                s = s.replace(f"font-size: {old}px", f"font-size: {fs}px")
+            setattr(cls, attr, s)
+
     def __init__(self, page_index: int, slot_index: int, parent=None):
         super().__init__(parent)
         self.page_index = page_index
         self.slot_index = slot_index
         self._data = {"name": f"Slot {slot_index + 1}", "file": "", "image": "", "link_page_name": ""}
         self._drag_start: QPoint | None = None
-        self.setFixedSize(96, 90)
+        self.setFixedSize(self._BTN_W, self._BTN_H)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
 
         self._btn = QToolButton()
-        self._btn.setFixedSize(96, 90)
+        self._btn.setFixedSize(self._BTN_W, self._BTN_H)
         self._btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-        self._btn.setIconSize(QSize(62, 46))
+        self._btn.setIconSize(QSize(self._ICON_W, self._ICON_H))
         self._btn.setStyleSheet(self._STYLE_IDLE)
         self._btn.clicked.connect(lambda: self.clicked_play.emit(self.slot_index))
         self._btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -1738,6 +1769,7 @@ class SoundboardButton(QWidget):
         link_name = self._data.get("link_page_name", "")
         name = self._data.get("name") or f"Slot {self.slot_index + 1}"
         display = self._wrap_label(name)
+        _isz = self._ICON_H
         if self._data.get("_back"):
             self._btn.setIcon(QIcon())
             self._btn.setText("◀ Takaisin")
@@ -1746,19 +1778,19 @@ class SoundboardButton(QWidget):
         elif self._data.get("subfolder"):
             _img = self._data.get("image", "")
             if _img and os.path.exists(_img):
-                self._btn.setIcon(QIcon(self._make_icon_pixmap(46)))
+                self._btn.setIcon(QIcon(self._make_icon_pixmap(_isz)))
             else:
-                self._btn.setIcon(QIcon(self._make_folder_pixmap(46)))
+                self._btn.setIcon(QIcon(self._make_folder_pixmap(_isz)))
             self._btn.setText(display)
             self._btn.setToolTip(f"📁 Kansio: {name}")
             self._btn.setStyleSheet(self._STYLE_FOLDER)
         elif link_name:
-            self._btn.setIcon(QIcon(self._make_link_pixmap(46)))
+            self._btn.setIcon(QIcon(self._make_link_pixmap(_isz)))
             self._btn.setText(display)
             self._btn.setToolTip(f"→ Sivu: {link_name}")
             self._btn.setStyleSheet(self._STYLE_LINK)
         else:
-            self._btn.setIcon(QIcon(self._make_icon_pixmap(46)))
+            self._btn.setIcon(QIcon(self._make_icon_pixmap(_isz)))
             self._btn.setText(display)
             self._btn.setToolTip(name + ("\n" + self._data["file"] if self._data.get("file") else ""))
             self._btn.setStyleSheet(self._STYLE_IDLE)
@@ -2775,7 +2807,7 @@ class _OctagonStopButton(QPushButton):
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawPolygon(poly)
-        font = QFont("Arial", 13, QFont.Weight.Black)
+        font = QFont("Arial", 9, QFont.Weight.Black)
         p.setFont(font)
         p.setPen(QColor("#FFFFFF"))
         p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "STOP")
@@ -3011,27 +3043,48 @@ class WakeListener:
 
 
 # =========================
-class _TextboxRecordBtnFilter(QObject):
-    """Repositions the overlay record button whenever the textbox is resized."""
-    def __init__(self, btn: QPushButton):
+class _TextboxOverlayFilter(QObject):
+    """Repositions floating overlay buttons inside the textbox on resize."""
+    def __init__(self, btn_right: "QPushButton", btn_left: "QPushButton" = None):
         super().__init__()
-        self._btn = btn
+        self._right = btn_right
+        self._left = btn_left
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.Resize:
-            self._btn.move(obj.width() - self._btn.width() - 6, obj.height() - self._btn.height() - 6)
+            w, h = obj.width(), obj.height()
+            if self._right:
+                self._right.move(w - self._right.width() - 6, h - self._right.height() - 6)
+            if self._left:
+                self._left.move(6, h - self._left.height() - 6)
         return False
 
 
 class SoundboardPageContainer(QWidget):
     """Soundboard page container — paints colored group backgrounds behind buttons."""
 
-    _COLS = 14
+    _COLS = 19
     _BTN_W = 96
     _BTN_H = 90
     _SPACING = 6
     _MARGIN = 6
-    _TOP = 26        # extra top margin so group titles have space at top
+    _TOP = 6         # top margin (matches grid.setContentsMargins top)
+    _MAX_ROW = 2     # 0-indexed max row index (3 rows → max=2)
+
+    @classmethod
+    def set_size_mode(cls, mode: str):
+        if mode == "small":
+            cls._COLS = 11
+            cls._BTN_W = 82
+            cls._BTN_H = 58
+            cls._SPACING = 3
+            cls._MAX_ROW = 4  # 5 rows → max=4
+        else:
+            cls._COLS = 19
+            cls._BTN_W = 96
+            cls._BTN_H = 90
+            cls._SPACING = 6
+            cls._MAX_ROW = 2  # 3 rows → max=2
 
     _PRESET_COLORS = [
         ("#3A7BFF", "Sininen"),
@@ -3049,36 +3102,92 @@ class SoundboardPageContainer(QWidget):
         self._page_index = page_index
         self._groups: list[dict] = list(groups)
         self._save_cb = save_callback
+        self._group_labels: list = []
 
     def set_groups(self, groups: list):
         self._groups = list(groups)
+        self._rebuild_group_labels()
         self.update()
 
     def get_groups(self) -> list:
         return list(self._groups)
 
-    def _row_rect(self, row_start: int, row_end: int) -> "QRect":
+    def init_group_labels(self):
+        """Call once after all button children have been added to the grid."""
+        self._rebuild_group_labels()
+
+    def _slot_to_rect(self, slot_s: int, slot_e: int):
+        """Return (row_s, row_e, col_s, col_e) for a slot range, layout-aware."""
+        slot_s = max(0, min(54, slot_s))
+        slot_e = max(slot_s, min(54, slot_e))
+        r_s = slot_s // self._COLS
+        r_e = slot_e // self._COLS
+        if r_s == r_e:
+            return r_s, r_e, slot_s % self._COLS, slot_e % self._COLS
+        return r_s, r_e, 0, self._COLS - 1
+
+    def _get_slot_range(self, grp: dict):
+        if "slot_start" in grp:
+            return grp["slot_start"], grp.get("slot_end", grp["slot_start"])
+        # Legacy row/col → slot index (best effort)
+        r_s = grp.get("row_start", 0)
+        c_s = grp.get("col_start", 0)
+        r_e = grp.get("row_end", r_s)
+        c_e = grp.get("col_end", self._COLS - 1)
+        return r_s * self._COLS + c_s, r_e * self._COLS + c_e
+
+    def _rebuild_group_labels(self):
+        from PyQt6.QtWidgets import QLabel as _QL
+        from PyQt6.QtGui import QColor as _QC
+        for lbl in self._group_labels:
+            lbl.hide()
+            lbl.deleteLater()
+        self._group_labels = []
+        for grp in self._groups:
+            name = grp.get("name", "")
+            if not name:
+                continue
+            slot_s, slot_e = self._get_slot_range(grp)
+            r_s, r_e, c_s, c_e = self._slot_to_rect(slot_s, slot_e)
+            color_str = grp.get("color", "#3A7BFF")
+            rect = self._row_rect(r_s, r_e, c_s, c_e)
+            c = _QC(color_str)
+            lbl = _QL(name, self)
+            lbl.setStyleSheet(
+                f"background: rgba({c.red()},{c.green()},{c.blue()},210);"
+                " color: #fff; font-weight: bold; font-size: 7px;"
+                " border-radius: 3px; padding: 0 4px;"
+            )
+            lbl.adjustSize()
+            lbl.move(rect.x() + 2, rect.y() + 2)
+            lbl.raise_()
+            lbl.show()
+            self._group_labels.append(lbl)
+
+    def _row_rect(self, row_start: int, row_end: int,
+                  col_start: int = 0, col_end: int = -1) -> "QRect":
         from PyQt6.QtCore import QRect as _QRect
-        x = self._MARGIN - 4
-        y = self._TOP + row_start * (self._BTN_H + self._SPACING) - 20
-        w = self._COLS * (self._BTN_W + self._SPACING) - self._SPACING + 8
-        h = (row_end - row_start + 1) * (self._BTN_H + self._SPACING) - self._SPACING + 24
-        return _QRect(x, max(0, y), w, h)
+        if col_end < 0:
+            col_end = self._COLS - 1
+        pad = 4
+        x = self._MARGIN + col_start * (self._BTN_W + self._SPACING) - pad // 2
+        y = self._TOP + row_start * (self._BTN_H + self._SPACING) - pad // 2
+        w = (col_end - col_start + 1) * (self._BTN_W + self._SPACING) - self._SPACING + pad
+        h = (row_end - row_start + 1) * (self._BTN_H + self._SPACING) - self._SPACING + pad
+        return _QRect(max(0, x), max(0, y), w, h)
 
     def paintEvent(self, event):
         super().paintEvent(event)
         if not self._groups:
             return
-        from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QFontMetrics
-        from PyQt6.QtCore import QRect
+        from PyQt6.QtGui import QPainter, QColor, QPen
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         for grp in self._groups:
-            row_start = max(0, grp.get("row_start", 0))
-            row_end = min(3, max(row_start, grp.get("row_end", row_start)))
+            slot_s, slot_e = self._get_slot_range(grp)
+            r_s, r_e, c_s, c_e = self._slot_to_rect(slot_s, slot_e)
             color_str = grp.get("color", "#3A7BFF")
-            name = grp.get("name", "")
-            rect = self._row_rect(row_start, row_end)
+            rect = self._row_rect(r_s, r_e, c_s, c_e)
             color = QColor(color_str)
             bg = QColor(color.red(), color.green(), color.blue(), 38)
             painter.fillRect(rect, bg)
@@ -3086,17 +3195,6 @@ class SoundboardPageContainer(QWidget):
             pen.setWidth(1)
             painter.setPen(pen)
             painter.drawRect(rect)
-            if name:
-                font = QFont()
-                font.setBold(True)
-                font.setPointSize(7)
-                painter.setFont(font)
-                fm = QFontMetrics(font)
-                tw = fm.horizontalAdvance(name) + 10
-                badge_rect = QRect(rect.x() + 4, rect.y(), tw, 16)
-                painter.fillRect(badge_rect, QColor(color.red(), color.green(), color.blue(), 200))
-                painter.setPen(QColor(255, 255, 255, 230))
-                painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, name)
 
     def open_groups_dialog(self):
         from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QListWidget,
@@ -3140,9 +3238,8 @@ class SoundboardPageContainer(QWidget):
         def _refresh_list():
             list_w.clear()
             for grp in self._groups:
-                item = QListWidgetItem(
-                    f"Rivit {grp['row_start']+1}–{grp['row_end']+1}: {grp['name']}"
-                )
+                s_s, s_e = self._get_slot_range(grp)
+                item = QListWidgetItem(f"Slotit {s_s+1}–{s_e+1}: {grp['name']}")
                 item.setForeground(QColor(grp.get("color", "#3A7BFF")))
                 list_w.addItem(item)
 
@@ -3165,19 +3262,20 @@ class SoundboardPageContainer(QWidget):
             sl.addWidget(QLabel("Nimi:"))
             sl.addWidget(name_ed)
 
-            row_s_combo = QComboBox()
-            row_e_combo = QComboBox()
-            for r in range(4):
-                row_s_combo.addItem(f"Rivi {r + 1}", r)
-                row_e_combo.addItem(f"Rivi {r + 1}", r)
-            row_s_combo.setCurrentIndex(existing.get("row_start", 0) if existing else 0)
-            row_e_combo.setCurrentIndex(existing.get("row_end", 0) if existing else 0)
-            row_s_combo.setStyleSheet(_input_ss)
-            row_e_combo.setStyleSheet(_input_ss)
-            sl.addWidget(QLabel("Alkurivi:"))
-            sl.addWidget(row_s_combo)
-            sl.addWidget(QLabel("Loppurivi:"))
-            sl.addWidget(row_e_combo)
+            from PyQt6.QtWidgets import QSpinBox as _QSpinBox
+            _cur_s, _cur_e = self._get_slot_range(existing) if existing else (0, 54)
+            slot_s_spin = _QSpinBox()
+            slot_s_spin.setRange(1, 55)
+            slot_s_spin.setValue(_cur_s + 1)
+            slot_s_spin.setStyleSheet(_input_ss)
+            slot_e_spin = _QSpinBox()
+            slot_e_spin.setRange(1, 55)
+            slot_e_spin.setValue(_cur_e + 1)
+            slot_e_spin.setStyleSheet(_input_ss)
+            sl.addWidget(QLabel("Alku-slotti (1–55):"))
+            sl.addWidget(slot_s_spin)
+            sl.addWidget(QLabel("Loppu-slotti (1–55):"))
+            sl.addWidget(slot_e_spin)
 
             color_combo = QComboBox()
             for hex_c, lbl in self._PRESET_COLORS:
@@ -3197,11 +3295,13 @@ class SoundboardPageContainer(QWidget):
             sl.addWidget(sbb)
 
             if sub.exec() == QDialog.DialogCode.Accepted:
+                s_s = slot_s_spin.value() - 1
+                s_e = max(s_s, slot_e_spin.value() - 1)
                 return {
                     "name": name_ed.text().strip() or "Ryhmä",
                     "color": color_combo.currentData(),
-                    "row_start": row_s_combo.currentData(),
-                    "row_end": max(row_s_combo.currentData(), row_e_combo.currentData()),
+                    "slot_start": s_s,
+                    "slot_end": s_e,
                 }
             return None
 
@@ -3825,26 +3925,42 @@ class App(QWidget):
         text_row.addLayout(lang_col)
 
         self.textbox = QTextEdit()
-        self.textbox.setPlaceholderText("Type the phrase to speak…\nOr press 🎤 to record.")
+        self.textbox.setPlaceholderText("Type the phrase to speak…\nOr press 🎤 Listen to record.")
         self.textbox.setMinimumHeight(90)
         text_row.addWidget(self.textbox, 1)
         layout.addLayout(text_row, 1)
 
-        # Record button — floating overlay inside textbox
-        self.record_button = QPushButton("🎤", self.textbox)
-        self.record_button.setFixedSize(38, 38)
-        self.record_button.setToolTip("Record")
-        self.record_button.clicked.connect(self.on_record_toggle)
-        self.record_button.setStyleSheet(
-            "QPushButton { background: rgba(18,18,18,210); border: 1px solid #333333;"
-            " border-radius: 10px; font-size: 18px; padding: 0; }"
-            "QPushButton:hover { background: rgba(58,123,255,180); border-color: #3A7BFF; }"
-            "QPushButton:disabled { opacity: 0.3; }"
+        # Speak button — floating overlay inside textbox, bottom-right
+        self.speak_button = QPushButton("🔊  Speak", self.textbox)
+        self.speak_button.setFixedSize(92, 32)
+        self.speak_button.setToolTip("Speak this text (Ctrl+Enter)")
+        self.speak_button.clicked.connect(self.on_speak)
+        self.speak_button.setStyleSheet(
+            "QPushButton { background: rgba(20,28,60,215); border: 1px solid #3A7BFF;"
+            " border-radius: 8px; color: #88AAFF; font-size: 12px; font-weight: 700; padding: 0; }"
+            "QPushButton:hover { background: rgba(58,123,255,180); color: #fff; border-color: #9A4DFF; }"
+            "QPushButton:pressed { background: #1a1a1a; }"
+            "QPushButton:disabled { background: rgba(20,20,20,180); color: #444; border-color: #222; }"
         )
-        self.record_button.move(self.textbox.width() - 44, self.textbox.height() - 44)
-        self._rec_filter = _TextboxRecordBtnFilter(self.record_button)
+        self.speak_button.move(self.textbox.width() - 98, self.textbox.height() - 38)
+
+        # Favorite button — floating overlay inside textbox, bottom-left
+        self.favorite_button = QPushButton("⭐  Favorite", self.textbox)
+        self.favorite_button.setFixedSize(98, 32)
+        self.favorite_button.setToolTip("Save as favorite")
+        self.favorite_button.clicked.connect(self.toggle_favorite)
+        self.favorite_button.setStyleSheet(
+            "QPushButton { background: rgba(26,18,0,215); border: 1px solid #5a4200;"
+            " border-radius: 8px; color: #AA8800; font-size: 12px; font-weight: 700; padding: 0; }"
+            "QPushButton:hover { border-color: #FFD700; color: #FFE84D; background: rgba(60,40,0,200); }"
+        )
+        self.favorite_button.move(6, self.textbox.height() - 38)
+
+        # Install resize filter for both textbox overlay buttons
+        self._rec_filter = _TextboxOverlayFilter(self.speak_button, self.favorite_button)
         self.textbox.installEventFilter(self._rec_filter)
-        self.record_button.raise_()
+        self.speak_button.raise_()
+        self.favorite_button.raise_()
 
         # Hidden widgets — needed by app logic but not shown in this card
         self.backend_combo = QComboBox()
@@ -3855,13 +3971,14 @@ class App(QWidget):
         self.test_audio_button = QPushButton("🧪  Test")
         self.test_audio_button.clicked.connect(self.on_test_audio)
 
-        # Button row: Speak | Favorite | Listen
+        # Button row: 🎤 Listen | 👂 Live Listen
         button_row = QHBoxLayout()
         button_row.setSpacing(8)
 
-        self.speak_button = QPushButton("🔊  Speak")
-        self.speak_button.clicked.connect(self.on_speak)
-        self.speak_button.setStyleSheet(
+        self.record_button = QPushButton("🎤  Listen")
+        self.record_button.setToolTip("Record from mic — Whisper transcribes and translates")
+        self.record_button.clicked.connect(self.on_record_toggle)
+        self.record_button.setStyleSheet(
             "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
             " stop:0 #3A7BFF, stop:1 #9A4DFF);"
             " border: 1px solid #3A7BFF; border-radius: 8px; color: #fff;"
@@ -3871,19 +3988,9 @@ class App(QWidget):
             "QPushButton:pressed { background: #1a1a1a; border-color: #3A7BFF; }"
             "QPushButton:disabled { background: #1A1A1A; color: #444444; border-color: #222222; }"
         )
-        button_row.addWidget(self.speak_button, 2)
+        button_row.addWidget(self.record_button, 2)
 
-        self.favorite_button = QPushButton("⭐  Favorite")
-        self.favorite_button.clicked.connect(self.toggle_favorite)
-        self.favorite_button.setStyleSheet(
-            "QPushButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-            " stop:0 #2a2000, stop:1 #1c1600);"
-            " border: 1px solid #5a4200; border-radius: 8px; color: #FFD700; font-weight: 600; }"
-            "QPushButton:hover { border-color: #FFD700; color: #FFE84D; background: #2e2200; }"
-        )
-        button_row.addWidget(self.favorite_button, 1)
-
-        self.listen_button = QPushButton("👂  Listen")
+        self.listen_button = QPushButton("👂  Live Listen")
         self.listen_button.setCheckable(True)
         self.listen_button.clicked.connect(self.toggle_wake_listener)
         self.listen_button.setStyleSheet(
@@ -3945,7 +4052,27 @@ class App(QWidget):
 
     # ---- Soundboard group overlay container ----
 
+    def _sb_rebuild(self, mode: str):
+        """Rebuild soundboard grid with new icon size mode."""
+        self._sb_stop_playback()
+        SoundboardButton.set_size_mode(mode)
+        SoundboardPageContainer.set_size_mode(mode)
+        sb_idx = next(
+            (i for i in range(self._bottom_tabs.count())
+             if "Soundboard" in self._bottom_tabs.tabText(i)), None)
+        if sb_idx is None:
+            return
+        self._soundboard_buttons.clear()
+        self._sb_page_containers.clear()
+        self._bottom_tabs.removeTab(sb_idx)
+        new_card = self._build_soundboard_card()
+        self._bottom_tabs.insertTab(sb_idx, new_card, "  Soundboard  ")
+        self._bottom_tabs.setCurrentIndex(sb_idx)
+
     def _build_soundboard_card(self) -> QWidget:
+        _mode = self.settings.get("sb_icon_size", "large")
+        SoundboardButton.set_size_mode(_mode)
+        SoundboardPageContainer.set_size_mode(_mode)
         frame = QWidget()
         frame.setObjectName("card")
         outer = QVBoxLayout(frame)
@@ -3987,7 +4114,7 @@ class App(QWidget):
 
         self._sb_edit_btn = QPushButton("Edit")
         self._sb_edit_btn.setCheckable(True)
-        self._sb_edit_btn.setFixedSize(46, 24)
+        self._sb_edit_btn.setFixedHeight(24)
         self._sb_edit_btn.setToolTip("Muokkaustila: vedä kuva/ääni napin päälle tai oikeaklikkaa")
         self._sb_edit_btn.setStyleSheet(
             "QPushButton { background: #1E1E2A; color: #666688; border: 1px solid #333344;"
@@ -4024,6 +4151,33 @@ class App(QWidget):
         _corner_lay.addWidget(self._sb_vol_slider)
         _corner_lay.addWidget(self._sb_vol_label)
 
+        _sb_sz_mode = _mode
+        _sb_sz_btn = QPushButton("L" if _sb_sz_mode != "small" else "S")
+        _sb_sz_btn.setFixedHeight(24)
+        _sb_sz_btn.setMinimumWidth(28)
+        _sb_sz_btn.setToolTip(
+            "Soundboard kuvakkeiden koko\n"
+            "L = Suuret (19×3 riviä)\n"
+            "S = Pienet (11×5 riviä, mahtuu kaikki 55)\n"
+            "Klikkaa vaihtaaksesi"
+        )
+        _sb_sz_btn.setStyleSheet(
+            "QPushButton { background: #252535; color: #DDDDFF; border: 1px solid #444466;"
+            " border-radius: 4px; font-size: 10px; font-weight: 700; padding: 0 6px; }"
+            "QPushButton:hover { background: #303048; border-color: #9A4DFF; color: #FFFFFF; }"
+            "QPushButton:pressed { background: #0e0e1e; }"
+        )
+
+        def _toggle_sb_size():
+            cur = self.settings.get("sb_icon_size", "large")
+            new_mode = "small" if cur == "large" else "large"
+            self.settings["sb_icon_size"] = new_mode
+            save_settings(self.settings)
+            self._sb_rebuild(new_mode)
+
+        _sb_sz_btn.clicked.connect(_toggle_sb_size)
+        _corner_lay.addWidget(_sb_sz_btn)
+
         add_page_btn = QPushButton("+")
         add_page_btn.setFixedWidth(26)
         add_page_btn.setToolTip("Lisää sivu (max 10)")
@@ -4059,9 +4213,8 @@ class App(QWidget):
         page_btns: list[SoundboardButton] = []
         container = SoundboardPageContainer(pi, page_data.get("groups", []), self._save_soundboard)
         grid = QGridLayout(container)
-        grid.setSpacing(6)
-        # Extra top margin (26px) gives space for group title badges
-        grid.setContentsMargins(6, 26, 6, 6)
+        grid.setSpacing(SoundboardPageContainer._SPACING)
+        grid.setContentsMargins(6, 6, 6, 6)
 
         for i in range(55):
             btn = SoundboardButton(pi, i)
@@ -4072,12 +4225,14 @@ class App(QWidget):
             btn.swap_requested.connect(self._sb_swap_handler)
             btn.bulk_import_requested.connect(self._sb_bulk_import_handler)
             page_btns.append(btn)
-            row, col = divmod(i, 14)
+            row, col = divmod(i, SoundboardPageContainer._COLS)
             grid.addWidget(btn, row, col)
 
         # Minimum width forces the grid to keep full size so QScrollArea can scroll horizontally
-        _min_w = 14 * (96 + 6) - 6 + 12
+        _sp = SoundboardPageContainer
+        _min_w = _sp._COLS * (_sp._BTN_W + _sp._SPACING) - _sp._SPACING + 2 * _sp._MARGIN
         container.setMinimumWidth(_min_w)
+        container.init_group_labels()
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -5170,17 +5325,21 @@ class App(QWidget):
         self._start_mic_monitor()
 
     def register_hotkey(self):
-        # Unregister previous hotkey first (if any)
         if self._registered_hotkey:
             try:
-                keyboard.remove_hotkey(self._registered_hotkey)
+                if _keyboard_mod:
+                    _keyboard_mod.remove_hotkey(self._registered_hotkey)
             except Exception:
                 pass
             self._registered_hotkey = None
 
+        if _keyboard_mod is None:
+            self.append_status("Global hotkey not available on this platform.")
+            return
+
         hk = self.settings.get("hotkey", "ctrl+alt+space")
         try:
-            self._registered_hotkey = keyboard.add_hotkey(hk, self.on_hotkey_triggered)
+            self._registered_hotkey = _keyboard_mod.add_hotkey(hk, self.on_hotkey_triggered)
         except Exception as exc:
             self.append_status(f"Hotkey registration failed: {exc}")
 
@@ -5393,20 +5552,22 @@ class App(QWidget):
         )
         self.recording_thread.start()
 
-        self.record_button.setText("🔴")
+        self.record_button.setText("🔴  Stop")
         self.record_button.setStyleSheet(
-            "QPushButton { background: rgba(160,40,40,220); border: 1px solid #cc4444;"
-            " border-radius: 8px; font-size: 18px; padding: 0; }"
+            "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
+            " stop:0 #aa2020, stop:1 #cc3030);"
+            " border: 1px solid #cc4444; border-radius: 8px; color: #fff;"
+            " font-size: 13px; font-weight: 700; padding: 8px 18px; }"
         )
         self.append_status(f"🎤 Recording from: {input_device_name}")
 
     def _stop_recording(self):
         self.is_recording = False
         self.record_button.setEnabled(False)
-        self.record_button.setText("⏳")
+        self.record_button.setText("⏳  Processing…")
         self.record_button.setStyleSheet(
-            "QPushButton { background: rgba(60,60,60,200); border: 1px solid #555;"
-            " border-radius: 8px; font-size: 18px; padding: 0; }"
+            "QPushButton { background: #1e1e1e; border: 1px solid #555555;"
+            " border-radius: 8px; color: #888888; font-size: 13px; font-weight: 700; padding: 8px 18px; }"
         )
 
     def do_recording(self, input_device_index: int, input_device_name: str):
@@ -5508,12 +5669,16 @@ class App(QWidget):
         if not self.wake_listener.is_running():
             self._start_mic_monitor()
         self.record_button.setEnabled(True)
-        self.record_button.setText("🎤")
+        self.record_button.setText("🎤  Listen")
         self.record_button.setStyleSheet(
-            "QPushButton { background: rgba(40,52,80,200); border: 1px solid #4f5f7f;"
-            " border-radius: 8px; font-size: 18px; padding: 0; }"
-            "QPushButton:hover { background: rgba(80,100,150,220); }"
-            "QPushButton:disabled { opacity: 0.4; }"
+            "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
+            " stop:0 #3A7BFF, stop:1 #9A4DFF);"
+            " border: 1px solid #3A7BFF; border-radius: 8px; color: #fff;"
+            " font-size: 13px; font-weight: 700; padding: 8px 18px; letter-spacing: 0.5px; }"
+            "QPushButton:hover { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
+            " stop:0 #5590FF, stop:1 #B060FF); border-color: #9A4DFF; }"
+            "QPushButton:pressed { background: #1a1a1a; border-color: #3A7BFF; }"
+            "QPushButton:disabled { background: #1A1A1A; color: #444444; border-color: #222222; }"
         )
 
     def _tick_mic_meter(self):
@@ -6766,7 +6931,7 @@ def open_settings_dialog(parent_app: "App") -> None:
         ("sounddevice",    "sounddevice",     True,  "Äänilaitteet"),
         ("numpy",          "numpy",           True,  "Audion käsittely"),
         ("scipy",          "scipy",           True,  "Resampling"),
-        ("keyboard",       "keyboard",        True,  "Global hotkey"),
+        ("keyboard",       "keyboard",        False, "Global hotkey (Windows/Linux)"),
         ("openai",         "openai",          True,  "Whisper + GPT"),
         ("pyttsx3",        "pyttsx3",         True,  "Paikallinen TTS"),
         ("edge_tts",       "edge-tts",        True,  "Edge TTS"),
@@ -7591,7 +7756,7 @@ class SetupWizard(QDialog):
             ("sounddevice",     "sounddevice",      True,  "Äänilaitteet"),
             ("numpy",           "numpy",            True,  "Audion käsittely"),
             ("scipy",           "scipy",            True,  "Resampling"),
-            ("keyboard",        "keyboard",         True,  "Global hotkey"),
+            ("keyboard",        "keyboard",         False, "Global hotkey (Windows/Linux)"),
             ("openai",          "openai",           True,  "Whisper + GPT"),
             ("pyttsx3",         "pyttsx3",          True,  "Paikallinen TTS"),
             ("edge_tts",        "edge-tts",         True,  "Edge TTS"),
@@ -9123,7 +9288,7 @@ if __name__ == "__main__":
     # Match App.__init__ geometry exactly so splash and main window occupy the same spot
     _WIN_X, _WIN_Y, _WIN_W, _WIN_H = 100, 100, 1320, 637
 
-    splash_path = os.path.join(ASSETS_PATH, "juhalempiainensoftware.png")
+    splash_path = os.path.join(ASSETS_PATH, "BluexDEV_logo.png")
     splash = None
     if os.path.exists(splash_path):
         logo = QPixmap(splash_path)
