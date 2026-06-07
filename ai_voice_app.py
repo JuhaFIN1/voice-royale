@@ -267,7 +267,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.49"
+APP_VERSION = "1.3.50"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -7312,6 +7312,30 @@ def open_settings_dialog(parent_app: "App") -> None:
 
     f6.addRow(_header("Python-paketit"))
 
+    def _pip_install_pkg(pip_name: str, icon_lbl, name_lbl, install_btn):
+        def _run():
+            QTimer.singleShot(0, lambda: install_btn.setText("Asennetaan…"))
+            QTimer.singleShot(0, lambda: install_btn.setEnabled(False))
+            import subprocess as _sp
+            ret = _sp.run(
+                [sys.executable, "-m", "pip", "install", pip_name],
+                capture_output=True, text=True
+            )
+            ok = ret.returncode == 0
+
+            def _done():
+                if ok:
+                    icon_lbl.setText("✅")
+                    icon_lbl.setStyleSheet("font-size: 14px; background: transparent; color: #7fc97f;")
+                    name_lbl.setStyleSheet("color: #e6edf3; background: transparent;")
+                    install_btn.setText("Asennettu ✓")
+                else:
+                    install_btn.setText("Epäonnistui")
+                    install_btn.setEnabled(True)
+                    parent_app.append_status(f"pip install {pip_name} epäonnistui:\n{ret.stderr[-300:]}")
+            QTimer.singleShot(0, _done)
+        threading.Thread(target=_run, daemon=True).start()
+
     for import_name, pip_name, required, desc in _PKG_LIST:
         ok, ver = _pkg_status(import_name, pip_name)
         row_w = QWidget()
@@ -7338,6 +7362,21 @@ def open_settings_dialog(parent_app: "App") -> None:
         row_h.addWidget(icon_lbl)
         row_h.addWidget(name_lbl)
         row_h.addWidget(desc_lbl, 1)
+
+        if not ok and not required:
+            _install_btn = _QPushButton("Asenna")
+            _install_btn.setFixedWidth(72)
+            _install_btn.setStyleSheet(
+                "QPushButton { background: #14281e; border: 1px solid #1a5a30; border-radius: 5px;"
+                " color: #00cc6a; padding: 3px 6px; font-size: 11px; font-weight: 700; }"
+                "QPushButton:hover { border-color: #00FF6A; color: #5AFFAA; }"
+                "QPushButton:disabled { background: #111; color: #444; border-color: #222; }"
+            )
+            _install_btn.clicked.connect(
+                lambda _checked, pn=pip_name, il=icon_lbl, nl=name_lbl, ib=_install_btn:
+                    _pip_install_pkg(pn, il, nl, ib)
+            )
+            row_h.addWidget(_install_btn)
 
         label_txt = "Pakollinen" if required else "Valinnainen"
         f6.addRow(_lbl(label_txt + ":"), row_w)
