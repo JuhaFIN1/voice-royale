@@ -294,6 +294,9 @@ DEFAULT_SETTINGS = {
     "stream_deck_mapping": {},   # tyhjä = käytä DEFAULT_MAPPING
     "soundboard_volume": 1.0,
     "sb_icon_size": "large",
+    "ha_url": "",
+    "ha_token": "",
+    "ha_players": [],
     "voice_fx_output_device": None,
     "voice_fx_monitor_device": None,
     "voice_fx_hear_myself": False,
@@ -1195,6 +1198,40 @@ class StreamDeckHttpServer:
                         except Exception:
                             pass
                     self._json({"image": img_b64})
+                elif self.path.startswith("/soundboard/audio/"):
+                    # Serve raw audio file for HA media_player playback
+                    parts = self.path[18:].strip("/").split("/")
+                    if len(parts) == 2:
+                        try:
+                            pi, si = int(parts[0]), int(parts[1])
+                            page_slots = app._get_page_root_slots(pi)
+                            file_path = page_slots[si].get("file", "") if si < len(page_slots) else ""
+                            if file_path and os.path.exists(file_path):
+                                with open(file_path, "rb") as _af:
+                                    body = _af.read()
+                                _ext = os.path.splitext(file_path)[1].lower().lstrip(".")
+                                _mime = {"mp3": "audio/mpeg", "wav": "audio/wav",
+                                         "ogg": "audio/ogg", "flac": "audio/flac"}.get(_ext, "audio/mpeg")
+                                self.send_response(200)
+                                self.send_header("Content-Type", _mime)
+                                self.send_header("Content-Length", str(len(body)))
+                                self._cors()
+                                self.end_headers()
+                                self.wfile.write(body)
+                                return
+                        except Exception:
+                            pass
+                    self.send_response(404)
+                    self._cors()
+                    self.end_headers()
+                elif self.path == "/ha_test_audio":
+                    body = _ha_serve_test_beep()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "audio/wav")
+                    self.send_header("Content-Length", str(len(body)))
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(body)
                 else:
                     self.send_response(404)
                     self._cors()
@@ -1228,7 +1265,7 @@ class StreamDeckHttpServer:
         try:
             import http.server as _hs
             self._server = server_ref._server = _hs.HTTPServer(
-                ("127.0.0.1", self.PORT), _Handler
+                ("0.0.0.0", self.PORT), _Handler
             )
             status_cb(f"Stream Deck: HTTP ready on port {self.PORT}")
             self._server.serve_forever()
@@ -1236,6 +1273,72 @@ class StreamDeckHttpServer:
             status_cb(f"Stream Deck: port {self.PORT} busy — plugin won't connect")
         except Exception as e:
             status_cb(f"Stream Deck HTTP: {e}")
+
+
+# =========================
+# HOME ASSISTANT HELPERS
+# =========================
+
+def _get_local_ip() -> str:
+    """Return the machine's LAN IP (the address HA can reach us on)."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
+def _make_test_beep_wav() -> bytes:
+    """Generate a short 440 Hz beep as WAV bytes."""
+    import math, struct, io as _io, wave as _wave
+    sr, dur, freq = 16000, 0.6, 440
+    n = int(sr * dur)
+    samples = [int(32767 * 0.5 * math.sin(2 * math.pi * freq * i / sr)) for i in range(n)]
+    buf = _io.BytesIO()
+    with _wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(struct.pack(f"<{n}h", *samples))
+    return buf.getvalue()
+
+
+def _ha_api(method: str, path: str, settings: dict, json_data: dict = None) -> dict:
+    """Make an authenticated Home Assistant REST API call."""
+    ha_url = settings.get("ha_url", "").rstrip("/")
+    ha_token = settings.get("ha_token", "")
+    if not ha_url:
+        raise RuntimeError("HA URL ei asetettu")
+    if not ha_token:
+        raise RuntimeError("HA token ei asetettu")
+    headers = {
+        "Authorization": f"Bearer {ha_token}",
+        "Content-Type": "application/json",
+    }
+    url = f"{ha_url}/api{path}"
+    if method.upper() == "GET":
+        r = requests.get(url, headers=headers, timeout=6)
+    else:
+        r = requests.post(url, headers=headers, json=json_data or {}, timeout=6)
+    r.raise_for_status()
+    try:
+        return r.json()
+    except Exception:
+        return {}
+
+
+_HA_TEST_BEEP: bytes = b""   # cached lazily
+
+
+def _ha_serve_test_beep() -> bytes:
+    global _HA_TEST_BEEP
+    if not _HA_TEST_BEEP:
+        _HA_TEST_BEEP = _make_test_beep_wav()
+    return _HA_TEST_BEEP
 
 
 # =========================
@@ -1438,6 +1541,16 @@ class SoundboardButton(QWidget):
         "QToolButton:pressed { background: #0A0A1A; border: 2px solid #3A7BFF; }"
         "QToolButton:focus { outline: none; }"
     )
+    _STYLE_HA = (
+        "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+        " stop:0 #001A1A, stop:1 #000E0E);"
+        " border: 2px solid #00B3B3; border-radius: 10px;"
+        " color: #00E5E5; font-size: 10px; font-weight: 700;"
+        " padding-bottom: 2px; }"
+        "QToolButton:hover { border: 2px solid #00FFFF; color: #80FFFF; }"
+        "QToolButton:pressed { background: #000E0E; border: 2px solid #009999; }"
+        "QToolButton:focus { outline: none; }"
+    )
 
     @classmethod
     def set_size_mode(cls, mode: str):
@@ -1451,7 +1564,7 @@ class SoundboardButton(QWidget):
             cls._FONT_SIZE = 10
         fs = cls._FONT_SIZE
         for attr in ("_STYLE_IDLE", "_STYLE_PLAY", "_STYLE_DRAG", "_STYLE_LINK",
-                     "_STYLE_FOLDER", "_STYLE_FOLDER_DRAG", "_STYLE_BACK"):
+                     "_STYLE_FOLDER", "_STYLE_FOLDER_DRAG", "_STYLE_BACK", "_STYLE_HA"):
             s = getattr(cls, attr)
             for old in (7, 8, 9, 10, 11):
                 s = s.replace(f"font-size: {old}px", f"font-size: {fs}px")
@@ -1789,6 +1902,12 @@ class SoundboardButton(QWidget):
             self._btn.setText(display)
             self._btn.setToolTip(f"→ Sivu: {link_name}")
             self._btn.setStyleSheet(self._STYLE_LINK)
+        elif self._data.get("ha_players"):
+            self._btn.setIcon(QIcon(self._make_icon_pixmap(_isz)))
+            self._btn.setText(display)
+            ha_names = ", ".join(self._data.get("ha_players", []))
+            self._btn.setToolTip(f"HA: {ha_names}\n{name}")
+            self._btn.setStyleSheet(self._STYLE_HA)
         else:
             self._btn.setIcon(QIcon(self._make_icon_pixmap(_isz)))
             self._btn.setText(display)
@@ -1811,14 +1930,80 @@ class SoundboardButton(QWidget):
         menu.addAction("Link to Page…", self._assign_page_link)
         if not self._data.get("_back") and not self._data.get("subfolder"):
             menu.addAction("Kansioksi…", self._set_as_folder)
+        if not self._data.get("_back"):
+            menu.addSeparator()
+            ha_label = "HA Media Players… (aktiivinen)" if self._data.get("ha_players") else "HA Media Players…"
+            menu.addAction(ha_label, self._assign_ha_players)
         _name = self._data.get("name", "")
         has_content = bool(self._data.get("file") or self._data.get("image")
                           or self._data.get("link_page_name") or self._data.get("subfolder")
+                          or self._data.get("ha_players")
                           or (_name and not _name.startswith("Slot ")))
         if has_content:
             menu.addSeparator()
             menu.addAction("Clear", self._clear)
         menu.exec(self.mapToGlobal(pos))
+
+    def _assign_ha_players(self):
+        """Open dialog to assign HA media_player entities to this soundboard slot."""
+        # Walk up widget tree to find App and get settings
+        p = self.parent()
+        app = None
+        while p is not None:
+            if hasattr(p, "settings"):
+                app = p
+                break
+            p = p.parent()
+        ha_players_cfg = app.settings.get("ha_players", []) if app else []
+        if not ha_players_cfg:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, "HA ei konfiguroitu",
+                "Määritä ensin Home Assistant -yhteys Asetukset → Home Assistant -välilehdellä."
+            )
+            return
+
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QDialogButtonBox, QCheckBox, QLabel
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"HA Media Players — {self._data.get('name', 'Slot')}")
+        dlg.resize(380, 300)
+        dlg.setStyleSheet(
+            "QDialog { background: #0d1117; color: #c9d1d9; }"
+            "QCheckBox { color: #c9d1d9; font-size: 13px; padding: 4px; }"
+            "QPushButton { background: #21262d; border: 1px solid #30363d; border-radius: 5px;"
+            " color: #c9d1d9; padding: 6px 16px; font-size: 12px; }"
+            "QPushButton:hover { background: #388bfd; border-color: #388bfd; }"
+            "QLabel { color: #8b949e; font-size: 11px; }"
+        )
+        vbox = QVBoxLayout(dlg)
+        vbox.setContentsMargins(16, 12, 16, 12)
+        vbox.setSpacing(6)
+        lbl = QLabel("Valitse HA media_player -laitteet joille ääni lähetetään:")
+        lbl.setStyleSheet("color: #c9d1d9; font-size: 12px; font-weight: 600; padding-bottom: 4px;")
+        vbox.addWidget(lbl)
+
+        current_players = set(self._data.get("ha_players", []))
+        checkboxes = []
+        for cfg in ha_players_cfg:
+            eid = cfg.get("entity_id", "")
+            friendly = cfg.get("name", "") or eid
+            cb = QCheckBox(f"{friendly}  ({eid})")
+            cb.setChecked(eid in current_players)
+            cb.setProperty("entity_id", eid)
+            vbox.addWidget(cb)
+            checkboxes.append(cb)
+
+        vbox.addStretch()
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        vbox.addWidget(btns)
+
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            selected = [cb.property("entity_id") for cb in checkboxes if cb.isChecked()]
+            self._data["ha_players"] = selected
+            self._refresh()
+            self.data_changed.emit(self.slot_index)
 
     def _assign_sound(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -5779,6 +5964,46 @@ class App(QWidget):
             self.append_status(f"Soundboard: sivu '{link_name}' ei löydy")
             return
 
+        # ── HA Media Player path ──────────────────────────────────────────
+        ha_entity_ids = data.get("ha_players", [])
+        if ha_entity_ids:
+            path = data.get("file", "")
+            if not path or not os.path.exists(path):
+                self.append_status(f"HA Soundboard p{page_index+1} slot {slot_index+1}: ei ääntä (oikeaklikkaa)")
+                return
+            local_ip = _get_local_ip()
+            audio_url = (f"http://{local_ip}:{StreamDeckHttpServer.PORT}"
+                         f"/soundboard/audio/{page_index}/{slot_index}")
+            vol = max(0.0, self.settings.get("soundboard_volume", 1.0) * data.get("volume", 1.0))
+
+            def _play_ha():
+                QTimer.singleShot(0, lambda: btn.set_playing(True))
+                errors = []
+                for eid in ha_entity_ids:
+                    try:
+                        _ha_api("POST", "/services/media_player/play_media", self.settings, {
+                            "entity_id": eid,
+                            "media_content_id": audio_url,
+                            "media_content_type": "music",
+                        })
+                    except Exception as e:
+                        errors.append(f"{eid}: {e}")
+                if errors:
+                    self.append_status("HA virhe: " + "; ".join(errors))
+                else:
+                    self.append_status(f"HA: soitetaan {', '.join(ha_entity_ids)}")
+                # Reset button after estimated play time + buffer
+                try:
+                    import wave as _w
+                    with _w.open(path, "rb") as wf:
+                        dur = wf.getnframes() / wf.getframerate()
+                except Exception:
+                    dur = 3.0
+                QTimer.singleShot(int((dur + 1.0) * 1000), lambda: btn.set_playing(False))
+
+            threading.Thread(target=_play_ha, daemon=True).start()
+            return
+
         path = data.get("file", "")
         if not path or not os.path.exists(path):
             self.append_status(f"Soundboard p{page_index+1} slot {slot_index+1}: ei ääntä (oikeaklikkaa)")
@@ -7521,11 +7746,190 @@ def open_settings_dialog(parent_app: "App") -> None:
         lambda: del_btn.setEnabled(bool(file_list.selectedItems()))
     )
 
+    # ── Home Assistant tab ───────────────────────────────────────────────
+    from PyQt6.QtWidgets import QScrollArea as _QSA2, QListWidget as _LW2, QListWidgetItem as _LWI2
+
+    ha_widget = QWidget()
+    ha_vbox = QVBoxLayout(ha_widget)
+    ha_vbox.setContentsMargins(20, 14, 20, 14)
+    ha_vbox.setSpacing(8)
+
+    ha_vbox.addWidget(_header("Home Assistant — yhteys"))
+
+    ha_url_row = QHBoxLayout()
+    ha_url_row.addWidget(_lbl("HA URL:"))
+    ha_url_edit = QLineEdit(settings.get("ha_url", ""))
+    ha_url_edit.setPlaceholderText("http://homeassistant.local:8123")
+    ha_url_row.addWidget(ha_url_edit, 1)
+    ha_vbox.addLayout(ha_url_row)
+
+    ha_token_row = QHBoxLayout()
+    ha_token_row.addWidget(_lbl("Long-lived token:"))
+    ha_token_edit = QLineEdit(settings.get("ha_token", ""))
+    ha_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+    ha_token_edit.setPlaceholderText("eyJ0eXAiOiJKV1QiLCJhbGc…")
+    ha_token_row.addWidget(ha_token_edit, 1)
+    ha_vbox.addLayout(ha_token_row)
+
+    ha_connect_btn = QPushButton("🔌  Testaa yhteys & hae soittimet")
+    ha_status_lbl = QLabel("")
+    ha_status_lbl.setStyleSheet("font-size: 12px; padding: 2px 0;")
+    ha_vbox.addWidget(ha_connect_btn)
+    ha_vbox.addWidget(ha_status_lbl)
+
+    ha_vbox.addWidget(_header("Media Players"))
+    ha_vbox.addWidget(_desc(
+        "Rastita haluamasi laitteet ja anna niille lyhyt nimi. "
+        "'▶ Testi' soittaa piipauksen kyseiselle laitteelle."
+    ))
+
+    ha_players_list = _LW2()
+    ha_players_list.setMinimumHeight(200)
+    ha_players_list.setStyleSheet(
+        "QListWidget { background: #0d0d1a; border: 1px solid #2a2a3a; border-radius: 6px; }"
+        "QListWidget::item { padding: 2px 4px; }"
+        "QListWidget::item:selected { background: transparent; }"
+    )
+    ha_vbox.addWidget(ha_players_list, 1)
+
+    _ha_fetched_players: list = []   # [{entity_id, friendly_name}] from HA
+
+    def _ha_make_player_row(entity_id: str, friendly: str, saved_name: str, checked: bool) -> QWidget:
+        row_w = QWidget()
+        row_w.setStyleSheet("background: transparent;")
+        row_h = QHBoxLayout(row_w)
+        row_h.setContentsMargins(4, 2, 4, 2)
+        row_h.setSpacing(8)
+        from PyQt6.QtWidgets import QCheckBox as _CB2
+        cb = _CB2()
+        cb.setChecked(checked)
+        cb.setStyleSheet("QCheckBox { color: #c9d1d9; } QCheckBox::indicator { width: 15px; height: 15px; }")
+        cb.setProperty("entity_id", entity_id)
+        row_h.addWidget(cb)
+        eid_lbl = QLabel(friendly or entity_id)
+        eid_lbl.setStyleSheet("color: #8b949e; font-size: 11px; min-width: 160px;")
+        eid_lbl.setToolTip(entity_id)
+        row_h.addWidget(eid_lbl)
+        name_edit = QLineEdit(saved_name)
+        name_edit.setPlaceholderText("Nimi (esim. Olohuone)")
+        name_edit.setFixedWidth(140)
+        name_edit.setStyleSheet(
+            "QLineEdit { background: #18182a; border: 1px solid #2e2e48; border-radius: 5px;"
+            " color: #e0e0f0; padding: 4px 8px; font-size: 12px; }"
+        )
+        name_edit.setProperty("entity_id", entity_id)
+        row_h.addWidget(name_edit)
+        test_btn = QPushButton("▶ Testi")
+        test_btn.setFixedWidth(68)
+        test_btn.setStyleSheet(
+            "QPushButton { background: #14281e; border: 1px solid #1a5a30; border-radius: 5px;"
+            " color: #00cc6a; padding: 4px 8px; font-size: 11px; font-weight: 700; }"
+            "QPushButton:hover { border-color: #00FF6A; color: #5AFFAA; }"
+        )
+
+        def _do_test(eid=entity_id):
+            test_btn.setEnabled(False)
+            test_btn.setText("…")
+            def _run():
+                try:
+                    local_ip = _get_local_ip()
+                    test_url = f"http://{local_ip}:{StreamDeckHttpServer.PORT}/ha_test_audio"
+                    cur = {"ha_url": ha_url_edit.text().strip(), "ha_token": ha_token_edit.text().strip()}
+                    _ha_api("POST", "/services/media_player/play_media", cur, {
+                        "entity_id": eid,
+                        "media_content_id": test_url,
+                        "media_content_type": "music",
+                    })
+                    QTimer.singleShot(0, lambda: (test_btn.setEnabled(True), test_btn.setText("▶ Testi"),
+                                                  ha_status_lbl.setStyleSheet("color: #00cc6a; font-size:12px;"),
+                                                  ha_status_lbl.setText(f"✓ Testi lähetetty → {eid}")))
+                except Exception as exc:
+                    QTimer.singleShot(0, lambda e=str(exc): (
+                        test_btn.setEnabled(True), test_btn.setText("▶ Testi"),
+                        ha_status_lbl.setStyleSheet("color: #ff4444; font-size:12px;"),
+                        ha_status_lbl.setText(f"✗ {e}")))
+            threading.Thread(target=_run, daemon=True).start()
+
+        test_btn.clicked.connect(_do_test)
+        row_h.addWidget(test_btn)
+        row_h.addStretch()
+        row_w._cb = cb
+        row_w._name_edit = name_edit
+        return row_w
+
+    def _ha_populate_list(players: list, saved_players: list):
+        ha_players_list.clear()
+        saved_map = {p["entity_id"]: p.get("name", "") for p in saved_players}
+        for pl in players:
+            eid = pl["entity_id"]
+            friendly = pl.get("friendly_name", "")
+            saved_name = saved_map.get(eid, friendly or "")
+            row_w = _ha_make_player_row(eid, friendly, saved_name, eid in saved_map)
+            item = _LWI2()
+            item.setSizeHint(row_w.sizeHint())
+            ha_players_list.addItem(item)
+            ha_players_list.setItemWidget(item, row_w)
+
+    # Pre-populate from saved config on open
+    saved_ha_players = settings.get("ha_players", [])
+    if saved_ha_players:
+        _ha_fetched_players = [{"entity_id": p["entity_id"],
+                                "friendly_name": p.get("name", "")} for p in saved_ha_players]
+        _ha_populate_list(_ha_fetched_players, saved_ha_players)
+        ha_status_lbl.setStyleSheet("color: #8b949e; font-size:12px;")
+        ha_status_lbl.setText(f"Tallennettu {len(saved_ha_players)} laitetta — paina 'Testaa' päivittääksesi listan")
+
+    def _ha_connect():
+        ha_connect_btn.setEnabled(False)
+        ha_connect_btn.setText("Yhdistetään…")
+        ha_status_lbl.setStyleSheet("color: #8b949e; font-size:12px;")
+        ha_status_lbl.setText("Yhdistetään…")
+
+        def _run():
+            cur = {"ha_url": ha_url_edit.text().strip(), "ha_token": ha_token_edit.text().strip()}
+            try:
+                _ha_api("GET", "/", cur)
+                states = _ha_api("GET", "/states", cur)
+                media_players = [
+                    {"entity_id": s["entity_id"],
+                     "friendly_name": s.get("attributes", {}).get("friendly_name", "")}
+                    for s in states if s.get("entity_id", "").startswith("media_player.")
+                ]
+                media_players.sort(key=lambda x: x["entity_id"])
+
+                def _update():
+                    nonlocal _ha_fetched_players
+                    _ha_fetched_players = media_players
+                    _ha_populate_list(media_players, settings.get("ha_players", []))
+                    ha_status_lbl.setStyleSheet("color: #00cc6a; font-size:12px;")
+                    ha_status_lbl.setText(
+                        f"✓ Yhdistetty — löydetty {len(media_players)} media_player-laitetta"
+                    )
+                    ha_connect_btn.setEnabled(True)
+                    ha_connect_btn.setText("🔌  Testaa yhteys & hae soittimet")
+                QTimer.singleShot(0, _update)
+            except Exception as exc:
+                def _err(e=str(exc)):
+                    ha_status_lbl.setStyleSheet("color: #ff4444; font-size:12px;")
+                    ha_status_lbl.setText(f"✗ Virhe: {e}")
+                    ha_connect_btn.setEnabled(True)
+                    ha_connect_btn.setText("🔌  Testaa yhteys & hae soittimet")
+                QTimer.singleShot(0, _err)
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    ha_connect_btn.clicked.connect(_ha_connect)
+
+    ha_scroll = _QSA2()
+    ha_scroll.setWidgetResizable(True)
+    ha_scroll.setWidget(ha_widget)
+
     tabs.addTab(_scroll_tab(f1), "Käännös & TTS")
     tabs.addTab(_scroll_tab(f2), "Wake Word")
     tabs.addTab(_scroll_tab(f3), "Kielet")
     tabs.addTab(_scroll_tab(f4), "Pika & Data")
     tabs.addTab(sd_scroll, "Stream Deck")
+    tabs.addTab(ha_scroll, "Home Assistant")
     tabs.addTab(_scroll_tab(f6), "Asennus")
     tabs.addTab(f_clean, "Siivoa")
     tabs.addTab(_scroll_tab(f7), "Päivitys")
@@ -7561,6 +7965,19 @@ def open_settings_dialog(parent_app: "App") -> None:
         except ValueError:
             new_settings["wake_command_seconds"] = 6.0
         new_settings["custom_languages"] = custom_langs
+
+        # HA settings
+        new_settings["ha_url"] = ha_url_edit.text().strip()
+        new_settings["ha_token"] = ha_token_edit.text().strip()
+        saved_ha: list = []
+        for i in range(ha_players_list.count()):
+            row_w = ha_players_list.itemWidget(ha_players_list.item(i))
+            if row_w and hasattr(row_w, "_cb") and row_w._cb.isChecked():
+                eid = row_w._cb.property("entity_id")
+                name = row_w._name_edit.text().strip()
+                if eid:
+                    saved_ha.append({"entity_id": eid, "name": name})
+        new_settings["ha_players"] = saved_ha
 
         # Save OpenAI API key to credentials.env and update globals
         new_key = api_key_edit.text().strip()
