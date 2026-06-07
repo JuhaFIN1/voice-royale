@@ -267,7 +267,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.52"
+APP_VERSION = "1.3.53"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -8234,10 +8234,15 @@ class SetupWizard(QDialog):
         self._dev_monitor_timer.timeout.connect(self._update_dev_levels)
         self._dev_monitor_timer.setInterval(80)
         # Service selection state — updated by _page_services
-        self._svc_stt = "openai"      # "openai" | "local"
-        self._svc_trans = "google"    # "google" | "deepl" | "openai"
-        self._svc_tts = "edge"        # "edge" | "elevenlabs"
-        self._svc_routing = "simple"  # "simple" | "gaming"
+        self._svc_stt = "openai"        # "openai" | "local"
+        self._svc_trans = "google"      # "google" | "deepl" | "openai"
+        self._svc_tts = "edge"          # "edge" | "elevenlabs"
+        self._svc_routing = "simple"    # "simple" | "gaming"
+        self._svc_streamdeck = False    # bool
+        self._svc_ha = False            # bool
+        # Wizard HA credentials (saved to settings in _finish_setup)
+        self._wiz_ha_url = ""
+        self._wiz_ha_token = ""
         self._build_ui()
         self._stack.setCurrentIndex(0)
 
@@ -8267,9 +8272,9 @@ class SetupWizard(QDialog):
 
     def _navigate(self, page):
         coming_from = self._stack.currentIndex()
-        if coming_from == 6 and page != 6:   # 6 = devices (renumbered)
+        if coming_from == 8 and page != 8:   # 8 = devices
             self._stop_dev_monitoring()
-        if page == 6 and coming_from != 6:
+        if page == 8 and coming_from != 8:
             self._stack.setCurrentIndex(page)
             self._start_dev_monitoring()
             return
@@ -8285,8 +8290,12 @@ class SetupWizard(QDialog):
         if self._svc_routing == "gaming":
             seq.append(4)  # vb-cable
             seq.append(5)  # voicemeeter
-        seq.append(6)  # devices
-        seq.append(7)  # final test
+        if self._svc_streamdeck:
+            seq.append(6)  # stream deck
+        if self._svc_ha:
+            seq.append(7)  # home assistant
+        seq.append(8)  # devices
+        seq.append(9)  # final test
         return seq
 
     def _nav_next(self):
@@ -8475,6 +8484,32 @@ class SetupWizard(QDialog):
         rt_simple_rb.setChecked(True)
         bl.addWidget(_rt_s_row)
         bl.addWidget(_rt_g_row)
+        bl.addWidget(_sep())
+
+        # ── Lisälaitteet ──────────────────────────────────────────────────
+        bl.addWidget(_sec_lbl("Lisälaitteet ja integraatiot"))
+        from PyQt6.QtWidgets import QCheckBox
+        sd_cb = QCheckBox("Elgato Stream Deck — näppäinpaneeli")
+        sd_cb.setStyleSheet(
+            "QCheckBox { color: #c9d1d9; font-size: 12px; background: transparent; padding: 2px 8px; }"
+            "QCheckBox::indicator { width: 14px; height: 14px; }"
+        )
+        sd_desc = QLabel("Asennetaan Voice Royale -lisäosa Stream Deckiin. Näppäimet saavat oman UI:n.")
+        sd_desc.setStyleSheet("color: #6e7681; font-size: 11px; background: transparent; padding: 0 30px;")
+        sd_desc.setWordWrap(True)
+        bl.addWidget(sd_cb)
+        bl.addWidget(sd_desc)
+
+        ha_cb = QCheckBox("Home Assistant — älykotiintegraatio")
+        ha_cb.setStyleSheet(
+            "QCheckBox { color: #c9d1d9; font-size: 12px; background: transparent; padding: 2px 8px; }"
+            "QCheckBox::indicator { width: 14px; height: 14px; }"
+        )
+        ha_desc = QLabel("Yhdistä HA-asennukseesi — ohjaa medialaitteitasi soundboardista.")
+        ha_desc.setStyleSheet("color: #6e7681; font-size: 11px; background: transparent; padding: 0 30px;")
+        ha_desc.setWordWrap(True)
+        bl.addWidget(ha_cb)
+        bl.addWidget(ha_desc)
 
         # ── Summary ───────────────────────────────────────────────────────
         summary_lbl = QLabel()
@@ -8495,6 +8530,8 @@ class SetupWizard(QDialog):
             self._svc_trans = trans
             self._svc_tts = tts
             self._svc_routing = routing
+            self._svc_streamdeck = sd_cb.isChecked()
+            self._svc_ha = ha_cb.isChecked()
             if stt == "openai" or trans == "openai" or tts == "elevenlabs":
                 needs.append("OpenAI API-avain")
             if tts == "elevenlabs":
@@ -8503,6 +8540,10 @@ class SetupWizard(QDialog):
                 needs.append("ffmpeg")
             if routing == "gaming":
                 needs.append("VB-Cable + Voicemeeter Banana")
+            if sd_cb.isChecked():
+                needs.append("Stream Deck -lisäosa")
+            if ha_cb.isChecked():
+                needs.append("HA URL + token")
             if needs:
                 summary_lbl.setText("Tarvitset: " + ", ".join(needs))
                 summary_lbl.setStyleSheet(
@@ -8520,6 +8561,8 @@ class SetupWizard(QDialog):
         trans_grp.buttonToggled.connect(lambda *_: _update_summary())
         tts_grp.buttonToggled.connect(lambda *_: _update_summary())
         rt_grp.buttonToggled.connect(lambda *_: _update_summary())
+        sd_cb.toggled.connect(lambda *_: _update_summary())
+        ha_cb.toggled.connect(lambda *_: _update_summary())
         _update_summary()
 
         bl.addStretch()
@@ -9325,6 +9368,309 @@ class SetupWizard(QDialog):
         lay.addWidget(body)
         return page
 
+    def _page_streamdeck(self):
+        import os, shutil as _shu, subprocess as _sdsp
+
+        page = QWidget()
+        page.setStyleSheet("background: #0d1117;")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._header(
+            "Stream Deck -lisäosa",
+            "Voice Royale -lisäosa tuo äänipaneelin Stream Deck -näppäimistöön."
+        ))
+
+        body = QWidget()
+        body.setStyleSheet("background: #0d1117;")
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(40, 24, 40, 16)
+        bl.setSpacing(14)
+
+        # Check install state
+        _plugins_dir = os.path.join(
+            os.environ.get("APPDATA", ""), "Elgato", "StreamDeck", "Plugins"
+        )
+        _plugin_installed = os.path.isdir(
+            os.path.join(_plugins_dir, "com.voiceroyale.sdPlugin")
+        )
+        _sd_app_installed = os.path.isdir(
+            os.path.join(os.environ.get("APPDATA", ""), "Elgato", "StreamDeck")
+        )
+
+        status_lbl = QLabel()
+        status_lbl.setWordWrap(True)
+        status_lbl.setStyleSheet("font-size: 12px; background: transparent;")
+
+        install_btn = QPushButton()
+        install_btn.setFixedHeight(40)
+        install_btn.setMinimumWidth(200)
+
+        def _find_plugin_file():
+            base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
+            candidates = [
+                os.path.join(base, "streamdeck-plugin", "com.voiceroyale.streamDeckPlugin"),
+                os.path.join(base, "com.voiceroyale.streamDeckPlugin"),
+            ]
+            for p in candidates:
+                if os.path.isfile(p):
+                    return p
+            return None
+
+        _plugin_file = _find_plugin_file()
+
+        if _plugin_installed:
+            status_lbl.setText("Lisäosa on jo asennettu.")
+            status_lbl.setStyleSheet("color: #3fb950; font-size: 13px; background: transparent;")
+            install_btn.setText("Asenna uudelleen")
+            install_btn.setStyleSheet(
+                "QPushButton { background: #161b22; border: 1px solid #30363d; border-radius: 6px;"
+                " color: #8b949e; font-size: 12px; }"
+                "QPushButton:hover { border-color: #58a6ff; color: #c9d1d9; }"
+            )
+        elif not _sd_app_installed:
+            status_lbl.setText(
+                "Stream Deck -sovellus ei löydy.\n"
+                "Lataa ja asenna ensin SD-sovellus osoitteesta elgato.com/downloads."
+            )
+            status_lbl.setStyleSheet("color: #e3b341; font-size: 12px; background: transparent;")
+            install_btn.setText("Avaa elgato.com/downloads")
+            install_btn.setStyleSheet(
+                "QPushButton { background: #0f4c75; border: 1px solid #1e6fa5; border-radius: 6px;"
+                " color: #c9d1d9; font-size: 12px; font-weight: 700; }"
+                "QPushButton:hover { border-color: #58a6ff; }"
+            )
+            def _open_elgato():
+                import webbrowser
+                webbrowser.open("https://www.elgato.com/en/downloads")
+            install_btn.clicked.connect(_open_elgato)
+        elif _plugin_file:
+            status_lbl.setText("Lisäosa löytyy — klikattuasi SD-sovellus avautuu ja pyytää asennuslupaa.")
+            status_lbl.setStyleSheet("color: #8b949e; font-size: 12px; background: transparent;")
+            install_btn.setText("Asenna Voice Royale -lisäosa")
+            install_btn.setStyleSheet(
+                "QPushButton { background: #0f4c75; border: 1px solid #1e6fa5; border-radius: 6px;"
+                " color: #e6edf3; font-size: 12px; font-weight: 700; }"
+                "QPushButton:hover { border-color: #58a6ff; }"
+                "QPushButton:pressed { background: #0d3d61; }"
+            )
+            def _do_install_sd():
+                try:
+                    os.startfile(_plugin_file)
+                    status_lbl.setText(
+                        "Asennustiedosto avattu — hyväksy SD-sovelluksen pyyntö."
+                    )
+                    status_lbl.setStyleSheet("color: #3fb950; font-size: 12px; background: transparent;")
+                    install_btn.setText("Avattu — odota SD-sovellusta")
+                    install_btn.setEnabled(False)
+                except Exception as e:
+                    status_lbl.setText(f"Virhe: {e}\nVoit asentaa manuaalisesti: kopioi tiedosto SD Plugins -kansioon.")
+                    status_lbl.setStyleSheet("color: #f85149; font-size: 12px; background: transparent;")
+            install_btn.clicked.connect(_do_install_sd)
+        else:
+            status_lbl.setText("Lisäosatiedostoa ei löydy paikallisesti.\nLataa se GitHub Releases -sivulta.")
+            status_lbl.setStyleSheet("color: #e3b341; font-size: 12px; background: transparent;")
+            install_btn.setText("Lataa lisäosa GitHubista")
+            install_btn.setStyleSheet(
+                "QPushButton { background: #0f4c75; border: 1px solid #1e6fa5; border-radius: 6px;"
+                " color: #e6edf3; font-size: 12px; font-weight: 700; }"
+                "QPushButton:hover { border-color: #58a6ff; }"
+            )
+            def _open_gh_releases():
+                import webbrowser
+                webbrowser.open("https://github.com/JuhaFIN1/voice-royale/releases/latest")
+            install_btn.clicked.connect(_open_gh_releases)
+
+        bl.addWidget(status_lbl)
+        bl.addWidget(install_btn)
+
+        manual_lbl = QLabel(
+            "Manuaalinen asennus:\n"
+            f"Pura lisäosatiedosto kansioon:\n{_plugins_dir}\\com.voiceroyale.sdPlugin\\"
+        )
+        manual_lbl.setStyleSheet("color: #484f58; font-size: 10px; background: transparent;")
+        manual_lbl.setWordWrap(True)
+        bl.addWidget(manual_lbl)
+
+        bl.addStretch()
+        lay.addWidget(body, 1)
+
+        nav = QHBoxLayout()
+        nav.setContentsMargins(32, 8, 32, 16)
+        nav.addWidget(self._back_btn())
+        nav.addStretch()
+        skip = QPushButton("Ohita →")
+        skip.setFixedHeight(36)
+        skip.setStyleSheet(
+            "QPushButton { background: transparent; border: 1px solid #30363d; border-radius: 6px;"
+            " color: #8b949e; font-size: 12px; padding: 0 16px; }"
+            "QPushButton:hover { border-color: #6e7681; color: #c9d1d9; }"
+        )
+        skip.clicked.connect(self._nav_next)
+        nxt = QPushButton("Seuraava  →")
+        nxt.setFixedHeight(42)
+        nxt.setMinimumWidth(140)
+        nxt.clicked.connect(self._nav_next)
+        nav.addWidget(skip)
+        nav.addWidget(nxt)
+        nav_w = QWidget()
+        nav_w.setStyleSheet("background: #0d1117;")
+        nav_w.setLayout(nav)
+        lay.addWidget(nav_w)
+        return page
+
+    def _page_ha_setup(self):
+        page = QWidget()
+        page.setStyleSheet("background: #0d1117;")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._header(
+            "Home Assistant",
+            "Yhdistä HA-asennukseesi — voit ohjata media-laitteita soundboardista."
+        ))
+
+        body = QWidget()
+        body.setStyleSheet("background: #0d1117;")
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(40, 24, 40, 16)
+        bl.setSpacing(10)
+
+        def _lbl(txt):
+            l = QLabel(txt)
+            l.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+            return l
+
+        bl.addWidget(_lbl("Home Assistant -osoite"))
+        url_edit = QLineEdit()
+        url_edit.setPlaceholderText("http://192.168.1.94:8123  tai  https://homeassistant.droneandme.com")
+        url_edit.setFixedHeight(34)
+        url_edit.setStyleSheet(
+            "QLineEdit { background: #161b22; border: 1px solid #30363d; border-radius: 6px;"
+            " color: #c9d1d9; padding: 0 10px; font-size: 12px; }"
+            "QLineEdit:focus { border-color: #388bfd; }"
+        )
+        bl.addWidget(url_edit)
+
+        bl.addWidget(_lbl("Long-Lived Access Token  (HA → Profiili → Pitkäaikaiset käyttöoikeustietueet)"))
+        token_edit = QLineEdit()
+        token_edit.setPlaceholderText("eyJhbGciOi...")
+        token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        token_edit.setFixedHeight(34)
+        token_edit.setStyleSheet(url_edit.styleSheet())
+        bl.addWidget(token_edit)
+
+        connect_btn = QPushButton("Testaa yhteys")
+        connect_btn.setFixedHeight(38)
+        connect_btn.setStyleSheet(
+            "QPushButton { background: #0f4c75; border: 1px solid #1e6fa5; border-radius: 6px;"
+            " color: #e6edf3; font-size: 12px; font-weight: 700; }"
+            "QPushButton:hover { border-color: #58a6ff; }"
+            "QPushButton:pressed { background: #0d3d61; }"
+            "QPushButton:disabled { background: #161b22; border-color: #21262d; color: #484f58; }"
+        )
+        bl.addWidget(connect_btn)
+
+        status_lbl = QLabel("Anna osoite ja token, sitten testaa yhteys.")
+        status_lbl.setWordWrap(True)
+        status_lbl.setStyleSheet("color: #6e7681; font-size: 11px; background: transparent;")
+        bl.addWidget(status_lbl)
+
+        import queue as _qha2
+        _rq2 = _qha2.Queue()
+        _ptmr2_holder = [None]
+
+        def _test_ha():
+            url = url_edit.text().strip()
+            token = token_edit.text().strip()
+            if not url or not token:
+                status_lbl.setText("Anna sekä osoite että token.")
+                return
+            connect_btn.setEnabled(False)
+            connect_btn.setText("Yhdistetään…")
+            status_lbl.setText("Yhdistetään…")
+            status_lbl.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+            self._wiz_ha_url = url
+            self._wiz_ha_token = token
+
+            def _run():
+                try:
+                    import urllib3 as _u3
+                    _u3.disable_warnings(_u3.exceptions.InsecureRequestWarning)
+                    import requests as _rq_req
+                    _creds = {"ha_url": url, "ha_token": token}
+                    _ha_api("GET", "/states", _creds)
+                    _rq2.put(("ok", ""))
+                except Exception as e:
+                    _rq2.put(("err", str(e)))
+
+            def _poll2():
+                try:
+                    kind, payload = _rq2.get_nowait()
+                except Exception:
+                    return
+                _ptmr2_holder[0].stop()
+                connect_btn.setEnabled(True)
+                connect_btn.setText("Testaa yhteys")
+                if kind == "ok":
+                    status_lbl.setText("Yhdistetty! Tallenna asetukset Seuraava-napilla.")
+                    status_lbl.setStyleSheet("color: #3fb950; font-size: 11px; background: transparent;")
+                else:
+                    err = payload
+                    if "SSL" in err or "CERTIFICATE" in err.upper():
+                        msg = f"SSL-virhe — kokeile http:// etuliitettä\n({err[:80]})"
+                    elif "timed out" in err.lower():
+                        msg = f"Yhteys aikakatkaistiin — tarkista osoite ja portti\n({err[:80]})"
+                    elif "401" in err or "Unauthorized" in err:
+                        msg = "Token virheellinen — tarkista Long-lived token"
+                    elif "refused" in err.lower():
+                        msg = f"Yhteys evätty — onko HA käynnissä? ({err[:60]})"
+                    else:
+                        msg = err[:120]
+                    status_lbl.setText(f"Virhe: {msg}")
+                    status_lbl.setStyleSheet("color: #f85149; font-size: 11px; background: transparent;")
+
+            t = QTimer(self)
+            t.timeout.connect(_poll2)
+            t.start(200)
+            _ptmr2_holder[0] = t
+            import threading as _thr2
+            _thr2.Thread(target=_run, daemon=True).start()
+
+        connect_btn.clicked.connect(_test_ha)
+
+        def _save_and_next():
+            self._wiz_ha_url = url_edit.text().strip()
+            self._wiz_ha_token = token_edit.text().strip()
+            self._nav_next()
+
+        bl.addStretch()
+        lay.addWidget(body, 1)
+
+        nav = QHBoxLayout()
+        nav.setContentsMargins(32, 8, 32, 16)
+        nav.addWidget(self._back_btn())
+        nav.addStretch()
+        skip = QPushButton("Ohita →")
+        skip.setFixedHeight(36)
+        skip.setStyleSheet(
+            "QPushButton { background: transparent; border: 1px solid #30363d; border-radius: 6px;"
+            " color: #8b949e; font-size: 12px; padding: 0 16px; }"
+            "QPushButton:hover { border-color: #6e7681; color: #c9d1d9; }"
+        )
+        skip.clicked.connect(self._nav_next)
+        nxt = QPushButton("Tallenna ja jatka  →")
+        nxt.setFixedHeight(42)
+        nxt.setMinimumWidth(160)
+        nxt.clicked.connect(_save_and_next)
+        nav.addWidget(skip)
+        nav.addWidget(nxt)
+        nav_w = QWidget()
+        nav_w.setStyleSheet("background: #0d1117;")
+        nav_w.setLayout(nav)
+        lay.addWidget(nav_w)
+        return page
+
     def _page_devices(self):
         page = QWidget()
         page.setStyleSheet("background: #0d1117;")
@@ -10037,14 +10383,16 @@ class SetupWizard(QDialog):
         main = QVBoxLayout(self)
         main.setContentsMargins(0, 0, 0, 0)
         main.addWidget(self._stack)
-        self._stack.addWidget(self._page_welcome())      # 0
-        self._stack.addWidget(self._page_services())     # 1  NEW
-        self._stack.addWidget(self._page_packages())     # 2
-        self._stack.addWidget(self._page_api_key())      # 3
-        self._stack.addWidget(self._page_vbcable())      # 4
-        self._stack.addWidget(self._page_voicemeeter())  # 5
-        self._stack.addWidget(self._page_devices())      # 6
-        self._stack.addWidget(self._page_final_test())   # 7
+        self._stack.addWidget(self._page_welcome())        # 0
+        self._stack.addWidget(self._page_services())       # 1
+        self._stack.addWidget(self._page_packages())       # 2
+        self._stack.addWidget(self._page_api_key())        # 3
+        self._stack.addWidget(self._page_vbcable())        # 4
+        self._stack.addWidget(self._page_voicemeeter())    # 5
+        self._stack.addWidget(self._page_streamdeck())     # 6  NEW
+        self._stack.addWidget(self._page_ha_setup())       # 7  NEW
+        self._stack.addWidget(self._page_devices())        # 8
+        self._stack.addWidget(self._page_final_test())     # 9
 
     def _on_key_changed(self, text):
         valid = text.strip().startswith("sk-") and len(text.strip()) > 20
@@ -10150,6 +10498,12 @@ class SetupWizard(QDialog):
                 json.dump(hd, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+        if self._wiz_ha_url:
+            settings = load_settings()
+            settings["ha_url"] = self._wiz_ha_url
+            if self._wiz_ha_token:
+                settings["ha_token"] = self._wiz_ha_token
+            save_settings(settings)
         self.accept()
 
     def closeEvent(self, event):
