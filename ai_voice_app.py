@@ -292,7 +292,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.61"
+APP_VERSION = "1.3.62"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -8995,11 +8995,23 @@ class SetupWizard(QDialog):
         ffmpeg_rl.addWidget(ffmpeg_name)
         ffmpeg_rl.addWidget(ffmpeg_desc, 1)
         if not _has_ffmpeg:
-            import queue as _ffq
+            import queue as _ffq, shutil as _sh_ff
             _ff_result_q = _ffq.Queue()
-            _ff_btn_label = "winget install ffmpeg" if sys.platform == "win32" else "brew install ffmpeg"
+
+            if sys.platform == "darwin":
+                # Check if Homebrew is installed
+                _brew_path = (
+                    _sh_ff.which("brew")
+                    or ("/opt/homebrew/bin/brew" if os.path.isfile("/opt/homebrew/bin/brew") else None)
+                    or ("/usr/local/bin/brew" if os.path.isfile("/usr/local/bin/brew") else None)
+                )
+                _ff_btn_label = "brew install ffmpeg" if _brew_path else "Asenna Homebrew + ffmpeg"
+            else:
+                _brew_path = None
+                _ff_btn_label = "winget install ffmpeg"
+
             ffmpeg_install_btn = QPushButton(_ff_btn_label)
-            ffmpeg_install_btn.setFixedWidth(170)
+            ffmpeg_install_btn.setFixedWidth(190)
             ffmpeg_install_btn.setStyleSheet(
                 "QPushButton { background: #14281e; border: 1px solid #1a5a30; border-radius: 5px;"
                 " color: #00cc6a; padding: 3px 6px; font-size: 11px; font-weight: 700; }"
@@ -9008,6 +9020,18 @@ class SetupWizard(QDialog):
             _ff_timer = QTimer(ffmpeg_install_btn)
 
             def _poll_ff():
+                # macOS terminal install: check paths directly (no queue)
+                if sys.platform == "darwin":
+                    for _hb in ["/opt/homebrew/bin", "/usr/local/bin"]:
+                        if os.path.isfile(os.path.join(_hb, "ffmpeg")):
+                            os.environ["PATH"] = _hb + ":" + os.environ.get("PATH", "")
+                            _ff_timer.stop()
+                            ffmpeg_icon.setText("✅")
+                            ffmpeg_name.setStyleSheet("color: #e6edf3; background: transparent;")
+                            ffmpeg_desc.setText("Edge TTS — asennettu onnistuneesti")
+                            ffmpeg_install_btn.setVisible(False)
+                            return
+                # Windows / macOS background thread: check queue
                 try:
                     found = _ff_result_q.get_nowait()
                 except Exception:
@@ -9025,20 +9049,52 @@ class SetupWizard(QDialog):
 
             _ff_timer.timeout.connect(_poll_ff)
 
-            def _run_ffmpeg_install():
+            def _run_ffmpeg_install(brew=_brew_path):
                 import subprocess as _sp2, shutil as _sh2
                 ffmpeg_install_btn.setEnabled(False)
-                ffmpeg_install_btn.setText("Asentaa…")
-                _ff_timer.start(500)
 
-                def _do():
-                    if sys.platform == "win32":
+                if sys.platform == "darwin":
+                    if not brew:
+                        # Homebrew not installed — open Terminal, install brew + ffmpeg
+                        ffmpeg_install_btn.setText("Terminal avattu — odota��")
+                        ffmpeg_desc.setText("Syötä salasana terminaalissa — tarkistus automaattinen")
+                        _cmd = (
+                            '/bin/bash -c "$(curl -fsSL '
+                            'https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" '
+                            '&& (/opt/homebrew/bin/brew install ffmpeg '
+                            '|| /usr/local/bin/brew install ffmpeg)'
+                        )
+                        _sp2.run(
+                            ["osascript", "-e",
+                             f'tell application "Terminal" to do script "{_cmd}"'],
+                            capture_output=True,
+                        )
+                        _ff_timer.start(4000)  # poll every 4s until ffmpeg appears
+                    else:
+                        # Homebrew found — install ffmpeg in background thread
+                        ffmpeg_install_btn.setText("Asentaa…")
+                        _ff_timer.start(3000)
+
+                        def _do_brew():
+                            _sp2.run([brew, "install", "ffmpeg"],
+                                     capture_output=True, timeout=600)
+                            for _hb in ["/opt/homebrew/bin", "/usr/local/bin"]:
+                                if os.path.isfile(os.path.join(_hb, "ffmpeg")):
+                                    os.environ["PATH"] = _hb + ":" + os.environ.get("PATH", "")
+                                    break
+
+                        threading.Thread(target=_do_brew, daemon=True).start()
+                else:
+                    # Windows: winget
+                    ffmpeg_install_btn.setText("Asentaa…")
+                    _ff_timer.start(500)
+
+                    def _do_win():
                         _sp2.run(
                             ["winget", "install", "--id", "Gyan.FFmpeg", "-e",
                              "--accept-source-agreements", "--accept-package-agreements"],
                             creationflags=getattr(_sp2, "CREATE_NEW_CONSOLE", 0),
                         )
-                        # Refresh PATH from Windows registry
                         try:
                             import winreg as _wreg
                             _k = _wreg.OpenKey(_wreg.HKEY_LOCAL_MACHINE,
@@ -9053,22 +9109,9 @@ class SetupWizard(QDialog):
                         except Exception:
                             _up_val = ""
                         os.environ["PATH"] = _sp_val + ";" + _up_val + ";" + os.environ.get("PATH", "")
-                    else:
-                        # macOS: find brew and install ffmpeg
-                        _brew = (_sh2.which("brew")
-                                 or ("/opt/homebrew/bin/brew" if os.path.isfile("/opt/homebrew/bin/brew") else None)
-                                 or ("/usr/local/bin/brew" if os.path.isfile("/usr/local/bin/brew") else None))
-                        if _brew:
-                            _sp2.run([_brew, "install", "ffmpeg"],
-                                     capture_output=True, timeout=600)
-                        # Add Homebrew bin dirs to PATH so shutil.which finds ffmpeg
-                        for _hb in ["/opt/homebrew/bin", "/usr/local/bin"]:
-                            if os.path.isfile(os.path.join(_hb, "ffmpeg")):
-                                os.environ["PATH"] = _hb + ":" + os.environ.get("PATH", "")
-                                break
-                    _ff_result_q.put(bool(_sh2.which("ffmpeg")))
+                        _ff_result_q.put(bool(_sh2.which("ffmpeg")))
 
-                threading.Thread(target=_do, daemon=True).start()
+                    threading.Thread(target=_do_win, daemon=True).start()
 
             ffmpeg_install_btn.clicked.connect(_run_ffmpeg_install)
             ffmpeg_rl.addWidget(ffmpeg_install_btn)
