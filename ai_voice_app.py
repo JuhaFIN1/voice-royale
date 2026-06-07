@@ -267,7 +267,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.53"
+APP_VERSION = "1.3.54"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -8361,7 +8361,7 @@ class SetupWizard(QDialog):
         return page
 
     def _page_services(self):
-        from PyQt6.QtWidgets import QRadioButton, QButtonGroup, QFrame
+        from PyQt6.QtWidgets import QRadioButton, QButtonGroup, QFrame, QCheckBox
         _is_frozen = getattr(sys, "frozen", False)
 
         page = QWidget()
@@ -8370,8 +8370,8 @@ class SetupWizard(QDialog):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         lay.addWidget(self._header(
-            "Valitse palvelut",
-            "Mukautetaan asennus valintojesi mukaan — voit muuttaa asetuksia myöhemmin."
+            "Kerro tilanteestasi",
+            "Mukautetaan asennus valintojesi mukaan — voit muuttaa kaikkia asetuksia myöhemmin."
         ))
 
         scroll = QScrollArea()
@@ -8385,185 +8385,362 @@ class SetupWizard(QDialog):
         bl.setContentsMargins(32, 16, 32, 16)
         bl.setSpacing(10)
 
-        def _sec_lbl(txt):
+        # ── SECTION 1: Devices ────────────────────────────────────────────
+        s1_lbl = QLabel("Mitä laitteita sinulla on?")
+        s1_lbl.setStyleSheet(
+            "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent; padding-bottom: 2px;"
+        )
+        bl.addWidget(s1_lbl)
+
+        def _device_row(icon, title, desc, always_on=False):
+            w = QWidget()
+            w.setFixedHeight(52)
+            w.setStyleSheet(
+                "QWidget { background: #161b22; border: 1px solid #21262d; border-radius: 8px; }"
+            )
+            h = QHBoxLayout(w)
+            h.setContentsMargins(14, 0, 14, 0)
+            h.setSpacing(12)
+            cb = QCheckBox()
+            cb.setChecked(always_on)
+            cb.setEnabled(not always_on)
+            cb.setStyleSheet(
+                "QCheckBox { background: transparent; border: none; }"
+                "QCheckBox::indicator { width: 18px; height: 18px; border-radius: 4px;"
+                " border: 2px solid #30363d; background: transparent; }"
+                "QCheckBox::indicator:checked { background: #238636; border-color: #238636; }"
+                "QCheckBox::indicator:hover { border-color: #388bfd; }"
+                "QCheckBox::indicator:disabled { background: #238636; border-color: #238636; }"
+            )
+            icon_lbl = QLabel(icon)
+            icon_lbl.setStyleSheet("font-size: 20px; background: transparent; border: none;")
+            icon_lbl.setFixedWidth(28)
+            title_lbl = QLabel(title)
+            title_lbl.setStyleSheet(
+                "color: #e6edf3; font-size: 12px; font-weight: 600; background: transparent; border: none;"
+            )
+            desc_lbl = QLabel(desc)
+            desc_lbl.setStyleSheet(
+                "color: #6e7681; font-size: 11px; background: transparent; border: none;"
+            )
+            h.addWidget(cb)
+            h.addWidget(icon_lbl)
+            col = QVBoxLayout()
+            col.setSpacing(1)
+            col.addWidget(title_lbl)
+            col.addWidget(desc_lbl)
+            h.addLayout(col, 1)
+            return w, cb
+
+        _hw, headphone_cb = _device_row("🎧", "Kuulokkeet tai kaiuttimet",
+            "Peruslaite — kaikilla on tämä.", always_on=True)
+        _gw, gaming_cb = _device_row("🎮", "Käytän pelejä tai Discordia",
+            "Haluan kuulua peleissä tai Discordissa virtuaalisena mikrofonina.")
+        _sw, sd_cb = _device_row("🎛️", "Elgato Stream Deck",
+            "Fyysiset näppäimet Voice Royalen ohjaukseen.")
+        _haw, ha_cb = _device_row("🏠", "Home Assistant",
+            "Älykotijärjestelmä — ohjaa medialaitteitasi soundboardista.")
+
+        bl.addWidget(_hw)
+        bl.addWidget(_gw)
+        bl.addWidget(_sw)
+        bl.addWidget(_haw)
+
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.Shape.HLine)
+        sep1.setStyleSheet("color: #21262d;")
+        bl.addWidget(sep1)
+
+        # ── SECTION 2: Package cards ──────────────────────────────────────
+        s2_lbl = QLabel("Valitse paketti")
+        s2_lbl.setStyleSheet(
+            "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent; padding-bottom: 2px;"
+        )
+        bl.addWidget(s2_lbl)
+
+        _selected_pkg = [1]  # 0=Ilmainen, 1=Suositeltu, 2=Premium
+
+        _PKGS = [
+            {
+                "icon": "🆓", "title": "Ilmainen", "badge": None,
+                "rows": [
+                    ("Puheentunnistus", "Tietokone — offline" if not _is_frozen else "OpenAI *"),
+                    ("Käännös", "Google Translate"),
+                    ("Ääni", "Microsoft Neural Voice"),
+                ],
+                "req": "✅  Ei tiliä eikä kuluja" if not _is_frozen else "⚠️  Vaatii OpenAI API-avaimen",
+                "req_ok": not _is_frozen,
+                "stt": "local" if not _is_frozen else "openai",
+                "trans": "google", "tts": "edge",
+            },
+            {
+                "icon": "⭐", "title": "Suositeltu", "badge": "SUOSITELTU",
+                "rows": [
+                    ("Puheentunnistus", "OpenAI — paras laatu"),
+                    ("Käännös", "Google Translate (ilmainen)"),
+                    ("Ääni", "Microsoft Neural Voice (ilmainen)"),
+                ],
+                "req": "⚠️  OpenAI API-avain (~1–2 €/kk)",
+                "req_ok": False,
+                "stt": "openai", "trans": "google", "tts": "edge",
+            },
+            {
+                "icon": "💎", "title": "Premium", "badge": None,
+                "rows": [
+                    ("Puheentunnistus", "OpenAI — paras laatu"),
+                    ("Käännös", "OpenAI AI-käännös"),
+                    ("Ääni", "ElevenLabs — erittäin realistinen"),
+                ],
+                "req": "⚠️  OpenAI + ElevenLabs API-avaimet",
+                "req_ok": False,
+                "stt": "openai", "trans": "openai", "tts": "elevenlabs",
+            },
+        ]
+
+        card_widgets = []
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(10)
+
+        def _make_card(pkg):
+            card = QFrame()
+            card.setMinimumHeight(172)
+            card.setCursor(Qt.CursorShape.PointingHandCursor)
+            cl = QVBoxLayout(card)
+            cl.setContentsMargins(14, 12, 14, 12)
+            cl.setSpacing(5)
+            hdr = QHBoxLayout()
+            hdr.setSpacing(6)
+            icon_l = QLabel(pkg["icon"])
+            icon_l.setStyleSheet("font-size: 22px; background: transparent; border: none;")
+            title_l = QLabel(pkg["title"])
+            title_l.setStyleSheet(
+                "color: #e6edf3; font-size: 13px; font-weight: 700; background: transparent; border: none;"
+            )
+            hdr.addWidget(icon_l)
+            hdr.addWidget(title_l)
+            hdr.addStretch()
+            if pkg["badge"]:
+                bdg = QLabel(pkg["badge"])
+                bdg.setStyleSheet(
+                    "background: #1f6feb; color: #fff; font-size: 9px; font-weight: 700;"
+                    " border-radius: 3px; padding: 1px 5px; border: none;"
+                )
+                hdr.addWidget(bdg)
+            cl.addLayout(hdr)
+            sph = QFrame()
+            sph.setFrameShape(QFrame.Shape.HLine)
+            sph.setStyleSheet("color: #21262d;")
+            cl.addWidget(sph)
+            for rt, rv in pkg["rows"]:
+                rw = QHBoxLayout()
+                rw.setSpacing(4)
+                rt_l = QLabel(f"• {rt}:")
+                rt_l.setStyleSheet(
+                    "color: #8b949e; font-size: 10px; background: transparent; border: none;"
+                )
+                rt_l.setFixedWidth(92)
+                rv_l = QLabel(rv)
+                rv_l.setStyleSheet(
+                    "color: #c9d1d9; font-size: 10px; background: transparent; border: none;"
+                )
+                rv_l.setWordWrap(True)
+                rw.addWidget(rt_l)
+                rw.addWidget(rv_l, 1)
+                cl.addLayout(rw)
+            cl.addStretch()
+            req_l = QLabel(pkg["req"])
+            req_l.setStyleSheet(
+                f"color: {'#3fb950' if pkg['req_ok'] else '#e3b341'};"
+                " font-size: 10px; background: transparent; border: none;"
+            )
+            req_l.setWordWrap(True)
+            cl.addWidget(req_l)
+            return card
+
+        for idx, pkg in enumerate(_PKGS):
+            c = _make_card(pkg)
+            card_widgets.append(c)
+            cards_row.addWidget(c, 1)
+            c.mousePressEvent = lambda e, i=idx: _select_pkg(i)
+
+        cards_container = QWidget()
+        cards_container.setStyleSheet("background: transparent;")
+        cards_container.setLayout(cards_row)
+        bl.addWidget(cards_container)
+
+        # ── Advanced (power user) ─────────────────────────────────────────
+        toggle_btn = QPushButton("▸  Muokkaa yksittäisiä asetuksia")
+        toggle_btn.setFlat(True)
+        toggle_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; color: #388bfd;"
+            " font-size: 11px; text-align: left; padding: 2px 0; }"
+            "QPushButton:hover { color: #58a6ff; }"
+        )
+        bl.addWidget(toggle_btn)
+
+        advanced_w = QWidget()
+        advanced_w.setVisible(False)
+        advanced_w.setStyleSheet(
+            "QWidget { background: #161b22; border: 1px solid #21262d; border-radius: 8px; }"
+        )
+        adv_bl = QVBoxLayout(advanced_w)
+        adv_bl.setContentsMargins(16, 10, 16, 12)
+        adv_bl.setSpacing(3)
+
+        def _adv_sec(txt):
             l = QLabel(txt)
             l.setStyleSheet(
-                "color: #e6edf3; font-size: 12px; font-weight: bold; background: transparent;"
+                "color: #8b949e; font-size: 10px; font-weight: bold; background: transparent;"
+                " border: none; padding-top: 6px;"
             )
             return l
 
-        def _radio(txt, desc, disabled=False):
-            w = QWidget()
-            w.setStyleSheet("background: transparent;")
-            h = QHBoxLayout(w)
-            h.setContentsMargins(8, 2, 4, 2)
-            h.setSpacing(8)
+        def _adv_rb(txt, disabled=False):
             rb = QRadioButton(txt)
+            rb.setEnabled(not disabled)
             rb.setStyleSheet(
-                "QRadioButton { color: #c9d1d9; font-size: 12px; background: transparent; }"
+                "QRadioButton { color: #e6edf3; font-size: 11px; background: transparent;"
+                " border: none; padding: 2px 8px; }"
+                "QRadioButton:checked { color: #58a6ff; font-weight: 600; }"
                 "QRadioButton:disabled { color: #484f58; }"
             )
-            rb.setEnabled(not disabled)
-            h.addWidget(rb)
-            dl = QLabel(desc)
-            dl.setStyleSheet(
-                f"color: {'#484f58' if disabled else '#6e7681'}; font-size: 11px; background: transparent;"
-            )
-            dl.setWordWrap(True)
-            h.addWidget(dl, 1)
-            return w, rb
+            return rb
 
-        def _sep():
-            f = QFrame()
-            f.setFrameShape(QFrame.Shape.HLine)
-            f.setStyleSheet("color: #21262d;")
-            return f
-
-        # ── STT ──────────────────────────────────────────────────────────
-        bl.addWidget(_sec_lbl("Puheentunnistus (STT) — mikrofoni → teksti"))
         stt_grp = QButtonGroup(page)
-        local_disabled = _is_frozen
-        _stt_local_row, stt_local_rb = _radio(
-            "🆓  Local Whisper (offline)",
-            "Ilmainen, ei API-avainta. Vaatii ffmpeg. Hitaampi." +
-            ("  ⚠️ Ei tuettu EXE-tilassa." if local_disabled else ""),
-            disabled=local_disabled
+        adv_bl.addWidget(_adv_sec("PUHEENTUNNISTUS"))
+        stt_local_rb = _adv_rb(
+            "Tietokone-tunnistus (ilmainen, offline)" +
+            ("  ⚠️ Ei tuettu EXE-tilassa" if _is_frozen else ""),
+            disabled=_is_frozen
         )
-        _stt_api_row, stt_api_rb = _radio(
-            "💳  OpenAI Whisper API",
-            "Maksettu krediiteillä. Nopea ja tarkka. Vaatii API-avaimen."
-        )
+        stt_api_rb = _adv_rb("OpenAI Whisper (maksettu, pilvi — nopea ja tarkka)")
         stt_grp.addButton(stt_local_rb, 0)
         stt_grp.addButton(stt_api_rb, 1)
         stt_api_rb.setChecked(True)
-        bl.addWidget(_stt_local_row)
-        bl.addWidget(_stt_api_row)
-        bl.addWidget(_sep())
+        adv_bl.addWidget(stt_local_rb)
+        adv_bl.addWidget(stt_api_rb)
 
-        # ── Translation ───────────────────────────────────────────────────
-        bl.addWidget(_sec_lbl("Käännös"))
         trans_grp = QButtonGroup(page)
-        _trans_g_row, trans_g_rb = _radio("🆓  Google Translate", "Ilmainen, ei tiliä. Hyvä laatu.")
-        _trans_d_row, trans_d_rb = _radio("🆓  DeepL", "500 000 merkkiä/kk ilmaiseksi. Vaatii ilmaisen tilin.")
-        _trans_o_row, trans_o_rb = _radio("💳  OpenAI GPT-4.1-mini", "Maksettu. Paras kontekstuaalinen laatu.")
+        adv_bl.addWidget(_adv_sec("KÄÄNNÖS"))
+        trans_g_rb = _adv_rb("Google Translate (ilmainen, ei tiliä)")
+        trans_d_rb = _adv_rb("DeepL (ilmainen 500k merkkiä/kk, vaatii ilmaisen tilin)")
+        trans_o_rb = _adv_rb("OpenAI GPT-käännös (maksettu, paras laatu)")
         trans_grp.addButton(trans_g_rb, 0)
         trans_grp.addButton(trans_d_rb, 1)
         trans_grp.addButton(trans_o_rb, 2)
         trans_g_rb.setChecked(True)
-        bl.addWidget(_trans_g_row)
-        bl.addWidget(_trans_d_row)
-        bl.addWidget(_trans_o_row)
-        bl.addWidget(_sep())
+        adv_bl.addWidget(trans_g_rb)
+        adv_bl.addWidget(trans_d_rb)
+        adv_bl.addWidget(trans_o_rb)
 
-        # ── TTS ───────────────────────────────────────────────────────────
-        bl.addWidget(_sec_lbl("Puhesynteesi (TTS) — teksti → ääni"))
         tts_grp = QButtonGroup(page)
-        _tts_e_row, tts_edge_rb = _radio("🆓  Edge TTS", "Ilmainen, Microsoftin neuraaliäänet. Suositeltu.")
-        _tts_el_row, tts_el_rb = _radio("💳  ElevenLabs", "Erittäin realistinen AI-ääni. Vaatii API-avaimen.")
+        adv_bl.addWidget(_adv_sec("ÄÄNISYNTEESI"))
+        tts_edge_rb = _adv_rb("Microsoft Neural Voice (ilmainen, suositeltu)")
+        tts_el_rb = _adv_rb("ElevenLabs (maksettu, erittäin realistinen)")
         tts_grp.addButton(tts_edge_rb, 0)
         tts_grp.addButton(tts_el_rb, 1)
         tts_edge_rb.setChecked(True)
-        bl.addWidget(_tts_e_row)
-        bl.addWidget(_tts_el_row)
-        bl.addWidget(_sep())
+        adv_bl.addWidget(tts_edge_rb)
+        adv_bl.addWidget(tts_el_rb)
+        bl.addWidget(advanced_w)
 
-        # ── Routing ───────────────────────────────────────────────────────
-        bl.addWidget(_sec_lbl("Äänilaitteiden reititys"))
-        rt_grp = QButtonGroup(page)
-        _rt_s_row, rt_simple_rb = _radio(
-            "🎧  Yksinkertainen",
-            "Vain kuulokkeet / kaiuttimet. Nopea asennus, ei lisäohjelmia."
-        )
-        _rt_g_row, rt_gaming_rb = _radio(
-            "🎮  Pelireititys",
-            "Voice Royalen TTS-ääni kuuluu mikrofonina peleissä ja Discordissa. "
-            "Vaatii VB-Cable + Voicemeeter Banana (ilmaisia)."
-        )
-        rt_grp.addButton(rt_simple_rb, 0)
-        rt_grp.addButton(rt_gaming_rb, 1)
-        rt_simple_rb.setChecked(True)
-        bl.addWidget(_rt_s_row)
-        bl.addWidget(_rt_g_row)
-        bl.addWidget(_sep())
+        _adv_open = [False]
 
-        # ── Lisälaitteet ──────────────────────────────────────────────────
-        bl.addWidget(_sec_lbl("Lisälaitteet ja integraatiot"))
-        from PyQt6.QtWidgets import QCheckBox
-        sd_cb = QCheckBox("Elgato Stream Deck — näppäinpaneeli")
-        sd_cb.setStyleSheet(
-            "QCheckBox { color: #c9d1d9; font-size: 12px; background: transparent; padding: 2px 8px; }"
-            "QCheckBox::indicator { width: 14px; height: 14px; }"
-        )
-        sd_desc = QLabel("Asennetaan Voice Royale -lisäosa Stream Deckiin. Näppäimet saavat oman UI:n.")
-        sd_desc.setStyleSheet("color: #6e7681; font-size: 11px; background: transparent; padding: 0 30px;")
-        sd_desc.setWordWrap(True)
-        bl.addWidget(sd_cb)
-        bl.addWidget(sd_desc)
+        def _toggle_adv():
+            _adv_open[0] = not _adv_open[0]
+            advanced_w.setVisible(_adv_open[0])
+            toggle_btn.setText(
+                "▾  Piilota yksityiskohtaiset asetukset" if _adv_open[0]
+                else "▸  Muokkaa yksittäisiä asetuksia"
+            )
 
-        ha_cb = QCheckBox("Home Assistant — älykotiintegraatio")
-        ha_cb.setStyleSheet(
-            "QCheckBox { color: #c9d1d9; font-size: 12px; background: transparent; padding: 2px 8px; }"
-            "QCheckBox::indicator { width: 14px; height: 14px; }"
-        )
-        ha_desc = QLabel("Yhdistä HA-asennukseesi — ohjaa medialaitteitasi soundboardista.")
-        ha_desc.setStyleSheet("color: #6e7681; font-size: 11px; background: transparent; padding: 0 30px;")
-        ha_desc.setWordWrap(True)
-        bl.addWidget(ha_cb)
-        bl.addWidget(ha_desc)
+        toggle_btn.clicked.connect(_toggle_adv)
 
-        # ── Summary ───────────────────────────────────────────────────────
+        # ── Summary label ─────────────────────────────────────────────────
         summary_lbl = QLabel()
         summary_lbl.setWordWrap(True)
-        summary_lbl.setStyleSheet(
-            "color: #3fb950; font-size: 11px; background: #0d2b14;"
-            " border: 1px solid #238636; border-radius: 6px; padding: 8px 12px;"
-        )
         bl.addWidget(summary_lbl)
 
+        # ── Logic (defined after all widgets exist) ────────────────────────
+
         def _update_summary():
-            needs = []
-            stt = "local" if stt_local_rb.isChecked() else "openai"
-            trans = "google" if trans_g_rb.isChecked() else ("deepl" if trans_d_rb.isChecked() else "openai")
-            tts = "edge" if tts_edge_rb.isChecked() else "elevenlabs"
-            routing = "gaming" if rt_gaming_rb.isChecked() else "simple"
+            if _adv_open[0]:
+                stt = "local" if stt_local_rb.isChecked() else "openai"
+                trans = ("google" if trans_g_rb.isChecked() else
+                         ("deepl" if trans_d_rb.isChecked() else "openai"))
+                tts = "edge" if tts_edge_rb.isChecked() else "elevenlabs"
+            else:
+                p = _PKGS[_selected_pkg[0]]
+                stt, trans, tts = p["stt"], p["trans"], p["tts"]
+            routing = "gaming" if gaming_cb.isChecked() else "simple"
             self._svc_stt = stt
             self._svc_trans = trans
             self._svc_tts = tts
             self._svc_routing = routing
             self._svc_streamdeck = sd_cb.isChecked()
             self._svc_ha = ha_cb.isChecked()
+            needs = []
             if stt == "openai" or trans == "openai" or tts == "elevenlabs":
                 needs.append("OpenAI API-avain")
             if tts == "elevenlabs":
                 needs.append("ElevenLabs API-avain")
             if stt == "local":
-                needs.append("ffmpeg")
+                needs.append("ffmpeg (ilmainen)")
             if routing == "gaming":
-                needs.append("VB-Cable + Voicemeeter Banana")
+                needs.append("VB-Cable + Voicemeeter (ilmaisia)")
             if sd_cb.isChecked():
                 needs.append("Stream Deck -lisäosa")
             if ha_cb.isChecked():
                 needs.append("HA URL + token")
             if needs:
-                summary_lbl.setText("Tarvitset: " + ", ".join(needs))
+                summary_lbl.setText("Tarvitaan vielä:  " + "  •  ".join(needs))
                 summary_lbl.setStyleSheet(
                     "color: #e3b341; font-size: 11px; background: #2b1f0a;"
                     " border: 1px solid #9e6a03; border-radius: 6px; padding: 8px 12px;"
                 )
             else:
-                summary_lbl.setText("✅ Ilmainen stack — ei API-avainta eikä lisäohjelmia tarvita.")
+                summary_lbl.setText("✅  Täysin ilmainen — ei tarvita tiliä eikä luottokorttia.")
                 summary_lbl.setStyleSheet(
                     "color: #3fb950; font-size: 11px; background: #0d2b14;"
                     " border: 1px solid #238636; border-radius: 6px; padding: 8px 12px;"
                 )
 
+        def _select_pkg(idx):
+            _selected_pkg[0] = idx
+            for i, c in enumerate(card_widgets):
+                if i == idx:
+                    c.setStyleSheet(
+                        "QFrame { background: #0d2b14; border: 2px solid #238636; border-radius: 10px; }"
+                    )
+                else:
+                    c.setStyleSheet(
+                        "QFrame { background: #161b22; border: 1px solid #30363d; border-radius: 10px; }"
+                    )
+            p = _PKGS[idx]
+            for rb in [stt_local_rb, stt_api_rb, trans_g_rb, trans_d_rb,
+                       trans_o_rb, tts_edge_rb, tts_el_rb]:
+                rb.blockSignals(True)
+            if p["stt"] == "local" and not _is_frozen:
+                stt_local_rb.setChecked(True)
+            else:
+                stt_api_rb.setChecked(True)
+            trans_g_rb.setChecked(p["trans"] == "google")
+            trans_d_rb.setChecked(p["trans"] == "deepl")
+            trans_o_rb.setChecked(p["trans"] == "openai")
+            tts_edge_rb.setChecked(p["tts"] == "edge")
+            tts_el_rb.setChecked(p["tts"] == "elevenlabs")
+            for rb in [stt_local_rb, stt_api_rb, trans_g_rb, trans_d_rb,
+                       trans_o_rb, tts_edge_rb, tts_el_rb]:
+                rb.blockSignals(False)
+            _update_summary()
+
+        gaming_cb.toggled.connect(lambda *_: _update_summary())
+        sd_cb.toggled.connect(lambda *_: _update_summary())
+        ha_cb.toggled.connect(lambda *_: _update_summary())
         stt_grp.buttonToggled.connect(lambda *_: _update_summary())
         trans_grp.buttonToggled.connect(lambda *_: _update_summary())
         tts_grp.buttonToggled.connect(lambda *_: _update_summary())
-        rt_grp.buttonToggled.connect(lambda *_: _update_summary())
-        sd_cb.toggled.connect(lambda *_: _update_summary())
-        ha_cb.toggled.connect(lambda *_: _update_summary())
-        _update_summary()
+        _select_pkg(1)  # default: Suositeltu
 
         bl.addStretch()
         scroll.setWidget(body)
@@ -8578,7 +8755,6 @@ class SetupWizard(QDialog):
         nxt.setMinimumWidth(140)
         nxt.clicked.connect(self._nav_next)
         nav.addWidget(nxt)
-
         nav_w = QWidget()
         nav_w.setStyleSheet("background: #0d1117;")
         nav_w.setLayout(nav)
