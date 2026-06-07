@@ -292,7 +292,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.60"
+APP_VERSION = "1.3.61"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -8994,16 +8994,17 @@ class SetupWizard(QDialog):
         ffmpeg_rl.addWidget(ffmpeg_icon)
         ffmpeg_rl.addWidget(ffmpeg_name)
         ffmpeg_rl.addWidget(ffmpeg_desc, 1)
-        if not _has_ffmpeg and sys.platform == "win32":
-            ffmpeg_install_btn = QPushButton("winget install ffmpeg")
-            ffmpeg_install_btn.setFixedWidth(160)
+        if not _has_ffmpeg:
+            import queue as _ffq
+            _ff_result_q = _ffq.Queue()
+            _ff_btn_label = "winget install ffmpeg" if sys.platform == "win32" else "brew install ffmpeg"
+            ffmpeg_install_btn = QPushButton(_ff_btn_label)
+            ffmpeg_install_btn.setFixedWidth(170)
             ffmpeg_install_btn.setStyleSheet(
                 "QPushButton { background: #14281e; border: 1px solid #1a5a30; border-radius: 5px;"
                 " color: #00cc6a; padding: 3px 6px; font-size: 11px; font-weight: 700; }"
                 "QPushButton:hover { border-color: #00FF6A; color: #5AFFAA; }"
             )
-            import queue as _ffq
-            _ff_result_q = _ffq.Queue()
             _ff_timer = QTimer(ffmpeg_install_btn)
 
             def _poll_ff():
@@ -9019,43 +9020,57 @@ class SetupWizard(QDialog):
                     ffmpeg_install_btn.setVisible(False)
                 else:
                     ffmpeg_install_btn.setEnabled(True)
-                    ffmpeg_install_btn.setText("winget install ffmpeg")
+                    ffmpeg_install_btn.setText(_ff_btn_label)
                     ffmpeg_desc.setText("Ei löydy asennuksen jälkeen — käynnistä ohjelma uudelleen")
 
             _ff_timer.timeout.connect(_poll_ff)
 
-            def _run_winget_ffmpeg():
+            def _run_ffmpeg_install():
                 import subprocess as _sp2, shutil as _sh2
                 ffmpeg_install_btn.setEnabled(False)
                 ffmpeg_install_btn.setText("Asentaa…")
                 _ff_timer.start(500)
 
                 def _do():
-                    _sp2.run(
-                        ["winget", "install", "--id", "Gyan.FFmpeg", "-e",
-                         "--accept-source-agreements", "--accept-package-agreements"],
-                        creationflags=getattr(_sp2, "CREATE_NEW_CONSOLE", 0),
-                    )
-                    # Refresh PATH from registry — current process doesn't see it otherwise
-                    try:
-                        import winreg as _wreg
-                        _k = _wreg.OpenKey(_wreg.HKEY_LOCAL_MACHINE,
-                            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")
-                        _sp_val, _ = _wreg.QueryValueEx(_k, "Path"); _wreg.CloseKey(_k)
-                    except Exception:
-                        _sp_val = ""
-                    try:
-                        import winreg as _wreg2
-                        _k2 = _wreg2.OpenKey(_wreg2.HKEY_CURRENT_USER, "Environment")
-                        _up_val, _ = _wreg2.QueryValueEx(_k2, "Path"); _wreg2.CloseKey(_k2)
-                    except Exception:
-                        _up_val = ""
-                    os.environ["PATH"] = _sp_val + ";" + _up_val + ";" + os.environ.get("PATH", "")
+                    if sys.platform == "win32":
+                        _sp2.run(
+                            ["winget", "install", "--id", "Gyan.FFmpeg", "-e",
+                             "--accept-source-agreements", "--accept-package-agreements"],
+                            creationflags=getattr(_sp2, "CREATE_NEW_CONSOLE", 0),
+                        )
+                        # Refresh PATH from Windows registry
+                        try:
+                            import winreg as _wreg
+                            _k = _wreg.OpenKey(_wreg.HKEY_LOCAL_MACHINE,
+                                r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")
+                            _sp_val, _ = _wreg.QueryValueEx(_k, "Path"); _wreg.CloseKey(_k)
+                        except Exception:
+                            _sp_val = ""
+                        try:
+                            import winreg as _wreg2
+                            _k2 = _wreg2.OpenKey(_wreg2.HKEY_CURRENT_USER, "Environment")
+                            _up_val, _ = _wreg2.QueryValueEx(_k2, "Path"); _wreg2.CloseKey(_k2)
+                        except Exception:
+                            _up_val = ""
+                        os.environ["PATH"] = _sp_val + ";" + _up_val + ";" + os.environ.get("PATH", "")
+                    else:
+                        # macOS: find brew and install ffmpeg
+                        _brew = (_sh2.which("brew")
+                                 or ("/opt/homebrew/bin/brew" if os.path.isfile("/opt/homebrew/bin/brew") else None)
+                                 or ("/usr/local/bin/brew" if os.path.isfile("/usr/local/bin/brew") else None))
+                        if _brew:
+                            _sp2.run([_brew, "install", "ffmpeg"],
+                                     capture_output=True, timeout=600)
+                        # Add Homebrew bin dirs to PATH so shutil.which finds ffmpeg
+                        for _hb in ["/opt/homebrew/bin", "/usr/local/bin"]:
+                            if os.path.isfile(os.path.join(_hb, "ffmpeg")):
+                                os.environ["PATH"] = _hb + ":" + os.environ.get("PATH", "")
+                                break
                     _ff_result_q.put(bool(_sh2.which("ffmpeg")))
 
                 threading.Thread(target=_do, daemon=True).start()
 
-            ffmpeg_install_btn.clicked.connect(_run_winget_ffmpeg)
+            ffmpeg_install_btn.clicked.connect(_run_ffmpeg_install)
             ffmpeg_rl.addWidget(ffmpeg_install_btn)
         bl.addWidget(ffmpeg_row)
 
