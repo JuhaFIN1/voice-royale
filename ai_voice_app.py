@@ -292,7 +292,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.63"
+APP_VERSION = "1.3.64"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -5503,28 +5503,32 @@ class App(QWidget):
         self.populate_input_devices()
 
     def populate_input_devices(self):
+        # Read saved selection BEFORE modifying the combo — addItem fires currentIndexChanged
+        # which calls on_input_device_changed and would overwrite history_data mid-population
+        saved_input_device = self.history_data.get("selected_input_device")
+        saved_input_name = self.history_data.get("selected_input_device_name", "")
+
+        self.input_device_combo.blockSignals(True)
         self.input_device_combo.clear()
         devices = list_input_devices()
         if not devices:
             self.input_device_combo.addItem("No audio input devices detected", -1)
+            self.input_device_combo.blockSignals(False)
             self.append_status("No audio input devices detected")
             return
 
         _virtual_kw = ["voicemeeter", "vb-audio", "voicemod"]
         _exclude_kw = ["bthhfenum", "microsoft sound mapper", "primary sound capture"]
 
-        # Deduplicate by friendly name, prefer highest sample rate
         best: dict[str, tuple] = {}  # friendly_name -> (index, name, samplerate)
         for index, name in devices:
             n = name.lower()
-            # Skip GUID-style names and system entries
             if name.startswith("{") or any(k in n for k in _exclude_kw):
                 continue
             try:
                 sr = sd.query_devices(index)["default_samplerate"]
             except Exception:
                 sr = 0
-            # Use full name as key for dedup
             if name not in best or sr > best[name][2]:
                 best[name] = (index, name, sr)
 
@@ -5537,7 +5541,6 @@ class App(QWidget):
             else:
                 physical.append((index, fullname))
 
-        # Sort physical: Rode first, then others alphabetically
         physical.sort(key=lambda x: (0 if "rode" in x[1].lower() else 1, x[1]))
 
         for index, name in physical:
@@ -5547,23 +5550,25 @@ class App(QWidget):
 
         self.append_status(f"Found {self.input_device_combo.count()} input devices ({len(physical)} physical, {len(virtual)} virtual)")
         _fit_combo_dropdown(self.input_device_combo)
+        self.input_device_combo.blockSignals(False)
 
-        # Restore previously selected input device — name-based first because macOS
-        # re-enumerates PortAudio indices when Continuity/AirPlay devices appear
-        saved_input_device = self.history_data.get("selected_input_device")
-        saved_input_name = self.history_data.get("selected_input_device_name", "")
+        # Restore by name first (stable across PortAudio re-enumeration), then by index
         matched = False
         if saved_input_name:
             for i in range(self.input_device_combo.count()):
                 if self.input_device_combo.itemText(i) == saved_input_name:
-                    self.input_device_combo.setCurrentIndex(i)
+                    self.input_device_combo.setCurrentIndex(i)  # fires on_input_device_changed
                     matched = True
                     break
         if not matched and saved_input_device is not None:
             for i in range(self.input_device_combo.count()):
                 if self.input_device_combo.itemData(i) == saved_input_device:
-                    self.input_device_combo.setCurrentIndex(i)
+                    self.input_device_combo.setCurrentIndex(i)  # fires on_input_device_changed
+                    matched = True
                     break
+        if not matched:
+            # No saved preference or device not found — combo is at 0, ensure monitor starts
+            self.on_input_device_changed()
 
     def get_selected_devices(self):
         """Get list of selected output device indices (or None if none)."""
@@ -5647,6 +5652,7 @@ class App(QWidget):
             self.wake_instructions_label.setVisible(False)
             self._start_mic_monitor()
         else:
+            self._stop_mic_monitor()
             ok = self._start_wake_listener()
             if ok:
                 self.listen_button.setText("⏹  Stop")
@@ -5656,7 +5662,6 @@ class App(QWidget):
                 kw_display = os.path.basename(custom) if custom else kw
                 self.wake_status_label.setText(f"Listening: {kw_display}")
                 self._mic_peak_ref[0] = 0.0
-                self._stop_mic_monitor()
                 secs = self.settings.get("wake_command_seconds", 6.0)
                 self.wake_instructions_label.setText(
                     f'Say  "{kw_display}"  then within {secs:.0f}s:\n'
