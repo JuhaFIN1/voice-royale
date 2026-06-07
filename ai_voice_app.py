@@ -267,7 +267,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.48"
+APP_VERSION = "1.3.49"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -283,6 +283,7 @@ DEFAULT_SETTINGS = {
     "default_target_lang": "Auto",
     "default_tts_backend": DEFAULT_TTS_BACKEND,
     "translation_backend": "Google (free)",
+    "stt_backend": "OpenAI Whisper API",
     "deepl_api_key": "",
     "pixabay_api_key": "",
     "wake_command_seconds": 6.0,
@@ -2827,13 +2828,51 @@ def record_wav_from_mic(duration: float = 5.0, samplerate: int = 16000, channels
         raise RuntimeError(f"Failed to record audio: {e}") from e
 
 
-def transcribe_audio_wav(wav_bytes: bytes, language: str = None) -> str:
+_local_whisper_model = None
+_local_whisper_model_name: str = ""
+
+def _load_local_whisper(model_name: str):
+    global _local_whisper_model, _local_whisper_model_name
+    if _local_whisper_model is not None and _local_whisper_model_name == model_name:
+        return _local_whisper_model
+    import whisper as _whisper
+    print(f"[Whisper] Loading local model '{model_name}'… (first use downloads ~{{'tiny':'75MB','base':'145MB','small':'460MB'}.get(model_name,'?')})")
+    _local_whisper_model = _whisper.load_model(model_name)
+    _local_whisper_model_name = model_name
+    return _local_whisper_model
+
+
+def transcribe_audio_wav(wav_bytes: bytes, language: str = None, stt_backend: str = "OpenAI Whisper API") -> str:
     try:
         if len(wav_bytes) < 100:
             return ""
         if not wav_bytes.startswith(b"RIFF"):
             return ""
 
+        if stt_backend.startswith("Local Whisper"):
+            # e.g. "Local Whisper (base)" → "base"
+            model_name = "base"
+            if "(" in stt_backend and ")" in stt_backend:
+                model_name = stt_backend.split("(")[1].rstrip(")")
+            import tempfile, os as _os
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp.write(wav_bytes)
+                tmp_path = tmp.name
+            try:
+                model = _load_local_whisper(model_name)
+                kwargs = {}
+                if language:
+                    kwargs["language"] = language
+                result = model.transcribe(tmp_path, **kwargs)
+                text = result.get("text", "")
+            finally:
+                try:
+                    _os.unlink(tmp_path)
+                except Exception:
+                    pass
+            return text.strip() if text else ""
+
+        # OpenAI Whisper API (default)
         with io.BytesIO(wav_bytes) as buffer:
             buffer.name = "speech.wav"
             kwargs = {"model": "whisper-1", "file": buffer}
@@ -3015,14 +3054,16 @@ class WakeListener:
         self._mode = None
         self._keyword = "jarvis"
         self._level_callback = None
+        self._stt_backend = "OpenAI Whisper API"
 
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self, access_key: str, keyword: str, custom_ppn_path: str, device_index, level_callback=None):
+    def start(self, access_key: str, keyword: str, custom_ppn_path: str, device_index, level_callback=None, stt_backend: str = "OpenAI Whisper API"):
         self._keyword = keyword.lower()
         self._device_index = device_index
         self._level_callback = level_callback
+        self._stt_backend = stt_backend
 
         # Try Picovoice Porcupine first
         if PORCUPINE_AVAILABLE and access_key:
@@ -3203,7 +3244,7 @@ class WakeListener:
                     wf.writeframes(audio_int16.tobytes())
 
                 try:
-                    transcript = transcribe_audio_wav(wav_buf.getvalue())
+                    transcript = transcribe_audio_wav(wav_buf.getvalue(), stt_backend=getattr(self, "_stt_backend", "OpenAI Whisper API"))
                     if transcript:
                         self.on_status(f"Wake heard: \"{transcript}\"")
                         if self._keyword in transcript.lower():
@@ -5596,6 +5637,7 @@ class App(QWidget):
             custom_ppn_path=self.settings.get("wake_custom_ppn_path", ""),
             device_index=self.get_selected_input_device(),
             level_callback=self._on_wake_level,
+            stt_backend=self.settings.get("stt_backend", "OpenAI Whisper API"),
         )
 
     def _on_wake_detected(self):
@@ -5659,7 +5701,7 @@ class App(QWidget):
             wav_bytes = wav_buf.getvalue()
 
             self.append_status("Transcribing wake command...")
-            transcript = transcribe_audio_wav(wav_bytes)
+            transcript = transcribe_audio_wav(wav_bytes, stt_backend=self.settings.get("stt_backend", "OpenAI Whisper API"))
             if not transcript:
                 self.append_status("Wake command: empty transcription.")
                 return
@@ -5822,7 +5864,7 @@ class App(QWidget):
 
             self.append_status(f"Sending {total_seconds:.1f}s audio to Whisper...")
             try:
-                transcribed = transcribe_audio_wav(wav_bytes)
+                transcribed = transcribe_audio_wav(wav_bytes, stt_backend=self.settings.get("stt_backend", "OpenAI Whisper API"))
             except Exception as e:
                 traceback.print_exc()
                 self.append_status(f"Transcription failed: {e}")
@@ -6700,6 +6742,19 @@ def open_settings_dialog(parent_app: "App") -> None:
         "Rekisteröidy: pixabay.com → API → Get API Key."
     ))
 
+    f1.addRow(_header("Puheentunnistus (STT)"))
+
+    stt_backend_combo = _QComboBox()
+    for b in ("OpenAI Whisper API", "Local Whisper (tiny)", "Local Whisper (base)", "Local Whisper (small)"):
+        stt_backend_combo.addItem(b)
+    stt_backend_combo.setCurrentText(settings.get("stt_backend", "OpenAI Whisper API"))
+    f1.addRow(_lbl("STT-moottori:"), stt_backend_combo)
+    f1.addRow("", _desc(
+        "OpenAI Whisper API — pilvipalvelu, hyvä laatu, vaatii maksullisen OpenAI-avaimen.\n"
+        "Local Whisper — ilmainen, offline, CPU-pohjainen. tiny=75MB, base=145MB, small=460MB.\n"
+        "Paikallinen malli ladataan automaattisesti ensimmäisellä käyttökerralla."
+    ))
+
     f1.addRow(_header("Puhesynteesi (TTS)"))
 
     backend_combo = _QComboBox()
@@ -7164,6 +7219,7 @@ def open_settings_dialog(parent_app: "App") -> None:
         ("pvporcupine",    "pvporcupine",     False, "Wake word offline (valinnainen)"),
         ("pyrubberband",   "pyrubberband",    False, "Voice FX laatu (valinnainen)"),
         ("pydub",          "pydub",           False, "MP3/OGG soundboard (valinnainen)"),
+        ("whisper",        "openai-whisper",  False, "Paikallinen STT (valinnainen, vaatii ffmpeg)"),
     ]
 
     def _pkg_status(import_name, pip_name):
@@ -7957,6 +8013,7 @@ def open_settings_dialog(parent_app: "App") -> None:
             "default_target_lang": lang_combo.currentText(),
             "default_tts_backend": backend_combo.currentText(),
             "translation_backend": trans_backend_combo.currentText(),
+            "stt_backend": stt_backend_combo.currentText(),
             "deepl_api_key": deepl_key_edit.text().strip(),
             "pixabay_api_key": pixabay_key_edit.text().strip(),
         }
@@ -8181,6 +8238,7 @@ class SetupWizard(QDialog):
             ("pvporcupine",     "pvporcupine",      False, "Wake word (valinnainen)"),
             ("pyrubberband",    "pyrubberband",     False, "Voice FX laatu (valinnainen)"),
             ("pydub",           "pydub",            False, "MP3/OGG soundboard (valinnainen)"),
+            ("whisper",         "openai-whisper",   False, "Paikallinen STT (valinnainen, vaatii ffmpeg)"),
         ]
 
         def _ck(imp, pip):
