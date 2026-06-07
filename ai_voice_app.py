@@ -292,7 +292,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.62"
+APP_VERSION = "1.3.63"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -5548,10 +5548,18 @@ class App(QWidget):
         self.append_status(f"Found {self.input_device_combo.count()} input devices ({len(physical)} physical, {len(virtual)} virtual)")
         _fit_combo_dropdown(self.input_device_combo)
 
-        # Restore previously selected input device
+        # Restore previously selected input device — name-based first because macOS
+        # re-enumerates PortAudio indices when Continuity/AirPlay devices appear
         saved_input_device = self.history_data.get("selected_input_device")
-        if saved_input_device is not None:
-            # Find the index in the combo box that matches the saved device index
+        saved_input_name = self.history_data.get("selected_input_device_name", "")
+        matched = False
+        if saved_input_name:
+            for i in range(self.input_device_combo.count()):
+                if self.input_device_combo.itemText(i) == saved_input_name:
+                    self.input_device_combo.setCurrentIndex(i)
+                    matched = True
+                    break
+        if not matched and saved_input_device is not None:
             for i in range(self.input_device_combo.count()):
                 if self.input_device_combo.itemData(i) == saved_input_device:
                     self.input_device_combo.setCurrentIndex(i)
@@ -5583,6 +5591,7 @@ class App(QWidget):
         selected_device = self.get_selected_input_device()
         if selected_device is not None:
             self.history_data["selected_input_device"] = selected_device
+            self.history_data["selected_input_device_name"] = self.input_device_combo.currentText()
             save_history_data(self.history_data)
         self._stop_mic_monitor()
         self._start_mic_monitor()
@@ -10822,6 +10831,12 @@ class SetupWizard(QDialog):
                     selected_out.append(_def_idx)
             if self._dev_selected_input is not None:
                 hd["selected_input_device"] = self._dev_selected_input
+                _dev_name = next(
+                    (n for i, n in self._dev_input_devices if i == self._dev_selected_input),
+                    None,
+                )
+                if _dev_name:
+                    hd["selected_input_device_name"] = f"🎤 {_dev_name}"
             if selected_out:
                 hd["selected_output_devices"] = selected_out
             with open(HISTORY_FILE, "w", encoding="utf-8") as f:
