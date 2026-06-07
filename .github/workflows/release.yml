@@ -32,6 +32,7 @@ jobs:
           pip install pyinstaller
           pip install PyQt6 requests python-dotenv sounddevice numpy keyboard openai pyttsx3 edge-tts scipy deep-translator duckduckgo-search
           pip install pvporcupine || true
+          pip install faster-whisper || true
         shell: pwsh
 
       - name: Build with PyInstaller
@@ -51,6 +52,8 @@ jobs:
             --collect-all sounddevice `
             --collect-all certifi `
             --collect-all duckduckgo_search `
+            --collect-all faster_whisper `
+            --collect-all ctranslate2 `
             --noconfirm `
             ai_voice_app.py
         shell: pwsh
@@ -132,6 +135,7 @@ jobs:
           pip install pyinstaller Pillow
           pip install PyQt6 requests python-dotenv sounddevice numpy openai pyttsx3 edge-tts scipy deep-translator duckduckgo-search
           pip install pvporcupine || true
+          pip install faster-whisper || true
 
       - name: Convert icon to icns
         run: |
@@ -163,6 +167,8 @@ jobs:
             --collect-all certifi \
             --collect-all pyttsx3 \
             --collect-all duckduckgo_search \
+            --collect-all faster_whisper \
+            --collect-all ctranslate2 \
             --icon "iconimage.icns" \
             --noconfirm \
             ai_voice_app.py
@@ -242,6 +248,7 @@ jobs:
           arch -x86_64 $X86_PY -m pip install pyinstaller Pillow
           arch -x86_64 $X86_PY -m pip install PyQt6 requests python-dotenv sounddevice numpy openai pyttsx3 edge-tts scipy deep-translator duckduckgo-search
           arch -x86_64 $X86_PY -m pip install pvporcupine || true
+          arch -x86_64 $X86_PY -m pip install faster-whisper || true
 
       - name: Convert icon to icns
         run: |
@@ -274,6 +281,8 @@ jobs:
             --collect-all certifi \
             --collect-all pyttsx3 \
             --collect-all duckduckgo_search \
+            --collect-all faster_whisper \
+            --collect-all ctranslate2 \
             --icon "iconimage.icns" \
             --noconfirm \
             ai_voice_app.py

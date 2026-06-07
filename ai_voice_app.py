@@ -267,7 +267,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.54"
+APP_VERSION = "1.3.55"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -2837,10 +2837,10 @@ def _load_local_whisper(model_name: str):
     global _local_whisper_model, _local_whisper_model_name
     if _local_whisper_model is not None and _local_whisper_model_name == model_name:
         return _local_whisper_model
-    import whisper as _whisper
+    from faster_whisper import WhisperModel
     _sizes = {"tiny": "75MB", "base": "145MB", "small": "460MB"}
-    print(f"[Whisper] Loading local model '{model_name}'… (first use downloads ~{_sizes.get(model_name, '?')})")
-    _local_whisper_model = _whisper.load_model(model_name)
+    print(f"[Whisper] Loading faster-whisper model '{model_name}'… (first use downloads ~{_sizes.get(model_name, '?')})")
+    _local_whisper_model = WhisperModel(model_name, device="cpu", compute_type="int8")
     _local_whisper_model_name = model_name
     return _local_whisper_model
 
@@ -2866,8 +2866,8 @@ def transcribe_audio_wav(wav_bytes: bytes, language: str = None, stt_backend: st
                 kwargs = {}
                 if language:
                     kwargs["language"] = language
-                result = model.transcribe(tmp_path, **kwargs)
-                text = result.get("text", "")
+                segments, _info = model.transcribe(tmp_path, **kwargs)
+                text = " ".join(seg.text for seg in segments)
             finally:
                 try:
                     _os.unlink(tmp_path)
@@ -6761,7 +6761,7 @@ def open_settings_dialog(parent_app: "App") -> None:
     f1.addRow(_lbl("STT-moottori:"), stt_backend_combo)
     f1.addRow("", _desc(
         "OpenAI Whisper API — pilvipalvelu, hyvä laatu, vaatii maksullisen OpenAI-avaimen.\n"
-        "Local Whisper — ilmainen, offline, CPU-pohjainen. tiny=75MB, base=145MB, small=460MB.\n"
+        "Local Whisper — ilmainen, offline, CPU-pohjainen (faster-whisper). tiny=75MB, base=145MB, small=460MB.\n"
         "Paikallinen malli ladataan automaattisesti ensimmäisellä käyttökerralla."
     ))
 
@@ -7229,7 +7229,7 @@ def open_settings_dialog(parent_app: "App") -> None:
         ("pvporcupine",    "pvporcupine",     False, "Wake word offline (valinnainen)"),
         ("pyrubberband",   "pyrubberband",    False, "Voice FX laatu (valinnainen)"),
         ("pydub",          "pydub",           False, "MP3/OGG soundboard (valinnainen)"),
-        ("whisper",        "openai-whisper",  False, "Paikallinen STT (valinnainen, vaatii ffmpeg)"),
+        ("faster_whisper", "faster-whisper",  False, "Paikallinen STT offline (valinnainen)"),
     ]
 
     def _pkg_status(import_name, pip_name):
@@ -7891,7 +7891,7 @@ def open_settings_dialog(parent_app: "App") -> None:
     ha_url_row = QHBoxLayout()
     ha_url_row.addWidget(_lbl("HA URL:"))
     ha_url_edit = QLineEdit(settings.get("ha_url", ""))
-    ha_url_edit.setPlaceholderText("http://192.168.1.94:8123  tai  https://homeassistant.droneandme.com")
+    ha_url_edit.setPlaceholderText("http://homeassistant.local:8123  tai  https://ha.esimerkki.com")
     ha_url_row.addWidget(ha_url_edit, 1)
     ha_vbox.addLayout(ha_url_row)
 
@@ -8464,13 +8464,13 @@ class SetupWizard(QDialog):
             {
                 "icon": "🆓", "title": "Ilmainen", "badge": None,
                 "rows": [
-                    ("Puheentunnistus", "Tietokone — offline" if not _is_frozen else "OpenAI *"),
+                    ("Puheentunnistus", "Tietokone — offline"),
                     ("Käännös", "Google Translate"),
                     ("Ääni", "Microsoft Neural Voice"),
                 ],
-                "req": "✅  Ei tiliä eikä kuluja" if not _is_frozen else "⚠️  Vaatii OpenAI API-avaimen",
-                "req_ok": not _is_frozen,
-                "stt": "local" if not _is_frozen else "openai",
+                "req": "✅  Ei tiliä eikä kuluja",
+                "req_ok": True,
+                "stt": "local",
                 "trans": "google", "tts": "edge",
             },
             {
@@ -8609,9 +8609,7 @@ class SetupWizard(QDialog):
         stt_grp = QButtonGroup(page)
         adv_bl.addWidget(_adv_sec("PUHEENTUNNISTUS"))
         stt_local_rb = _adv_rb(
-            "Tietokone-tunnistus (ilmainen, offline)" +
-            ("  ⚠️ Ei tuettu EXE-tilassa" if _is_frozen else ""),
-            disabled=_is_frozen
+            "Tietokone-tunnistus (ilmainen, offline — faster-whisper)"
         )
         stt_api_rb = _adv_rb("OpenAI Whisper (maksettu, pilvi — nopea ja tarkka)")
         stt_grp.addButton(stt_local_rb, 0)
@@ -8779,7 +8777,7 @@ class SetupWizard(QDialog):
             ("pvporcupine",     "pvporcupine",      False, "Wake word (valinnainen)"),
             ("pyrubberband",    "pyrubberband",     False, "Voice FX laatu (valinnainen)"),
             ("pydub",           "pydub",            False, "MP3/OGG soundboard (valinnainen)"),
-            ("whisper",         "openai-whisper",   False, "Paikallinen STT (valinnainen, vaatii ffmpeg)"),
+            ("faster_whisper",  "faster-whisper",   False, "Paikallinen STT offline (valinnainen)"),
         ]
 
         def _ck(imp, pip):
@@ -8867,6 +8865,10 @@ class SetupWizard(QDialog):
                 summary_lbl.setStyleSheet("color: #e3b341; font-size: 12px; background: transparent;")
                 return
             missing = [pip for imp, pip, req, _ in _PKG_LIST if req and not _ck(imp, pip)[0]]
+            # Also install faster-whisper if user selected local STT
+            if getattr(self, "_svc_stt", "") == "local" and not _ck("faster_whisper", "faster-whisper")[0]:
+                if "faster-whisper" not in missing:
+                    missing.append("faster-whisper")
             if not missing:
                 summary_lbl.setText("✅ Kaikki asennettu.")
                 return
@@ -8913,8 +8915,7 @@ class SetupWizard(QDialog):
 
         if getattr(sys, "frozen", False):
             frozen_note = QLabel(
-                "✅ Kaikki pakolliset kirjastot on bundlattu asennuspakettiin.\n"
-                "Valinnaiset kirjastot vaativat Python-lähdeversion."
+                "✅ Kaikki kirjastot — myös faster-whisper — on bundlattu asennuspakettiin."
             )
             frozen_note.setStyleSheet(
                 "color: #3fb950; font-size: 11px; background: transparent;"
@@ -8940,8 +8941,8 @@ class SetupWizard(QDialog):
             f"color: {'#e6edf3' if _has_ffmpeg else '#e3b341'}; background: transparent;"
         )
         ffmpeg_desc = QLabel(
-            "Edge TTS + Local Whisper" if _has_ffmpeg
-            else "Edge TTS + Local Whisper — ei löydy PATH:ista"
+            "Edge TTS (faster-whisper ei tarvitse ffmpegiä)" if _has_ffmpeg
+            else "Edge TTS — ei löydy PATH:ista  (faster-whisper toimii ilman ffmpegiä)"
         )
         ffmpeg_desc.setStyleSheet("background: transparent; font-size: 11px; color: #8b949e;")
         ffmpeg_rl.addWidget(ffmpeg_icon)
@@ -9719,7 +9720,7 @@ class SetupWizard(QDialog):
 
         bl.addWidget(_lbl("Home Assistant -osoite"))
         url_edit = QLineEdit()
-        url_edit.setPlaceholderText("http://192.168.1.94:8123  tai  https://homeassistant.droneandme.com")
+        url_edit.setPlaceholderText("http://homeassistant.local:8123  tai  https://ha.esimerkki.com")
         url_edit.setFixedHeight(34)
         url_edit.setStyleSheet(
             "QLineEdit { background: #161b22; border: 1px solid #30363d; border-radius: 6px;"

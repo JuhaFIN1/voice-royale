@@ -40,7 +40,10 @@ echo.
     --hidden-import comtypes.stream ^
     --collect-all edge_tts ^
     --collect-all sounddevice ^
-    --collect-all certifi ^\r\n    --collect-all duckduckgo_search ^
+    --collect-all certifi ^
+    --collect-all duckduckgo_search ^
+    --collect-all faster_whisper ^
+    --collect-all ctranslate2 ^
     --noconfirm ^
     %SCRIPT%
 
