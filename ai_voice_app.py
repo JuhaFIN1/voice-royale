@@ -67,6 +67,19 @@ import requests
 import sounddevice as sd
 from dotenv import load_dotenv
 from openai import OpenAI
+
+# macOS 26+ (Tahoe): Qt's C++ static initializers run during dlopen(QtCore.abi3.so)
+# before NSApplication is set up, causing CFBundleGetMainBundle() to return NULL.
+# macOS 26 crashes in __CFCheckCFInfoPACSignature on the NULL pointer (SIGSEGV).
+# NSApplicationLoad() must be called before any PyQt6 import to fix this.
+if sys.platform == "darwin":
+    try:
+        import ctypes as _ct
+        _appkit = _ct.CDLL("/System/Library/Frameworks/AppKit.framework/AppKit")
+        _appkit.NSApplicationLoad()
+    except (OSError, AttributeError):
+        pass
+
 from PyQt6.QtCore import QEvent, QMimeData, QObject, QPoint, QRectF, QSize, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QDrag, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygon
 from PyQt6.QtWidgets import (
@@ -267,7 +280,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.58"
+APP_VERSION = "1.3.59"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
