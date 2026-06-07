@@ -267,7 +267,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.51"
+APP_VERSION = "1.3.52"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1321,10 +1321,12 @@ def _ha_api(method: str, path: str, settings: dict, json_data: dict = None) -> d
         "Content-Type": "application/json",
     }
     url = f"{ha_url}/api{path}"
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     if method.upper() == "GET":
-        r = requests.get(url, headers=headers, timeout=6)
+        r = requests.get(url, headers=headers, timeout=10, verify=False)
     else:
-        r = requests.post(url, headers=headers, json=json_data or {}, timeout=6)
+        r = requests.post(url, headers=headers, json=json_data or {}, timeout=10, verify=False)
     r.raise_for_status()
     try:
         return r.json()
@@ -4468,9 +4470,15 @@ class App(QWidget):
         scroll.setWidget(container)
         scroll.setStyleSheet(
             "QScrollArea { border: none; background: transparent; }"
-            "QScrollBar:horizontal { height: 8px; background: #111; border-radius: 4px; }"
-            "QScrollBar::handle:horizontal { background: #444; border-radius: 4px; min-width: 30px; }"
-            "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }"
+            "QScrollBar:horizontal { height: 16px; background: #0d0d1a; border-radius: 8px; margin: 0 18px; }"
+            "QScrollBar::handle:horizontal { background: #3a3a5a; border-radius: 7px; min-width: 40px; }"
+            "QScrollBar::handle:horizontal:hover { background: #5a5a8a; }"
+            "QScrollBar::add-line:horizontal { width: 18px; background: #141428;"
+            " border-left: 1px solid #333355; border-radius: 0 8px 8px 0; }"
+            "QScrollBar::sub-line:horizontal { width: 18px; background: #141428;"
+            " border-right: 1px solid #333355; border-radius: 8px 0 0 8px; }"
+            "QScrollBar::add-line:horizontal:hover, QScrollBar::sub-line:horizontal:hover"
+            " { background: #1e1e3a; }"
         )
 
         # Fixed toolbar below scroll: [Takaisin] [stretch] [Soita random] [STOP]
@@ -4483,12 +4491,13 @@ class App(QWidget):
 
         _back_btn = QPushButton("◀ Takaisin")
         _back_btn.setFixedHeight(28)
-        _back_btn.setVisible(False)
+        _back_btn.setEnabled(False)
         _back_btn.setStyleSheet(
             "QPushButton { background: #141428; color: #8888BB; border: 1px solid #333355;"
             " border-radius: 4px; font-size: 10px; font-weight: 700; padding: 0 10px; }"
-            "QPushButton:hover { border-color: #9A4DFF; color: #C0C0FF; }"
-            "QPushButton:pressed { background: #0A0A1A; }"
+            "QPushButton:hover:enabled { border-color: #9A4DFF; color: #C0C0FF; }"
+            "QPushButton:pressed:enabled { background: #0A0A1A; }"
+            "QPushButton:disabled { color: #333355; border-color: #222233; background: #0d0d1a; }"
         )
         _back_btn.clicked.connect(lambda: self._sb_go_back(self._sb_tabs.currentIndex()))
 
@@ -4655,7 +4664,7 @@ class App(QWidget):
         self._sb_nav_stack[page_index].append((cur_slots, slot_index, prev_tab_name))
         # Show pinned back button in toolbar
         if page_index < len(self._sb_back_btns):
-            self._sb_back_btns[page_index].setVisible(True)
+            self._sb_back_btns[page_index].setEnabled(True)
         # Load subfolder content into buttons
         for i, btn in enumerate(page_btns):
             btn.set_data(sub_slots[i])
@@ -4689,7 +4698,7 @@ class App(QWidget):
         self._sb_tabs.setTabText(page_index, prev_tab_name)
         # Hide pinned back button if we're back at root level
         if not stack and page_index < len(self._sb_back_btns):
-            self._sb_back_btns[page_index].setVisible(False)
+            self._sb_back_btns[page_index].setEnabled(False)
         self._save_soundboard()
 
     def _sb_stop_playback(self):
@@ -7314,27 +7323,54 @@ def open_settings_dialog(parent_app: "App") -> None:
     f6.addRow(_header("Python-paketit"))
 
     def _pip_install_pkg(pip_name: str, icon_lbl, name_lbl, install_btn):
+        if getattr(sys, "frozen", False):
+            install_btn.setText(f"pip install {pip_name}")
+            install_btn.setToolTip(
+                f"EXE-tilassa automaattinen asennus ei ole mahdollista.\n"
+                f"Avaa terminaali ja aja: pip install {pip_name}"
+            )
+            import subprocess as _sp_frozen
+            def _open_terminal_cmd(pn=pip_name):
+                _sp_frozen.Popen(
+                    ["cmd", "/k", f"pip install {pn}"],
+                    creationflags=getattr(_sp_frozen, "CREATE_NEW_CONSOLE", 0)
+                )
+            install_btn.clicked.disconnect()
+            install_btn.clicked.connect(_open_terminal_cmd)
+            return
+
+        import queue as _q_pip
+        _rq_pip = _q_pip.Queue()
+
         def _run():
-            QTimer.singleShot(0, lambda: install_btn.setText("Asennetaan…"))
-            QTimer.singleShot(0, lambda: install_btn.setEnabled(False))
             import subprocess as _sp
             ret = _sp.run(
                 [sys.executable, "-m", "pip", "install", pip_name],
                 capture_output=True, text=True
             )
-            ok = ret.returncode == 0
+            _rq_pip.put((ret.returncode == 0, ret.stderr[-300:] if ret.returncode != 0 else ""))
 
-            def _done():
-                if ok:
-                    icon_lbl.setText("✅")
-                    icon_lbl.setStyleSheet("font-size: 14px; background: transparent; color: #7fc97f;")
-                    name_lbl.setStyleSheet("color: #e6edf3; background: transparent;")
-                    install_btn.setText("Asennettu ✓")
-                else:
-                    install_btn.setText("Epäonnistui")
-                    install_btn.setEnabled(True)
-                    parent_app.append_status(f"pip install {pip_name} epäonnistui:\n{ret.stderr[-300:]}")
-            QTimer.singleShot(0, _done)
+        def _poll_pip():
+            try:
+                ok, stderr = _rq_pip.get_nowait()
+            except Exception:
+                return
+            _ptmr_pip.stop()
+            if ok:
+                icon_lbl.setText("✅")
+                icon_lbl.setStyleSheet("font-size: 14px; background: transparent; color: #7fc97f;")
+                name_lbl.setStyleSheet("color: #e6edf3; background: transparent;")
+                install_btn.setText("Asennettu ✓")
+            else:
+                install_btn.setText("Epäonnistui")
+                install_btn.setEnabled(True)
+                parent_app.append_status(f"pip install {pip_name} epäonnistui:\n{stderr}")
+
+        install_btn.setText("Asennetaan…")
+        install_btn.setEnabled(False)
+        _ptmr_pip = QTimer(parent_app)
+        _ptmr_pip.timeout.connect(_poll_pip)
+        _ptmr_pip.start(200)
         threading.Thread(target=_run, daemon=True).start()
 
     for import_name, pip_name, required, desc in _PKG_LIST:
@@ -7855,7 +7891,7 @@ def open_settings_dialog(parent_app: "App") -> None:
     ha_url_row = QHBoxLayout()
     ha_url_row.addWidget(_lbl("HA URL:"))
     ha_url_edit = QLineEdit(settings.get("ha_url", ""))
-    ha_url_edit.setPlaceholderText("http://homeassistant.local:8123")
+    ha_url_edit.setPlaceholderText("http://192.168.1.94:8123  tai  https://homeassistant.droneandme.com")
     ha_url_row.addWidget(ha_url_edit, 1)
     ha_vbox.addLayout(ha_url_row)
 
@@ -7980,6 +8016,8 @@ def open_settings_dialog(parent_app: "App") -> None:
         ha_connect_btn.setText("Yhdistetään…")
         ha_status_lbl.setStyleSheet("color: #8b949e; font-size:12px;")
         ha_status_lbl.setText("Yhdistetään…")
+        import queue as _qha
+        _rq_ha = _qha.Queue()
 
         def _run():
             cur = {"ha_url": ha_url_edit.text().strip(), "ha_token": ha_token_edit.text().strip()}
@@ -7992,26 +8030,41 @@ def open_settings_dialog(parent_app: "App") -> None:
                     for s in states if s.get("entity_id", "").startswith("media_player.")
                 ]
                 media_players.sort(key=lambda x: x["entity_id"])
-
-                def _update():
-                    nonlocal _ha_fetched_players
-                    _ha_fetched_players = media_players
-                    _ha_populate_list(media_players, settings.get("ha_players", []))
-                    ha_status_lbl.setStyleSheet("color: #00cc6a; font-size:12px;")
-                    ha_status_lbl.setText(
-                        f"✓ Yhdistetty — löydetty {len(media_players)} media_player-laitetta"
-                    )
-                    ha_connect_btn.setEnabled(True)
-                    ha_connect_btn.setText("🔌  Testaa yhteys & hae soittimet")
-                QTimer.singleShot(0, _update)
+                _rq_ha.put(("ok", media_players))
             except Exception as exc:
-                def _err(e=str(exc)):
-                    ha_status_lbl.setStyleSheet("color: #ff4444; font-size:12px;")
-                    ha_status_lbl.setText(f"✗ Virhe: {e}")
-                    ha_connect_btn.setEnabled(True)
-                    ha_connect_btn.setText("🔌  Testaa yhteys & hae soittimet")
-                QTimer.singleShot(0, _err)
+                _rq_ha.put(("err", str(exc)))
 
+        def _poll_ha():
+            try:
+                kind, payload = _rq_ha.get_nowait()
+            except Exception:
+                return
+            _ptmr_ha.stop()
+            ha_connect_btn.setEnabled(True)
+            ha_connect_btn.setText("🔌  Testaa yhteys & hae soittimet")
+            if kind == "ok":
+                nonlocal _ha_fetched_players
+                _ha_fetched_players = payload
+                _ha_populate_list(payload, settings.get("ha_players", []))
+                ha_status_lbl.setStyleSheet("color: #00cc6a; font-size:12px;")
+                ha_status_lbl.setText(f"✓ Yhdistetty — löydetty {len(payload)} media_player-laitetta")
+            else:
+                err = payload
+                msg = err
+                if "SSL" in err or "CERTIFICATE" in err.upper():
+                    msg = f"SSL-virhe — kokeile http:// osoitteen alussa\n({err[:80]})"
+                elif "timed out" in err.lower() or "timeout" in err.lower():
+                    msg = f"Yhteys aikakatkaistiin — tarkista osoite ja portti\n({err[:80]})"
+                elif "401" in err or "Unauthorized" in err:
+                    msg = "Token virheellinen — tarkista Long-lived token"
+                elif "refused" in err.lower():
+                    msg = f"Yhteys evätty — onko HA käynnissä osoitteessa {ha_url_edit.text().strip()}?"
+                ha_status_lbl.setStyleSheet("color: #ff4444; font-size:12px;")
+                ha_status_lbl.setText(f"✗ {msg}")
+
+        _ptmr_ha = QTimer(parent_app)
+        _ptmr_ha.timeout.connect(_poll_ha)
+        _ptmr_ha.start(200)
         threading.Thread(target=_run, daemon=True).start()
 
     ha_connect_btn.clicked.connect(_ha_connect)
@@ -8180,6 +8233,11 @@ class SetupWizard(QDialog):
         self._dev_monitor_timer = QTimer(self)
         self._dev_monitor_timer.timeout.connect(self._update_dev_levels)
         self._dev_monitor_timer.setInterval(80)
+        # Service selection state — updated by _page_services
+        self._svc_stt = "openai"      # "openai" | "local"
+        self._svc_trans = "google"    # "google" | "deepl" | "openai"
+        self._svc_tts = "edge"        # "edge" | "elevenlabs"
+        self._svc_routing = "simple"  # "simple" | "gaming"
         self._build_ui()
         self._stack.setCurrentIndex(0)
 
@@ -8200,22 +8258,55 @@ class SetupWizard(QDialog):
             lay.addWidget(sub)
         return w
 
-    def _back_btn(self, target):
+    def _back_btn(self):
         btn = QPushButton("← Takaisin")
         btn.setFixedHeight(36)
         btn.setStyleSheet(self._BTN_SEC)
-        btn.clicked.connect(lambda: self._navigate(target))
+        btn.clicked.connect(self._nav_back)
         return btn
 
     def _navigate(self, page):
         coming_from = self._stack.currentIndex()
-        if coming_from == 5 and page != 5:
+        if coming_from == 6 and page != 6:   # 6 = devices (renumbered)
             self._stop_dev_monitoring()
-        if page == 5 and coming_from != 5:
+        if page == 6 and coming_from != 6:
             self._stack.setCurrentIndex(page)
             self._start_dev_monitoring()
             return
         self._stack.setCurrentIndex(page)
+
+    def _get_page_sequence(self) -> list:
+        seq = [0, 1, 2]  # welcome, services, packages
+        needs_api = (self._svc_stt == "openai" or
+                     self._svc_trans == "openai" or
+                     self._svc_tts == "elevenlabs")
+        if needs_api:
+            seq.append(3)  # api keys
+        if self._svc_routing == "gaming":
+            seq.append(4)  # vb-cable
+            seq.append(5)  # voicemeeter
+        seq.append(6)  # devices
+        seq.append(7)  # final test
+        return seq
+
+    def _nav_next(self):
+        seq = self._get_page_sequence()
+        cur = self._stack.currentIndex()
+        try:
+            nxt = seq[seq.index(cur) + 1]
+            self._navigate(nxt)
+        except (ValueError, IndexError):
+            pass
+
+    def _nav_back(self):
+        seq = self._get_page_sequence()
+        cur = self._stack.currentIndex()
+        try:
+            i = seq.index(cur)
+            if i > 0:
+                self._navigate(seq[i - 1])
+        except (ValueError, IndexError):
+            pass
 
     # ── pages ─────────────────────────────────────────────────────────────
 
@@ -8258,6 +8349,197 @@ class SetupWizard(QDialog):
         row.addWidget(btn)
         bl.addLayout(row)
         lay.addWidget(body)
+        return page
+
+    def _page_services(self):
+        from PyQt6.QtWidgets import QRadioButton, QButtonGroup, QFrame
+        _is_frozen = getattr(sys, "frozen", False)
+
+        page = QWidget()
+        page.setStyleSheet("background: #0d1117;")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._header(
+            "Valitse palvelut",
+            "Mukautetaan asennus valintojesi mukaan — voit muuttaa asetuksia myöhemmin."
+        ))
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: #0d1117; }")
+
+        body = QWidget()
+        body.setStyleSheet("background: #0d1117;")
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(32, 16, 32, 16)
+        bl.setSpacing(10)
+
+        def _sec_lbl(txt):
+            l = QLabel(txt)
+            l.setStyleSheet(
+                "color: #e6edf3; font-size: 12px; font-weight: bold; background: transparent;"
+            )
+            return l
+
+        def _radio(txt, desc, disabled=False):
+            w = QWidget()
+            w.setStyleSheet("background: transparent;")
+            h = QHBoxLayout(w)
+            h.setContentsMargins(8, 2, 4, 2)
+            h.setSpacing(8)
+            rb = QRadioButton(txt)
+            rb.setStyleSheet(
+                "QRadioButton { color: #c9d1d9; font-size: 12px; background: transparent; }"
+                "QRadioButton:disabled { color: #484f58; }"
+            )
+            rb.setEnabled(not disabled)
+            h.addWidget(rb)
+            dl = QLabel(desc)
+            dl.setStyleSheet(
+                f"color: {'#484f58' if disabled else '#6e7681'}; font-size: 11px; background: transparent;"
+            )
+            dl.setWordWrap(True)
+            h.addWidget(dl, 1)
+            return w, rb
+
+        def _sep():
+            f = QFrame()
+            f.setFrameShape(QFrame.Shape.HLine)
+            f.setStyleSheet("color: #21262d;")
+            return f
+
+        # ── STT ──────────────────────────────────────────────────────────
+        bl.addWidget(_sec_lbl("Puheentunnistus (STT) — mikrofoni → teksti"))
+        stt_grp = QButtonGroup(page)
+        local_disabled = _is_frozen
+        _stt_local_row, stt_local_rb = _radio(
+            "🆓  Local Whisper (offline)",
+            "Ilmainen, ei API-avainta. Vaatii ffmpeg. Hitaampi." +
+            ("  ⚠️ Ei tuettu EXE-tilassa." if local_disabled else ""),
+            disabled=local_disabled
+        )
+        _stt_api_row, stt_api_rb = _radio(
+            "💳  OpenAI Whisper API",
+            "Maksettu krediiteillä. Nopea ja tarkka. Vaatii API-avaimen."
+        )
+        stt_grp.addButton(stt_local_rb, 0)
+        stt_grp.addButton(stt_api_rb, 1)
+        stt_api_rb.setChecked(True)
+        bl.addWidget(_stt_local_row)
+        bl.addWidget(_stt_api_row)
+        bl.addWidget(_sep())
+
+        # ── Translation ───────────────────────────────────────────────────
+        bl.addWidget(_sec_lbl("Käännös"))
+        trans_grp = QButtonGroup(page)
+        _trans_g_row, trans_g_rb = _radio("🆓  Google Translate", "Ilmainen, ei tiliä. Hyvä laatu.")
+        _trans_d_row, trans_d_rb = _radio("🆓  DeepL", "500 000 merkkiä/kk ilmaiseksi. Vaatii ilmaisen tilin.")
+        _trans_o_row, trans_o_rb = _radio("💳  OpenAI GPT-4.1-mini", "Maksettu. Paras kontekstuaalinen laatu.")
+        trans_grp.addButton(trans_g_rb, 0)
+        trans_grp.addButton(trans_d_rb, 1)
+        trans_grp.addButton(trans_o_rb, 2)
+        trans_g_rb.setChecked(True)
+        bl.addWidget(_trans_g_row)
+        bl.addWidget(_trans_d_row)
+        bl.addWidget(_trans_o_row)
+        bl.addWidget(_sep())
+
+        # ── TTS ───────────────────────────────────────────────────────────
+        bl.addWidget(_sec_lbl("Puhesynteesi (TTS) — teksti → ääni"))
+        tts_grp = QButtonGroup(page)
+        _tts_e_row, tts_edge_rb = _radio("🆓  Edge TTS", "Ilmainen, Microsoftin neuraaliäänet. Suositeltu.")
+        _tts_el_row, tts_el_rb = _radio("💳  ElevenLabs", "Erittäin realistinen AI-ääni. Vaatii API-avaimen.")
+        tts_grp.addButton(tts_edge_rb, 0)
+        tts_grp.addButton(tts_el_rb, 1)
+        tts_edge_rb.setChecked(True)
+        bl.addWidget(_tts_e_row)
+        bl.addWidget(_tts_el_row)
+        bl.addWidget(_sep())
+
+        # ── Routing ───────────────────────────────────────────────────────
+        bl.addWidget(_sec_lbl("Äänilaitteiden reititys"))
+        rt_grp = QButtonGroup(page)
+        _rt_s_row, rt_simple_rb = _radio(
+            "🎧  Yksinkertainen",
+            "Vain kuulokkeet / kaiuttimet. Nopea asennus, ei lisäohjelmia."
+        )
+        _rt_g_row, rt_gaming_rb = _radio(
+            "🎮  Pelireititys",
+            "Voice Royalen TTS-ääni kuuluu mikrofonina peleissä ja Discordissa. "
+            "Vaatii VB-Cable + Voicemeeter Banana (ilmaisia)."
+        )
+        rt_grp.addButton(rt_simple_rb, 0)
+        rt_grp.addButton(rt_gaming_rb, 1)
+        rt_simple_rb.setChecked(True)
+        bl.addWidget(_rt_s_row)
+        bl.addWidget(_rt_g_row)
+
+        # ── Summary ───────────────────────────────────────────────────────
+        summary_lbl = QLabel()
+        summary_lbl.setWordWrap(True)
+        summary_lbl.setStyleSheet(
+            "color: #3fb950; font-size: 11px; background: #0d2b14;"
+            " border: 1px solid #238636; border-radius: 6px; padding: 8px 12px;"
+        )
+        bl.addWidget(summary_lbl)
+
+        def _update_summary():
+            needs = []
+            stt = "local" if stt_local_rb.isChecked() else "openai"
+            trans = "google" if trans_g_rb.isChecked() else ("deepl" if trans_d_rb.isChecked() else "openai")
+            tts = "edge" if tts_edge_rb.isChecked() else "elevenlabs"
+            routing = "gaming" if rt_gaming_rb.isChecked() else "simple"
+            self._svc_stt = stt
+            self._svc_trans = trans
+            self._svc_tts = tts
+            self._svc_routing = routing
+            if stt == "openai" or trans == "openai" or tts == "elevenlabs":
+                needs.append("OpenAI API-avain")
+            if tts == "elevenlabs":
+                needs.append("ElevenLabs API-avain")
+            if stt == "local":
+                needs.append("ffmpeg")
+            if routing == "gaming":
+                needs.append("VB-Cable + Voicemeeter Banana")
+            if needs:
+                summary_lbl.setText("Tarvitset: " + ", ".join(needs))
+                summary_lbl.setStyleSheet(
+                    "color: #e3b341; font-size: 11px; background: #2b1f0a;"
+                    " border: 1px solid #9e6a03; border-radius: 6px; padding: 8px 12px;"
+                )
+            else:
+                summary_lbl.setText("✅ Ilmainen stack — ei API-avainta eikä lisäohjelmia tarvita.")
+                summary_lbl.setStyleSheet(
+                    "color: #3fb950; font-size: 11px; background: #0d2b14;"
+                    " border: 1px solid #238636; border-radius: 6px; padding: 8px 12px;"
+                )
+
+        stt_grp.buttonToggled.connect(lambda *_: _update_summary())
+        trans_grp.buttonToggled.connect(lambda *_: _update_summary())
+        tts_grp.buttonToggled.connect(lambda *_: _update_summary())
+        rt_grp.buttonToggled.connect(lambda *_: _update_summary())
+        _update_summary()
+
+        bl.addStretch()
+        scroll.setWidget(body)
+        lay.addWidget(scroll, 1)
+
+        nav = QHBoxLayout()
+        nav.setContentsMargins(32, 8, 32, 16)
+        nav.addWidget(self._back_btn())
+        nav.addStretch()
+        nxt = QPushButton("Seuraava  →")
+        nxt.setFixedHeight(42)
+        nxt.setMinimumWidth(140)
+        nxt.clicked.connect(self._nav_next)
+        nav.addWidget(nxt)
+
+        nav_w = QWidget()
+        nav_w.setStyleSheet("background: #0d1117;")
+        nav_w.setLayout(nav)
+        lay.addWidget(nav_w)
         return page
 
     def _page_packages(self):
@@ -8361,6 +8643,10 @@ class SetupWizard(QDialog):
         install_btn.setEnabled(not req_all_ok)
 
         def _do_install():
+            if getattr(sys, "frozen", False):
+                summary_lbl.setText("EXE-tilassa paketteja ei voi asentaa automaattisesti.\nAvaa terminaali ja aja: pip install [paketti]")
+                summary_lbl.setStyleSheet("color: #e3b341; font-size: 12px; background: transparent;")
+                return
             missing = [pip for imp, pip, req, _ in _PKG_LIST if req and not _ck(imp, pip)[0]]
             if not missing:
                 summary_lbl.setText("✅ Kaikki asennettu.")
@@ -8368,6 +8654,8 @@ class SetupWizard(QDialog):
             install_btn.setEnabled(False)
             summary_lbl.setText("Asennetaan — odota...")
             summary_lbl.setStyleSheet("color: #8b949e; font-size: 12px; background: transparent;")
+            import queue as _q
+            _rq = _q.Queue()
 
             def _bg():
                 import subprocess as _sp
@@ -8379,34 +8667,92 @@ class SetupWizard(QDialog):
                     ok2 = res.returncode == 0
                     msg = ("✅ Asennus valmis — käynnistä appi uudelleen."
                            if ok2 else f"✗ Virhe: {res.stderr[-200:]}")
-                    def _ui():
-                        summary_lbl.setText(msg)
-                        summary_lbl.setStyleSheet(
-                            f"color: {'#3fb950' if ok2 else '#f85149'};"
-                            " font-size: 12px; background: transparent;"
-                        )
-                        install_btn.setEnabled(not ok2)
-                    QTimer.singleShot(0, _ui)
+                    _rq.put((ok2, msg))
                 except Exception as e:
-                    def _err():
-                        summary_lbl.setText(f"✗ Virhe: {e}")
-                        summary_lbl.setStyleSheet("color: #f85149; font-size: 12px; background: transparent;")
-                        install_btn.setEnabled(True)
-                    QTimer.singleShot(0, _err)
+                    _rq.put((False, f"✗ Virhe: {e}"))
 
+            def _poll():
+                try:
+                    ok2, msg = _rq.get_nowait()
+                except Exception:
+                    return
+                _ptmr.stop()
+                summary_lbl.setText(msg)
+                summary_lbl.setStyleSheet(
+                    f"color: {'#3fb950' if ok2 else '#f85149'};"
+                    " font-size: 12px; background: transparent;"
+                )
+                install_btn.setEnabled(not ok2)
+
+            _ptmr = QTimer(self)
+            _ptmr.timeout.connect(_poll)
+            _ptmr.start(200)
             threading.Thread(target=_bg, daemon=True).start()
 
         install_btn.clicked.connect(_do_install)
         bl.addWidget(install_btn)
+
+        if getattr(sys, "frozen", False):
+            frozen_note = QLabel(
+                "✅ Kaikki pakolliset kirjastot on bundlattu asennuspakettiin.\n"
+                "Valinnaiset kirjastot vaativat Python-lähdeversion."
+            )
+            frozen_note.setStyleSheet(
+                "color: #3fb950; font-size: 11px; background: transparent;"
+            )
+            frozen_note.setWordWrap(True)
+            bl.addWidget(frozen_note)
+            install_btn.setVisible(False)
+
+        # ffmpeg check
+        import shutil as _shutil
+        _has_ffmpeg = bool(_shutil.which("ffmpeg"))
+        ffmpeg_row = QWidget()
+        ffmpeg_row.setStyleSheet("background: transparent;")
+        ffmpeg_rl = QHBoxLayout(ffmpeg_row)
+        ffmpeg_rl.setContentsMargins(2, 1, 2, 1)
+        ffmpeg_rl.setSpacing(8)
+        ffmpeg_icon = QLabel("✅" if _has_ffmpeg else "⚠️")
+        ffmpeg_icon.setFixedWidth(22)
+        ffmpeg_icon.setStyleSheet("font-size: 14px; background: transparent;")
+        ffmpeg_name = QLabel("<b>ffmpeg</b>")
+        ffmpeg_name.setFixedWidth(160)
+        ffmpeg_name.setStyleSheet(
+            f"color: {'#e6edf3' if _has_ffmpeg else '#e3b341'}; background: transparent;"
+        )
+        ffmpeg_desc = QLabel(
+            "Edge TTS + Local Whisper" if _has_ffmpeg
+            else "Edge TTS + Local Whisper — ei löydy PATH:ista"
+        )
+        ffmpeg_desc.setStyleSheet("background: transparent; font-size: 11px; color: #8b949e;")
+        ffmpeg_rl.addWidget(ffmpeg_icon)
+        ffmpeg_rl.addWidget(ffmpeg_name)
+        ffmpeg_rl.addWidget(ffmpeg_desc, 1)
+        if not _has_ffmpeg and sys.platform == "win32":
+            ffmpeg_install_btn = QPushButton("winget install ffmpeg")
+            ffmpeg_install_btn.setFixedWidth(160)
+            ffmpeg_install_btn.setStyleSheet(
+                "QPushButton { background: #14281e; border: 1px solid #1a5a30; border-radius: 5px;"
+                " color: #00cc6a; padding: 3px 6px; font-size: 11px; font-weight: 700; }"
+                "QPushButton:hover { border-color: #00FF6A; color: #5AFFAA; }"
+            )
+            def _run_winget_ffmpeg():
+                import subprocess as _sp2
+                _sp2.Popen(["winget", "install", "--id", "Gyan.FFmpeg", "-e"],
+                           creationflags=getattr(_sp2, "CREATE_NEW_CONSOLE", 0))
+            ffmpeg_install_btn.clicked.connect(_run_winget_ffmpeg)
+            ffmpeg_rl.addWidget(ffmpeg_install_btn)
+        bl.addWidget(ffmpeg_row)
+
         bl.addStretch()
 
         nav = QHBoxLayout()
-        nav.addWidget(self._back_btn(0))
+        nav.addWidget(self._back_btn())
         nav.addStretch()
         nxt = QPushButton("Seuraava  →")
         nxt.setFixedHeight(42)
         nxt.setMinimumWidth(140)
-        nxt.clicked.connect(lambda: self._navigate(2))
+        nxt.clicked.connect(self._nav_next)
         nav.addWidget(nxt)
         bl.addLayout(nav)
         lay.addWidget(body)
@@ -8515,17 +8861,17 @@ class SetupWizard(QDialog):
         bl.addStretch()
 
         nav = QHBoxLayout()
-        nav.addWidget(self._back_btn(1))
+        nav.addWidget(self._back_btn())
         skip = QPushButton("Ohita (ei puheentunnistusta)")
         skip.setFixedHeight(36)
         skip.setStyleSheet(self._BTN_SKIP)
-        skip.clicked.connect(lambda: self._navigate(3))
+        skip.clicked.connect(self._nav_next)
         nav.addWidget(skip)
         nav.addStretch()
         nxt = QPushButton("Seuraava  →")
         nxt.setFixedHeight(42)
         nxt.setMinimumWidth(140)
-        nxt.clicked.connect(lambda: self._navigate(3))
+        nxt.clicked.connect(self._nav_next)
         nav.addWidget(nxt)
         bl.addLayout(nav)
         lay.addWidget(body)
@@ -8578,23 +8924,37 @@ class SetupWizard(QDialog):
 
         def _do_vbc():
             self._vbc_install_btn.setEnabled(False)
-            self._vbc_install_btn.setText("Asennetaan — hyväksy UAC-pyyntö...")
+            self._vbc_install_btn.setText("Asennetaan…")
+            import queue as _q_vbc
+            _rq_vbc = _q_vbc.Queue()
 
             def _cb(msg):
-                def _ui():
-                    self._vbc_status_lbl.setText(msg)
-                    ok = "✅" in msg or "installed" in msg.lower()
-                    self._vbc_status_lbl.setStyleSheet(
-                        f"color: {'#3fb950' if ok else '#f85149'};"
-                        " font-size: 13px; font-weight: bold; background: transparent;"
-                    )
-                    if ok:
-                        self._vbc_install_btn.setText("VB-Cable asennettu")
-                    else:
-                        self._vbc_install_btn.setEnabled(True)
-                        self._vbc_install_btn.setText("Yritä uudelleen")
-                QTimer.singleShot(0, _ui)
+                _rq_vbc.put(msg)
 
+            def _poll_vbc():
+                while True:
+                    try:
+                        msg = _rq_vbc.get_nowait()
+                    except Exception:
+                        break
+                    ok = "✅" in msg or "installed" in msg.lower()
+                    is_final = ok or any(w in msg.lower() for w in ("error", "virhe", "failed", "manual"))
+                    self._vbc_status_lbl.setText(msg)
+                    self._vbc_status_lbl.setStyleSheet(
+                        f"color: {'#3fb950' if ok else '#f85149' if is_final else '#8b949e'};"
+                        " font-size: 12px; background: transparent;"
+                    )
+                    if is_final:
+                        _ptmr_vbc.stop()
+                        if ok:
+                            self._vbc_install_btn.setText("VB-Cable asennettu")
+                        else:
+                            self._vbc_install_btn.setEnabled(True)
+                            self._vbc_install_btn.setText("Yritä uudelleen")
+
+            _ptmr_vbc = QTimer(self)
+            _ptmr_vbc.timeout.connect(_poll_vbc)
+            _ptmr_vbc.start(100)
             threading.Thread(target=_install_vbcable, args=(_cb,), daemon=True).start()
 
         self._vbc_install_btn.clicked.connect(_do_vbc)
@@ -8609,12 +8969,12 @@ class SetupWizard(QDialog):
         bl.addStretch()
 
         nav = QHBoxLayout()
-        nav.addWidget(self._back_btn(2))
+        nav.addWidget(self._back_btn())
         nav.addStretch()
         nxt = QPushButton("Seuraava  →")
         nxt.setFixedHeight(42)
         nxt.setMinimumWidth(140)
-        nxt.clicked.connect(lambda: self._navigate(4))
+        nxt.clicked.connect(self._nav_next)
         nav.addWidget(nxt)
         bl.addLayout(nav)
         lay.addWidget(body)
@@ -8642,12 +9002,12 @@ class SetupWizard(QDialog):
             bl.addWidget(note)
             bl.addStretch()
             nav = QHBoxLayout()
-            nav.addWidget(self._back_btn(3))
+            nav.addWidget(self._back_btn())
             nav.addStretch()
             nxt2 = QPushButton("Seuraava  →")
             nxt2.setFixedHeight(42)
             nxt2.setMinimumWidth(140)
-            nxt2.clicked.connect(lambda: self._navigate(5))
+            nxt2.clicked.connect(self._nav_next)
             nav.addWidget(nxt2)
             bl.addLayout(nav)
             lay.addWidget(body)
@@ -8695,24 +9055,38 @@ class SetupWizard(QDialog):
 
         def _do_vm_install():
             self._wiz_vm_install_btn.setEnabled(False)
-            self._wiz_vm_install_btn.setText("Asennetaan — hyväksy UAC-pyyntö...")
+            self._wiz_vm_install_btn.setText("Asennetaan…")
+            import queue as _q_vm
+            _rq_vm = _q_vm.Queue()
 
             def _cb(msg):
-                def _ui():
-                    self._wiz_vm_status_lbl.setText(msg)
+                _rq_vm.put(msg)
+
+            def _poll_vm():
+                while True:
+                    try:
+                        msg = _rq_vm.get_nowait()
+                    except Exception:
+                        break
                     ok = "✅" in msg
+                    is_final = ok or any(w in msg.lower() for w in ("error", "virhe", "failed", "manuaalinen"))
+                    self._wiz_vm_status_lbl.setText(msg)
                     self._wiz_vm_status_lbl.setStyleSheet(
-                        f"color: {'#3fb950' if ok else '#f85149'};"
+                        f"color: {'#3fb950' if ok else '#f85149' if is_final else '#8b949e'};"
                         " font-size: 12px; background: transparent;"
                     )
-                    if ok:
-                        self._wiz_vm_install_btn.setText("Voicemeeter Banana asennettu")
-                        _refresh_vm_devices()
-                    else:
-                        self._wiz_vm_install_btn.setEnabled(True)
-                        self._wiz_vm_install_btn.setText("Yritä uudelleen")
-                QTimer.singleShot(0, _ui)
+                    if is_final:
+                        _ptmr_vm.stop()
+                        if ok:
+                            self._wiz_vm_install_btn.setText("Voicemeeter Banana asennettu")
+                            _refresh_vm_devices()
+                        else:
+                            self._wiz_vm_install_btn.setEnabled(True)
+                            self._wiz_vm_install_btn.setText("Yritä uudelleen")
 
+            _ptmr_vm = QTimer(self)
+            _ptmr_vm.timeout.connect(_poll_vm)
+            _ptmr_vm.start(100)
             threading.Thread(target=_install_voicemeeter, args=(_cb,), daemon=True).start()
 
         self._wiz_vm_install_btn.clicked.connect(_do_vm_install)
@@ -8940,12 +9314,12 @@ class SetupWizard(QDialog):
         bl.addWidget(skip_lbl)
 
         nav = QHBoxLayout()
-        nav.addWidget(self._back_btn(3))
+        nav.addWidget(self._back_btn())
         nav.addStretch()
         nxt = QPushButton("Seuraava  →")
         nxt.setFixedHeight(42)
         nxt.setMinimumWidth(140)
-        nxt.clicked.connect(lambda: self._navigate(5))
+        nxt.clicked.connect(self._nav_next)
         nav.addWidget(nxt)
         bl.addLayout(nav)
         lay.addWidget(body)
@@ -9186,12 +9560,12 @@ class SetupWizard(QDialog):
         bl.addWidget(self._dev_out_status_lbl)
 
         nav = QHBoxLayout()
-        nav.addWidget(self._back_btn(4))
+        nav.addWidget(self._back_btn())
         nav.addStretch()
         nxt = QPushButton("Seuraava  →")
         nxt.setFixedHeight(42)
         nxt.setMinimumWidth(140)
-        nxt.clicked.connect(lambda: self._navigate(6))
+        nxt.clicked.connect(self._nav_next)
         nav.addWidget(nxt)
         bl.addLayout(nav)
         lay.addWidget(body)
@@ -9349,6 +9723,16 @@ class SetupWizard(QDialog):
         bl.addWidget(tts_result)
 
         def _do_tts_test():
+            import shutil as _shutil2
+            if not _shutil2.which("ffmpeg"):
+                tts_result.setText(
+                    "⚠️  ffmpeg puuttuu — Edge TTS vaatii sen MP3→WAV-konversioon.\n"
+                    "Asenna: Settings → Asennukset → ffmpeg  tai  winget install ffmpeg terminaalissa."
+                )
+                tts_result.setStyleSheet(
+                    "color: #e3b341; font-size: 11px; background: transparent;"
+                )
+                return
             import queue as _q
             selected_out = [idx for idx, cb in self._dev_out_checkboxes.items() if cb.isChecked()]
             tts_btn.setEnabled(False)
@@ -9464,7 +9848,7 @@ class SetupWizard(QDialog):
         bl.addStretch()
 
         nav = QHBoxLayout()
-        nav.addWidget(self._back_btn(5))
+        nav.addWidget(self._back_btn())
         nav.addStretch()
         fin = QPushButton("Valmis  ✓")
         fin.setFixedHeight(42)
@@ -9654,12 +10038,13 @@ class SetupWizard(QDialog):
         main.setContentsMargins(0, 0, 0, 0)
         main.addWidget(self._stack)
         self._stack.addWidget(self._page_welcome())      # 0
-        self._stack.addWidget(self._page_packages())     # 1
-        self._stack.addWidget(self._page_api_key())      # 2
-        self._stack.addWidget(self._page_vbcable())      # 3
-        self._stack.addWidget(self._page_voicemeeter())  # 4
-        self._stack.addWidget(self._page_devices())      # 5
-        self._stack.addWidget(self._page_final_test())   # 6
+        self._stack.addWidget(self._page_services())     # 1  NEW
+        self._stack.addWidget(self._page_packages())     # 2
+        self._stack.addWidget(self._page_api_key())      # 3
+        self._stack.addWidget(self._page_vbcable())      # 4
+        self._stack.addWidget(self._page_voicemeeter())  # 5
+        self._stack.addWidget(self._page_devices())      # 6
+        self._stack.addWidget(self._page_final_test())   # 7
 
     def _on_key_changed(self, text):
         valid = text.strip().startswith("sk-") and len(text.strip()) > 20
