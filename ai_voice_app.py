@@ -267,7 +267,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.50"
+APP_VERSION = "1.3.51"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -2836,7 +2836,8 @@ def _load_local_whisper(model_name: str):
     if _local_whisper_model is not None and _local_whisper_model_name == model_name:
         return _local_whisper_model
     import whisper as _whisper
-    print(f"[Whisper] Loading local model '{model_name}'… (first use downloads ~{{'tiny':'75MB','base':'145MB','small':'460MB'}.get(model_name,'?')})")
+    _sizes = {"tiny": "75MB", "base": "145MB", "small": "460MB"}
+    print(f"[Whisper] Loading local model '{model_name}'… (first use downloads ~{_sizes.get(model_name, '?')})")
     _local_whisper_model = _whisper.load_model(model_name)
     _local_whisper_model_name = model_name
     return _local_whisper_model

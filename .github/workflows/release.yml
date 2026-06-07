@@ -107,6 +107,7 @@ jobs:
 
   build-macos-arm64:
     # macos-14 = Apple Silicon (M1/M2/M3) — native ARM64
+    needs: [build-windows]
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -211,6 +212,7 @@ jobs:
 
   build-macos-intel:
     # macos-14 (M1 runner) + arch -x86_64 = Intel x86_64 binary via Rosetta 2 cross-build
+    needs: [build-windows]
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
