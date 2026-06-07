@@ -68,16 +68,28 @@ import sounddevice as sd
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# macOS 26+ (Tahoe): Qt's C++ static initializers run during dlopen(QtCore.abi3.so)
-# before NSApplication is set up, causing CFBundleGetMainBundle() to return NULL.
-# macOS 26 crashes in __CFCheckCFInfoPACSignature on the NULL pointer (SIGSEGV).
-# NSApplicationLoad() must be called before any PyQt6 import to fix this.
+# macOS 26+ (Tahoe): Qt's static initializer (QLoggingRegistry) calls
+# CFBundleGetMainBundle() which returns NULL before NSApplication is set up,
+# causing a crash in __CFCheckCFInfoPACSignature (SIGSEGV at 0x8).
+# Fix 1: Call [NSApplication sharedApplication] via Obj-C runtime before PyQt6 import.
+# Fix 2: qt.conf (bundled) gives Qt an explicit DataPath so it never calls CFBundleGetMainBundle.
 if sys.platform == "darwin":
     try:
-        import ctypes as _ct
-        _appkit = _ct.CDLL("/System/Library/Frameworks/AppKit.framework/AppKit")
-        _appkit.NSApplicationLoad()
-    except (OSError, AttributeError):
+        import ctypes as _ct, ctypes.util as _ctu
+        _lib = _ctu.find_library("objc")
+        if _lib:
+            _objc = _ct.CDLL(_lib)
+            _objc.objc_getClass.restype = _ct.c_void_p
+            _objc.objc_getClass.argtypes = [_ct.c_char_p]
+            _objc.sel_registerName.restype = _ct.c_void_p
+            _objc.sel_registerName.argtypes = [_ct.c_char_p]
+            _objc.objc_msgSend.restype = _ct.c_void_p
+            _objc.objc_msgSend.argtypes = [_ct.c_void_p, _ct.c_void_p]
+            _cls = _objc.objc_getClass(b"NSApplication")
+            _sel = _objc.sel_registerName(b"sharedApplication")
+            if _cls:
+                _objc.objc_msgSend(_cls, _sel)
+    except Exception:
         pass
 
 from PyQt6.QtCore import QEvent, QMimeData, QObject, QPoint, QRectF, QSize, QTimer, Qt, pyqtSignal
@@ -280,7 +292,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.59"
+APP_VERSION = "1.3.60"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
