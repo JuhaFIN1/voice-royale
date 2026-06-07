@@ -267,7 +267,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.57"
+APP_VERSION = "1.3.58"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1384,6 +1384,7 @@ def _sb_import_audio(src_path: str, page_index: int, slot_index: int) -> tuple[s
                  "-ac", "1", "-ar", str(target_sr), "-sample_fmt", "s16",
                  "-f", "wav", tmp_wav],
                 capture_output=True, timeout=60,
+                creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0),
             )
             if result.returncode != 0:
                 raise RuntimeError(result.stderr.decode(errors="ignore").strip()[-300:])
@@ -2787,6 +2788,7 @@ async def request_edge_tts_wav(text: str, lang: str) -> bytes:
                 ffmpeg_cmd,
                 capture_output=True,
                 text=True,
+                creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0),
             )
         except FileNotFoundError as exc:
             raise RuntimeError(
