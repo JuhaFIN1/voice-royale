@@ -267,7 +267,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.56"
+APP_VERSION = "1.3.57"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -8975,10 +8975,59 @@ class SetupWizard(QDialog):
                 " color: #00cc6a; padding: 3px 6px; font-size: 11px; font-weight: 700; }"
                 "QPushButton:hover { border-color: #00FF6A; color: #5AFFAA; }"
             )
+            import queue as _ffq
+            _ff_result_q = _ffq.Queue()
+            _ff_timer = QTimer(ffmpeg_install_btn)
+
+            def _poll_ff():
+                try:
+                    found = _ff_result_q.get_nowait()
+                except Exception:
+                    return
+                _ff_timer.stop()
+                if found:
+                    ffmpeg_icon.setText("✅")
+                    ffmpeg_name.setStyleSheet("color: #e6edf3; background: transparent;")
+                    ffmpeg_desc.setText("Edge TTS — asennettu onnistuneesti")
+                    ffmpeg_install_btn.setVisible(False)
+                else:
+                    ffmpeg_install_btn.setEnabled(True)
+                    ffmpeg_install_btn.setText("winget install ffmpeg")
+                    ffmpeg_desc.setText("Ei löydy asennuksen jälkeen — käynnistä ohjelma uudelleen")
+
+            _ff_timer.timeout.connect(_poll_ff)
+
             def _run_winget_ffmpeg():
-                import subprocess as _sp2
-                _sp2.Popen(["winget", "install", "--id", "Gyan.FFmpeg", "-e"],
-                           creationflags=getattr(_sp2, "CREATE_NEW_CONSOLE", 0))
+                import subprocess as _sp2, shutil as _sh2
+                ffmpeg_install_btn.setEnabled(False)
+                ffmpeg_install_btn.setText("Asentaa…")
+                _ff_timer.start(500)
+
+                def _do():
+                    _sp2.run(
+                        ["winget", "install", "--id", "Gyan.FFmpeg", "-e",
+                         "--accept-source-agreements", "--accept-package-agreements"],
+                        creationflags=getattr(_sp2, "CREATE_NEW_CONSOLE", 0),
+                    )
+                    # Refresh PATH from registry — current process doesn't see it otherwise
+                    try:
+                        import winreg as _wreg
+                        _k = _wreg.OpenKey(_wreg.HKEY_LOCAL_MACHINE,
+                            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")
+                        _sp_val, _ = _wreg.QueryValueEx(_k, "Path"); _wreg.CloseKey(_k)
+                    except Exception:
+                        _sp_val = ""
+                    try:
+                        import winreg as _wreg2
+                        _k2 = _wreg2.OpenKey(_wreg2.HKEY_CURRENT_USER, "Environment")
+                        _up_val, _ = _wreg2.QueryValueEx(_k2, "Path"); _wreg2.CloseKey(_k2)
+                    except Exception:
+                        _up_val = ""
+                    os.environ["PATH"] = _sp_val + ";" + _up_val + ";" + os.environ.get("PATH", "")
+                    _ff_result_q.put(bool(_sh2.which("ffmpeg")))
+
+                threading.Thread(target=_do, daemon=True).start()
+
             ffmpeg_install_btn.clicked.connect(_run_winget_ffmpeg)
             ffmpeg_rl.addWidget(ffmpeg_install_btn)
         bl.addWidget(ffmpeg_row)
