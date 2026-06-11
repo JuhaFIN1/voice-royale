@@ -99,6 +99,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -292,7 +293,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.64"
+APP_VERSION = "1.3.65"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -2692,6 +2693,17 @@ _DEEPL_LANG_MAP = {
     # DeepL ei tue: Hindi, Hebrew, Croatian
 }
 
+# Whisper ISO 639-1 language codes (None = auto-detect)
+_WHISPER_LANG_MAP = {
+    "English": "en", "German": "de", "Swedish": "sv", "Finnish": "fi",
+    "Russian": "ru", "Italian": "it", "Dutch": "nl", "Norwegian": "no",
+    "Danish": "da", "Romanian": "ro", "Latvian": "lv", "Lithuanian": "lt",
+    "Japanese": "ja", "Chinese": "zh", "Hungarian": "hu", "Polish": "pl",
+    "Czech": "cs", "Catalan": "ca", "Belarusian": "be", "Spanish": "es",
+    "French": "fr", "Turkish": "tr", "Hindi": "hi", "Hebrew": "he",
+    "Greek": "el", "Croatian": "hr", "Arabic": "ar",
+}
+
 
 def translate_text(text: str, lang: str,
                    backend: str = "Google (free)", deepl_key: str = "") -> str:
@@ -3760,6 +3772,20 @@ class App(QWidget):
                 self.langbox.addItem(lang)
         if self.langbox.findText(current) >= 0:
             self.langbox.setCurrentText(current)
+        if hasattr(self, "source_langbox"):
+            cur_src = self.source_langbox.currentText()
+            self.source_langbox.clear()
+            self.source_langbox.addItem("Auto (tunnistaa)")
+            for lang in LANGS.keys():
+                if lang == "Auto":
+                    continue
+                icon = self.lang_icons.get(lang)
+                if icon:
+                    self.source_langbox.addItem(icon, lang)
+                else:
+                    self.source_langbox.addItem(lang)
+            if self.source_langbox.findText(cur_src) >= 0:
+                self.source_langbox.setCurrentText(cur_src)
 
     def __init__(self):
         super().__init__()
@@ -4152,10 +4178,37 @@ class App(QWidget):
         )
         layout.addWidget(self.translated_label)
 
-        # Target selector (left narrow column) + textbox (right)
+        # Source + Target selectors (left narrow columns) + textbox (right)
         text_row = QHBoxLayout()
         text_row.setSpacing(6)
         text_row.setContentsMargins(0, 0, 0, 0)
+
+        src_lang_col = QVBoxLayout()
+        src_lang_col.setSpacing(2)
+        src_lang_col.setContentsMargins(0, 0, 0, 0)
+        lbl_source = QLabel("SOURCE")
+        lbl_source.setStyleSheet(
+            "color: #555555; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;"
+        )
+        src_lang_col.addWidget(lbl_source)
+        self.source_langbox = QComboBox()
+        self.source_langbox.addItem("Auto (tunnistaa)")
+        for _sl in LANGS.keys():
+            if _sl == "Auto":
+                continue
+            _icon = self.lang_icons.get(_sl)
+            if _icon:
+                self.source_langbox.addItem(_icon, _sl)
+            else:
+                self.source_langbox.addItem(_sl)
+        _saved_src = self.settings.get("stt_source_language", "Auto (tunnistaa)")
+        if self.source_langbox.findText(_saved_src) >= 0:
+            self.source_langbox.setCurrentText(_saved_src)
+        self.source_langbox.setFixedWidth(118)
+        self.source_langbox.setToolTip("Kieli, jolla puhut mikrofoniin. Auto = Whisper tunnistaa itse.")
+        src_lang_col.addWidget(self.source_langbox)
+        src_lang_col.addStretch()
+        text_row.addLayout(src_lang_col)
 
         lang_col = QVBoxLayout()
         lang_col.setSpacing(2)
@@ -5628,6 +5681,9 @@ class App(QWidget):
         new_lang = self.settings.get("default_target_lang", "Auto")
         if self.langbox.findText(new_lang) >= 0:
             self.langbox.setCurrentText(new_lang)
+        new_src = self.settings.get("stt_source_language", "Auto (tunnistaa)")
+        if self.source_langbox.findText(new_src) >= 0:
+            self.source_langbox.setCurrentText(new_src)
         new_backend = self.settings.get("default_tts_backend", DEFAULT_TTS_BACKEND)
         if self.backend_combo.findText(new_backend) >= 0:
             self.backend_combo.setCurrentText(new_backend)
@@ -5888,8 +5944,14 @@ class App(QWidget):
             # Concatenate and flatten to 1D float32
             audio_data = np.concatenate(frames, axis=0).flatten()
 
-            # Normalize to [-1, 1]
+            # Noise gate: check raw amplitude BEFORE normalization
             max_val = np.max(np.abs(audio_data))
+            noise_gate = float(self.settings.get("noise_gate_threshold", 0.0))
+            if noise_gate > 0.0 and max_val < noise_gate:
+                self.append_status(f"Liian hiljainen (max {max_val:.4f} < {noise_gate:.4f}) — ei lähetetä Whisperille.")
+                return
+
+            # Normalize to [-1, 1]
             if max_val > 0:
                 audio_data = audio_data / max_val
             else:
@@ -5913,9 +5975,13 @@ class App(QWidget):
                 wf.writeframes(audio_int16.tobytes())
             wav_bytes = wav_bytes.getvalue()
 
+            # Source language hint for Whisper
+            src_lang_name = self.source_langbox.currentText()
+            whisper_lang = _WHISPER_LANG_MAP.get(src_lang_name)  # None = auto-detect
+
             self.append_status(f"Sending {total_seconds:.1f}s audio to Whisper...")
             try:
-                transcribed = transcribe_audio_wav(wav_bytes, stt_backend=self.settings.get("stt_backend", "OpenAI Whisper API"))
+                transcribed = transcribe_audio_wav(wav_bytes, language=whisper_lang, stt_backend=self.settings.get("stt_backend", "OpenAI Whisper API"))
             except Exception as e:
                 traceback.print_exc()
                 self.append_status(f"Transcription failed: {e}")
@@ -6804,6 +6870,35 @@ def open_settings_dialog(parent_app: "App") -> None:
         "OpenAI Whisper API — pilvipalvelu, hyvä laatu, vaatii maksullisen OpenAI-avaimen.\n"
         "Local Whisper — ilmainen, offline, CPU-pohjainen (faster-whisper). tiny=75MB, base=145MB, small=460MB.\n"
         "Paikallinen malli ladataan automaattisesti ensimmäisellä käyttökerralla."
+    ))
+
+    stt_src_lang_combo = _QComboBox()
+    stt_src_lang_combo.addItem("Auto (tunnistaa)")
+    for _sl in LANGS.keys():
+        if _sl != "Auto":
+            stt_src_lang_combo.addItem(_sl)
+    stt_src_lang_combo.setCurrentText(settings.get("stt_source_language", "Auto (tunnistaa)"))
+    f1.addRow(_lbl("Lähde­kieli:"), stt_src_lang_combo)
+    f1.addRow("", _desc(
+        "Kieli, jolla puhut mikrofoniin.\n"
+        "'Auto (tunnistaa)' — Whisper tunnistaa kielen automaattisesti (suositeltu).\n"
+        "Aseta tietty kieli vain jos tunnistus on toistuvasti väärä."
+    ))
+
+    noise_gate_spin = QDoubleSpinBox()
+    noise_gate_spin.setRange(0.0, 0.05)
+    noise_gate_spin.setSingleStep(0.005)
+    noise_gate_spin.setDecimals(3)
+    noise_gate_spin.setValue(float(settings.get("noise_gate_threshold", 0.0)))
+    noise_gate_spin.setMaximumWidth(120)
+    noise_gate_spin.setStyleSheet(
+        "QDoubleSpinBox { background: #1a1a1a; color: #e6edf3; border: 1px solid #333;"
+        " border-radius: 4px; padding: 2px 6px; }"
+    )
+    f1.addRow(_lbl("Noise gate:"), noise_gate_spin)
+    f1.addRow("", _desc(
+        "Äänenvoimakkuuden alaraja — alle jäävät tallennukset ohitetaan eikä Whisperille lähetetä.\n"
+        "0.000 = pois päältä. Kokeile 0.010–0.020 suodattamaan hiljaiset tallennukset."
     ))
 
     f1.addRow(_header("Puhesynteesi (TTS)"))
@@ -8167,6 +8262,8 @@ def open_settings_dialog(parent_app: "App") -> None:
             "default_tts_backend": backend_combo.currentText(),
             "translation_backend": trans_backend_combo.currentText(),
             "stt_backend": stt_backend_combo.currentText(),
+            "stt_source_language": stt_src_lang_combo.currentText(),
+            "noise_gate_threshold": noise_gate_spin.value(),
             "deepl_api_key": deepl_key_edit.text().strip(),
             "pixabay_api_key": pixabay_key_edit.text().strip(),
         }
