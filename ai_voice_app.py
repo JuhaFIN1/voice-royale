@@ -293,7 +293,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.66"
+APP_VERSION = "1.3.67"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1949,6 +1949,7 @@ class SoundboardButton(QWidget):
             return
         menu = QMenu(self)
         menu.addAction("Assign Sound…", self._assign_sound)
+        menu.addAction("Generoi TTS-ääni…", self._generate_tts_sound)
         menu.addAction("Assign Image…", self._assign_image)
         menu.addAction("Etsi kuva netistä…", self._search_image_online)
         menu.addAction("Rename…", self._rename)
@@ -2034,6 +2035,180 @@ class SoundboardButton(QWidget):
             self._data["ha_players"] = selected
             self._refresh()
             self.data_changed.emit(self.slot_index)
+
+    def _generate_tts_sound(self):
+        """Open a dialog to generate TTS audio and save it to this soundboard slot."""
+        from PyQt6.QtWidgets import (
+            QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
+            QComboBox as _QCB, QPushButton as _QPB,
+        )
+        import threading as _thr
+
+        # Walk up to find App instance for settings
+        p = self.parent()
+        app = None
+        while p is not None:
+            if hasattr(p, "settings"):
+                app = p
+                break
+            p = p.parent()
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Generoi TTS-ääni — {self._data.get('name', 'Slot')}")
+        dlg.resize(460, 300)
+        dlg.setStyleSheet(
+            "QDialog { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', sans-serif; }"
+            "QLabel { color: #c9d1d9; font-size: 12px; }"
+            "QTextEdit { background: #161b22; border: 1px solid #30363d; border-radius: 5px;"
+            " color: #e6edf3; font-size: 13px; padding: 4px; }"
+            "QComboBox { background: #21262d; border: 1px solid #30363d; border-radius: 5px;"
+            " color: #e6edf3; padding: 4px 8px; min-height: 22px; }"
+            "QComboBox::drop-down { border: none; }"
+            "QComboBox QAbstractItemView { background: #161b22; color: #e6edf3; }"
+            "QPushButton { background: #21262d; border: 1px solid #30363d; border-radius: 5px;"
+            " color: #c9d1d9; padding: 6px 18px; font-size: 12px; }"
+            "QPushButton:hover { background: #1f6feb; border-color: #1f6feb; color: #fff; }"
+            "QPushButton:disabled { background: #161b22; color: #484f58; border-color: #21262d; }"
+        )
+
+        vbox = QVBoxLayout(dlg)
+        vbox.setContentsMargins(16, 14, 16, 14)
+        vbox.setSpacing(8)
+
+        vbox.addWidget(QLabel("Teksti puhuttavaksi:"))
+        text_edit = QTextEdit()
+        text_edit.setMaximumHeight(80)
+        text_edit.setPlaceholderText("Kirjoita teksti…")
+        vbox.addWidget(text_edit)
+
+        opt_row = QHBoxLayout()
+        opt_row.setSpacing(8)
+        backend_combo = _QCB()
+        backend_combo.addItems(["Edge TTS (free)", "ElevenLabs", "OpenAI TTS"])
+        if app:
+            backend_combo.setCurrentText(app.settings.get("default_tts_backend", "Edge TTS (free)"))
+        lang_combo = _QCB()
+        for _l in LANGS:
+            if _l != "Auto":
+                lang_combo.addItem(_l)
+        if app and hasattr(app, "langbox"):
+            cur = app.langbox.currentText()
+            if lang_combo.findText(cur) >= 0:
+                lang_combo.setCurrentText(cur)
+        opt_row.addWidget(QLabel("Backend:"))
+        opt_row.addWidget(backend_combo, 1)
+        opt_row.addWidget(QLabel("Kieli:"))
+        opt_row.addWidget(lang_combo, 1)
+        vbox.addLayout(opt_row)
+
+        status_lbl = QLabel("")
+        status_lbl.setStyleSheet("color: #8b949e; font-size: 11px;")
+        vbox.addWidget(status_lbl)
+
+        btn_row = QHBoxLayout()
+        preview_btn = _QPB("Generoi & Esikatselu")
+        save_btn = _QPB("Tallenna napille")
+        save_btn.setEnabled(False)
+        btn_row.addWidget(preview_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(save_btn)
+        vbox.addLayout(btn_row)
+
+        _wav = [None]
+
+        def _do_generate(then_save=False):
+            text = text_edit.toPlainText().strip()
+            if not text:
+                status_lbl.setText("Kirjoita ensin teksti.")
+                return
+            backend = backend_combo.currentText()
+            lang = lang_combo.currentText()
+            preview_btn.setEnabled(False)
+            save_btn.setEnabled(False)
+            status_lbl.setText("Generoidaan…")
+
+            def _worker():
+                try:
+                    if backend == "ElevenLabs":
+                        wav_bytes = request_tts_wav(text)
+                    elif backend.startswith("Edge TTS"):
+                        import asyncio as _aio
+                        wav_bytes = _aio.run(request_edge_tts_wav(text, lang))
+                    else:
+                        if not client:
+                            raise RuntimeError("OpenAI API-avain puuttuu asetuksista.")
+                        resp = client.audio.speech.create(
+                            model="tts-1", voice="alloy", input=text
+                        )
+                        mp3_bytes = resp.content
+                        import tempfile as _tf
+                        with _tf.NamedTemporaryFile(suffix=".mp3", delete=False) as _m:
+                            _m.write(mp3_bytes)
+                            _mp3 = _m.name
+                        with _tf.NamedTemporaryFile(suffix=".wav", delete=False) as _w:
+                            _wp = _w.name
+                        try:
+                            subprocess.run(
+                                ["ffmpeg", "-y", "-i", _mp3,
+                                 "-ar", "22050", "-ac", "1", "-f", "wav", _wp],
+                                capture_output=True, timeout=30,
+                                creationflags=(subprocess.CREATE_NO_WINDOW
+                                               if sys.platform == "win32" else 0),
+                            )
+                            with open(_wp, "rb") as _f:
+                                wav_bytes = _f.read()
+                        finally:
+                            for _pp in (_mp3, _wp):
+                                try: os.remove(_pp)
+                                except: pass
+                    _wav[0] = wav_bytes
+                    QTimer.singleShot(0, lambda wb=wav_bytes: _on_done(wb, then_save))
+                except Exception as exc:
+                    QTimer.singleShot(0, lambda e=str(exc): _on_err(e))
+
+            _thr.Thread(target=_worker, daemon=True).start()
+
+        def _on_done(wav_bytes, then_save):
+            kb = len(wav_bytes) // 1024
+            status_lbl.setText(f"Valmis — {kb} KB. Kuunnellaan…")
+            preview_btn.setEnabled(True)
+            save_btn.setEnabled(True)
+            _thr.Thread(target=lambda: play_wav_bytes(wav_bytes), daemon=True).start()
+            if then_save:
+                _do_save()
+
+        def _on_err(msg):
+            status_lbl.setText(f"Virhe: {msg[:100]}")
+            preview_btn.setEnabled(True)
+
+        def _do_save():
+            if not _wav[0]:
+                _do_generate(then_save=True)
+                return
+            import tempfile as _tf
+            with _tf.NamedTemporaryFile(suffix=".wav", delete=False) as _t:
+                _t.write(_wav[0])
+                _tmp = _t.name
+            try:
+                dest, _, _ = _sb_import_audio(_tmp, self.page_index, self.slot_index)
+                self._data["file"] = dest
+                self._data["link_page_name"] = ""
+                txt = text_edit.toPlainText().strip()
+                if not self._data.get("name") or self._data["name"].startswith("Slot "):
+                    self._data["name"] = txt[:20] if txt else "TTS"
+                self._refresh()
+                self.data_changed.emit(self.slot_index)
+                status_lbl.setText("Tallennettu napille!")
+                save_btn.setEnabled(False)
+            except Exception as exc:
+                status_lbl.setText(f"Tallennusvirhe: {exc}")
+            finally:
+                try: os.remove(_tmp)
+                except: pass
+
+        preview_btn.clicked.connect(lambda: _do_generate(then_save=False))
+        save_btn.clicked.connect(_do_save)
+        dlg.exec()
 
     def _assign_sound(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -4201,7 +4376,7 @@ class App(QWidget):
                 self.source_langbox.addItem(_icon, _sl)
             else:
                 self.source_langbox.addItem(_sl)
-        _saved_src = self.settings.get("stt_source_language", "Auto (tunnistaa)")
+        _saved_src = self.settings.get("stt_source_language", "Finnish")
         if self.source_langbox.findText(_saved_src) >= 0:
             self.source_langbox.setCurrentText(_saved_src)
         self.source_langbox.setFixedWidth(118)
@@ -5681,7 +5856,7 @@ class App(QWidget):
         new_lang = self.settings.get("default_target_lang", "Auto")
         if self.langbox.findText(new_lang) >= 0:
             self.langbox.setCurrentText(new_lang)
-        new_src = self.settings.get("stt_source_language", "Auto (tunnistaa)")
+        new_src = self.settings.get("stt_source_language", "Finnish")
         if self.source_langbox.findText(new_src) >= 0:
             self.source_langbox.setCurrentText(new_src)
         new_backend = self.settings.get("default_tts_backend", DEFAULT_TTS_BACKEND)
@@ -6877,7 +7052,7 @@ def open_settings_dialog(parent_app: "App") -> None:
     for _sl in LANGS.keys():
         if _sl != "Auto":
             stt_src_lang_combo.addItem(_sl)
-    stt_src_lang_combo.setCurrentText(settings.get("stt_source_language", "Auto (tunnistaa)"))
+    stt_src_lang_combo.setCurrentText(settings.get("stt_source_language", "Finnish"))
     f1.addRow(_lbl("Lähde­kieli:"), stt_src_lang_combo)
     f1.addRow("", _desc(
         "Kieli, jolla puhut mikrofoniin.\n"
