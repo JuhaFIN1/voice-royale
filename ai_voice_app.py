@@ -293,7 +293,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.67"
+APP_VERSION = "1.3.68"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1131,7 +1131,7 @@ class StreamDeckHttpServer:
 
     ACTIONS = [
         "record_toggle", "wake_listen_toggle", "speak", "stop_recording",
-        "tts_toggle", "settings",
+        "tts_toggle", "settings", "overlay_toggle",
         "lang_Auto", "lang_English", "lang_Finnish", "lang_Swedish",
         "lang_German", "lang_Russian", "lang_Italian", "lang_Dutch",
         "lang_Norwegian", "lang_Danish", "lang_Romanian", "lang_Latvian",
@@ -3783,6 +3783,79 @@ class SoundboardPageContainer(QWidget):
         dlg.exec()
 
 
+# =========================
+# SUBTITLE OVERLAY
+# =========================
+class SubtitleOverlay(QWidget):
+    """Frameless always-on-top floating subtitle widget. Drag to reposition."""
+
+    def __init__(self):
+        super().__init__(
+            None,
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool,
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self._drag_pos = None
+
+        vbox = QVBoxLayout(self)
+        vbox.setContentsMargins(16, 10, 16, 10)
+        vbox.setSpacing(3)
+
+        self._orig_lbl = QLabel("")
+        self._orig_lbl.setWordWrap(True)
+        self._orig_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        vbox.addWidget(self._orig_lbl)
+
+        self._trans_lbl = QLabel("")
+        self._trans_lbl.setWordWrap(True)
+        self._trans_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        vbox.addWidget(self._trans_lbl)
+
+        self.setMinimumWidth(360)
+        self.setMaximumWidth(960)
+        self.set_font_size(16)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), 12, 12)
+        p.fillPath(path, QColor(10, 14, 20, 215))
+        p.end()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos and event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+
+    def set_transcription(self, text: str):
+        self._orig_lbl.setText(text)
+        self.adjustSize()
+
+    def set_translation(self, text: str):
+        self._trans_lbl.setText(text)
+        self.adjustSize()
+
+    def set_font_size(self, size: int):
+        self._orig_lbl.setStyleSheet(
+            f"color: #e6edf3; font-size: {size}px; font-weight: 600;"
+            " background: transparent; padding: 0;"
+        )
+        self._trans_lbl.setStyleSheet(
+            f"color: #58a6ff; font-size: {size}px; font-weight: 600;"
+            " background: transparent; padding: 0;"
+        )
+
+
 # APPLICATION
 # =========================
 class App(QWidget):
@@ -4239,6 +4312,18 @@ class App(QWidget):
         self.sig_out_level.connect(self._update_output_meters)
         self.sig_status.connect(self._on_status)
         self.sig_set_textbox.connect(self.textbox.setPlainText)
+        self.sig_set_textbox.connect(self._overlay_on_transcription)
+
+        # Subtitle overlay
+        self._overlay = SubtitleOverlay()
+        _op = self.settings.get("overlay_pos")
+        if _op and len(_op) == 2:
+            self._overlay.move(_op[0], _op[1])
+        else:
+            _scr = QApplication.primaryScreen().geometry()
+            self._overlay.move(_scr.center().x() - 200, _scr.bottom() - 160)
+        _ofs = int(self.settings.get("overlay_font_size", 16))
+        self._overlay.set_font_size(_ofs)
 
         # Recording state + mic monitor (must be set before populate_input_devices)
         self.is_recording = False
@@ -4487,6 +4572,19 @@ class App(QWidget):
             " border: 2px solid #00FF6A; color: #00FF6A; }"
         )
         button_row.addWidget(self.listen_button, 1)
+
+        self._overlay_btn = QPushButton("CC")
+        self._overlay_btn.setCheckable(True)
+        self._overlay_btn.setFixedWidth(40)
+        self._overlay_btn.setToolTip("Subtitle Overlay — kelluva tekstitys (raahaa kohdalle)")
+        self._overlay_btn.clicked.connect(self.toggle_overlay)
+        self._overlay_btn.setStyleSheet(
+            "QPushButton { background: #111118; border: 1px solid #333; border-radius: 8px;"
+            " color: #555; font-size: 11px; font-weight: 700; padding: 0; }"
+            "QPushButton:hover { border-color: #58a6ff; color: #58a6ff; }"
+            "QPushButton:checked { background: #0a1428; border: 2px solid #58a6ff; color: #58a6ff; }"
+        )
+        button_row.addWidget(self._overlay_btn)
         layout.addLayout(button_row)
 
         # Status + hotkey compact row
@@ -5509,6 +5607,21 @@ class App(QWidget):
     def update_translated(self, text: str):
         self.sig_status.emit(f"→ {text}")
         QTimer.singleShot(0, lambda: self.translated_label.setText(f"Translated: {text}"))
+        QTimer.singleShot(0, lambda: self._overlay.set_translation(text))
+
+    def _overlay_on_transcription(self, text: str):
+        self._overlay.set_transcription(text)
+        self._overlay.set_translation("")
+
+    def toggle_overlay(self):
+        if self._overlay.isVisible():
+            pos = self._overlay.pos()
+            self.settings["overlay_pos"] = [pos.x(), pos.y()]
+            save_settings(self.settings)
+            self._overlay.hide()
+        else:
+            self._overlay.show()
+        self._overlay_btn.setChecked(self._overlay.isVisible())
 
     def set_controls_enabled(self, enabled: bool):
         QTimer.singleShot(0, lambda: self._set_controls_enabled_main(enabled))
@@ -5865,6 +5978,7 @@ class App(QWidget):
 
         self.hotkey_label.setText(f"Global hotkey: {self.settings.get('hotkey', 'ctrl+alt+space')}")
         self.register_hotkey()
+        self._overlay.set_font_size(int(self.settings.get("overlay_font_size", 16)))
 
         # If wake listener is running, restart it with new keyword/key
         if self.wake_listener.is_running():
@@ -6544,6 +6658,8 @@ class App(QWidget):
             self.backend_combo.setCurrentText(nxt)
         elif action == "settings":
             open_settings_dialog(self)
+        elif action == "overlay_toggle":
+            self.toggle_overlay()
         elif action.startswith("lang_"):
             lang = action[5:]
             idx = self.langbox.findText(lang)
@@ -6706,6 +6822,13 @@ class App(QWidget):
             pass
         try:
             self._stream_deck.stop()
+        except Exception:
+            pass
+        try:
+            pos = self._overlay.pos()
+            self.settings["overlay_pos"] = [pos.x(), pos.y()]
+            save_settings(self.settings)
+            self._overlay.close()
         except Exception:
             pass
         super().closeEvent(event)
@@ -7058,6 +7181,24 @@ def open_settings_dialog(parent_app: "App") -> None:
         "Kieli, jolla puhut mikrofoniin.\n"
         "'Auto (tunnistaa)' — Whisper tunnistaa kielen automaattisesti (suositeltu).\n"
         "Aseta tietty kieli vain jos tunnistus on toistuvasti väärä."
+    ))
+
+    f1.addRow(_header("Subtitle Overlay"))
+
+    overlay_font_spin = QDoubleSpinBox()
+    overlay_font_spin.setRange(10, 48)
+    overlay_font_spin.setSingleStep(2)
+    overlay_font_spin.setDecimals(0)
+    overlay_font_spin.setValue(float(settings.get("overlay_font_size", 16)))
+    overlay_font_spin.setMaximumWidth(80)
+    overlay_font_spin.setStyleSheet(
+        "QDoubleSpinBox { background: #1a1a1a; color: #e6edf3; border: 1px solid #333;"
+        " border-radius: 4px; padding: 2px 6px; }"
+    )
+    f1.addRow(_lbl("Tekstikoko (px):"), overlay_font_spin)
+    f1.addRow("", _desc(
+        "Kelluvan tekstityksen fonttikoko. CC-napista päälle/pois.\n"
+        "Raahaa overlay haluamaasi kohtaan näyttöä."
     ))
 
     noise_gate_spin = QDoubleSpinBox()
@@ -8439,6 +8580,7 @@ def open_settings_dialog(parent_app: "App") -> None:
             "stt_backend": stt_backend_combo.currentText(),
             "stt_source_language": stt_src_lang_combo.currentText(),
             "noise_gate_threshold": noise_gate_spin.value(),
+            "overlay_font_size": int(overlay_font_spin.value()),
             "deepl_api_key": deepl_key_edit.text().strip(),
             "pixabay_api_key": pixabay_key_edit.text().strip(),
         }
