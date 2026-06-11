@@ -293,7 +293,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.68"
+APP_VERSION = "1.3.69"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -6208,14 +6208,21 @@ class App(QWidget):
             self.append_status(f"Recording from {input_device_name} at {sample_rate} Hz")
 
             max_peak_ref = [0.0]
+            last_speech_ref = [time.time()]
+            record_start = time.time()
+            auto_stop_secs = float(self.settings.get("auto_stop_silence", 2.0))
+            speech_rms_threshold = 0.02  # RMS to count as speech
 
             def _audio_cb(indata, frame_count, time_info, status):
                 # No Qt calls here — PortAudio thread must stay clean
                 peak = float(np.max(np.abs(indata)))
+                rms = float(np.sqrt(np.mean(indata ** 2)))
                 if peak > max_peak_ref[0]:
                     max_peak_ref[0] = peak
                 if peak > self._mic_peak_ref[0]:
                     self._mic_peak_ref[0] = peak
+                if rms > speech_rms_threshold:
+                    last_speech_ref[0] = time.time()
                 frames.append(indata.copy())
 
             with sd.InputStream(device=input_device_index, channels=channels,
@@ -6223,6 +6230,11 @@ class App(QWidget):
                                 dtype="float32", callback=_audio_cb):
                 while self.is_recording:
                     time.sleep(0.05)
+                    # Auto-stop after silence
+                    if auto_stop_secs > 0 and (time.time() - record_start) > 0.4:
+                        if (time.time() - last_speech_ref[0]) >= auto_stop_secs:
+                            self.is_recording = False
+                            QTimer.singleShot(0, self._stop_recording)
 
             if not frames:
                 self.append_status("No audio data recorded")
@@ -7215,6 +7227,22 @@ def open_settings_dialog(parent_app: "App") -> None:
     f1.addRow("", _desc(
         "Äänenvoimakkuuden alaraja — alle jäävät tallennukset ohitetaan eikä Whisperille lähetetä.\n"
         "0.000 = pois päältä. Kokeile 0.010–0.020 suodattamaan hiljaiset tallennukset."
+    ))
+
+    auto_stop_spin = QDoubleSpinBox()
+    auto_stop_spin.setRange(0.0, 10.0)
+    auto_stop_spin.setSingleStep(0.5)
+    auto_stop_spin.setDecimals(1)
+    auto_stop_spin.setValue(float(settings.get("auto_stop_silence", 2.0)))
+    auto_stop_spin.setMaximumWidth(120)
+    auto_stop_spin.setStyleSheet(
+        "QDoubleSpinBox { background: #1a1a1a; color: #e6edf3; border: 1px solid #333;"
+        " border-radius: 4px; padding: 2px 6px; }"
+    )
+    f1.addRow(_lbl("Auto-stop (s):"), auto_stop_spin)
+    f1.addRow("", _desc(
+        "Sekuntia hiljaisuutta ennen kuin tallennus pysähtyy automaattisesti.\n"
+        "0.0 = pois päältä. Suositeltu: 2.0 s."
     ))
 
     f1.addRow(_header("Puhesynteesi (TTS)"))
@@ -8580,6 +8608,7 @@ def open_settings_dialog(parent_app: "App") -> None:
             "stt_backend": stt_backend_combo.currentText(),
             "stt_source_language": stt_src_lang_combo.currentText(),
             "noise_gate_threshold": noise_gate_spin.value(),
+            "auto_stop_silence": auto_stop_spin.value(),
             "overlay_font_size": int(overlay_font_spin.value()),
             "deepl_api_key": deepl_key_edit.text().strip(),
             "pixabay_api_key": pixabay_key_edit.text().strip(),
