@@ -293,7 +293,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.65"
+APP_VERSION = "1.3.66"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -10945,12 +10945,27 @@ class SetupWizard(QDialog):
                 json.dump(hd, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+        settings = load_settings()
         if self._wiz_ha_url:
-            settings = load_settings()
             settings["ha_url"] = self._wiz_ha_url
             if self._wiz_ha_token:
                 settings["ha_token"] = self._wiz_ha_token
-            save_settings(settings)
+        # Save STT/TTS/translation backends chosen in wizard
+        if getattr(self, "_svc_stt", "openai") == "local":
+            settings["stt_backend"] = "Local Whisper (base)"
+        else:
+            settings.setdefault("stt_backend", "OpenAI Whisper API")
+        if getattr(self, "_svc_tts", "edge") == "elevenlabs":
+            settings.setdefault("default_tts_backend", "ElevenLabs")
+        else:
+            settings.setdefault("default_tts_backend", "Edge TTS (free)")
+        if getattr(self, "_svc_trans", "google") == "openai":
+            settings.setdefault("translation_backend", "OpenAI")
+        elif getattr(self, "_svc_trans", "google") == "deepl":
+            settings.setdefault("translation_backend", "DeepL")
+        else:
+            settings.setdefault("translation_backend", "Google (free)")
+        save_settings(settings)
         self.accept()
 
     def closeEvent(self, event):
