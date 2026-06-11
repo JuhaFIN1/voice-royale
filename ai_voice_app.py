@@ -293,7 +293,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.69"
+APP_VERSION = "1.3.70"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -6211,17 +6211,18 @@ class App(QWidget):
             last_speech_ref = [time.time()]
             record_start = time.time()
             auto_stop_secs = float(self.settings.get("auto_stop_silence", 2.0))
-            speech_rms_threshold = 0.02  # RMS to count as speech
+            # Peak threshold for speech detection — kept low so it works even with low mic gain.
+            # Noise gate separately handles whether to send to Whisper.
+            speech_peak_threshold = 0.005
 
             def _audio_cb(indata, frame_count, time_info, status):
                 # No Qt calls here — PortAudio thread must stay clean
                 peak = float(np.max(np.abs(indata)))
-                rms = float(np.sqrt(np.mean(indata ** 2)))
                 if peak > max_peak_ref[0]:
                     max_peak_ref[0] = peak
                 if peak > self._mic_peak_ref[0]:
                     self._mic_peak_ref[0] = peak
-                if rms > speech_rms_threshold:
+                if peak > speech_peak_threshold:
                     last_speech_ref[0] = time.time()
                 frames.append(indata.copy())
 
