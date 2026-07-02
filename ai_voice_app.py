@@ -293,7 +293,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.70"
+APP_VERSION = "1.3.72"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -3856,6 +3856,115 @@ class SubtitleOverlay(QWidget):
         )
 
 
+class CompactWidget(QWidget):
+    """Small floating always-on-top control panel — REC/TARGET/Speak/status.
+    Meant to replace the full window while gaming. Double-click to restore."""
+
+    def __init__(self, app: "App"):
+        super().__init__(
+            None,
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool,
+        )
+        self._app = app
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._drag_pos = None
+        self.setFixedSize(320, 84)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 8, 10, 8)
+        outer.setSpacing(4)
+
+        row = QHBoxLayout()
+        row.setSpacing(6)
+
+        btn_style = (
+            "QPushButton { background: #18182a; border: 1px solid #2e2e48; border-radius: 6px;"
+            " color: #e0e0f0; font-size: 14px; }"
+            "QPushButton:hover { border-color: #7a4dff; }"
+        )
+
+        self.rec_btn = QPushButton("🎤")
+        self.rec_btn.setFixedSize(36, 32)
+        self.rec_btn.setToolTip("Record — dupla-klikkaa tausta palataksesi täyteen ikkunaan")
+        self.rec_btn.setStyleSheet(btn_style)
+        self.rec_btn.clicked.connect(lambda: self._app.on_record_toggle())
+        row.addWidget(self.rec_btn)
+
+        self.lang_combo = QComboBox()
+        for lang in LANGS.keys():
+            self.lang_combo.addItem(lang)
+        self.lang_combo.setFixedWidth(120)
+        self.lang_combo.setStyleSheet(
+            "QComboBox { background: #18182a; border: 1px solid #2e2e48; border-radius: 6px;"
+            " color: #e0e0f0; font-size: 11px; padding: 2px 6px; }"
+        )
+        self.lang_combo.currentTextChanged.connect(self._on_lang_changed)
+        row.addWidget(self.lang_combo)
+
+        self.speak_btn = QPushButton("🔊")
+        self.speak_btn.setFixedSize(36, 32)
+        self.speak_btn.setToolTip("Speak")
+        self.speak_btn.setStyleSheet(btn_style)
+        self.speak_btn.clicked.connect(lambda: self._app.on_speak())
+        row.addWidget(self.speak_btn)
+
+        outer.addLayout(row)
+
+        self.status_lbl = QLabel("Ready — dupla-klikkaa palataksesi")
+        self.status_lbl.setWordWrap(True)
+        self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_lbl.setStyleSheet("color: #9aa0b0; font-size: 10px; background: transparent;")
+        self.status_lbl.installEventFilter(self)
+        outer.addWidget(self.status_lbl)
+
+    def _on_lang_changed(self, text: str):
+        if text and self._app.langbox.currentText() != text:
+            self._app.langbox.setCurrentText(text)
+
+    def sync_lang(self, text: str):
+        self.lang_combo.blockSignals(True)
+        self.lang_combo.setCurrentText(text)
+        self.lang_combo.blockSignals(False)
+
+    def set_rec_state(self, recording: bool):
+        self.rec_btn.setText("🔴" if recording else "🎤")
+
+    def set_status(self, text: str):
+        line = text.strip().splitlines()[-1] if text.strip() else ""
+        self.status_lbl.setText(line[:70])
+
+    def eventFilter(self, obj, event):
+        if obj is self.status_lbl and event.type() == QEvent.Type.MouseButtonDblClick:
+            self._app.toggle_compact_mode()
+            return True
+        return super().eventFilter(obj, event)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), 14, 14)
+        p.fillPath(path, QColor(10, 14, 20, 235))
+        p.end()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos and event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._app.toggle_compact_mode()
+
+
 # APPLICATION
 # =========================
 class App(QWidget):
@@ -4207,6 +4316,9 @@ class App(QWidget):
             }
         """)
 
+        # Last Whisper STT call round-trip time, shown in Settings dialog
+        self._last_stt_latency_ms = None
+
         # Load app settings first so custom languages are available for icon building
         self.settings = load_settings()
         _apply_custom_languages_to_globals(self.settings.get("custom_languages", []))
@@ -4324,6 +4436,17 @@ class App(QWidget):
             self._overlay.move(_scr.center().x() - 200, _scr.bottom() - 160)
         _ofs = int(self.settings.get("overlay_font_size", 16))
         self._overlay.set_font_size(_ofs)
+
+        # Compact / mini mode — small always-on-top control panel for gaming
+        self._compact = CompactWidget(self)
+        _cp = self.settings.get("compact_pos")
+        if _cp and len(_cp) == 2:
+            self._compact.move(_cp[0], _cp[1])
+        else:
+            _scr2 = QApplication.primaryScreen().geometry()
+            self._compact.move(_scr2.right() - 340, _scr2.top() + 40)
+        self.langbox.currentTextChanged.connect(self._compact.sync_lang)
+        self._compact.sync_lang(self.langbox.currentText())
 
         # Recording state + mic monitor (must be set before populate_input_devices)
         self.is_recording = False
@@ -4585,6 +4708,19 @@ class App(QWidget):
             "QPushButton:checked { background: #0a1428; border: 2px solid #58a6ff; color: #58a6ff; }"
         )
         button_row.addWidget(self._overlay_btn)
+
+        self._compact_btn = QPushButton("▭")
+        self._compact_btn.setCheckable(True)
+        self._compact_btn.setFixedWidth(40)
+        self._compact_btn.setToolTip("Compact-tila — pieni kelluva widget pelaamisen ajaksi")
+        self._compact_btn.clicked.connect(self.toggle_compact_mode)
+        self._compact_btn.setStyleSheet(
+            "QPushButton { background: #111118; border: 1px solid #333; border-radius: 8px;"
+            " color: #555; font-size: 11px; font-weight: 700; padding: 0; }"
+            "QPushButton:hover { border-color: #58a6ff; color: #58a6ff; }"
+            "QPushButton:checked { background: #0a1428; border: 2px solid #58a6ff; color: #58a6ff; }"
+        )
+        button_row.addWidget(self._compact_btn)
         layout.addLayout(button_row)
 
         # Status + hotkey compact row
@@ -5603,6 +5739,7 @@ class App(QWidget):
         cursor = self.status_text.textCursor()
         cursor.movePosition(cursor.MoveOperation.End)
         self.status_text.setTextCursor(cursor)
+        self._compact.set_status(message)
 
     def update_translated(self, text: str):
         self.sig_status.emit(f"→ {text}")
@@ -5622,6 +5759,23 @@ class App(QWidget):
         else:
             self._overlay.show()
         self._overlay_btn.setChecked(self._overlay.isVisible())
+
+    def toggle_compact_mode(self):
+        if self._compact.isVisible():
+            pos = self._compact.pos()
+            self.settings["compact_pos"] = [pos.x(), pos.y()]
+            save_settings(self.settings)
+            self._compact.hide()
+            self.show()
+            self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
+            self.activateWindow()
+            self.raise_()
+        else:
+            self._compact.sync_lang(self.langbox.currentText())
+            self._compact.set_rec_state(self.is_recording)
+            self._compact.show()
+            self.hide()
+        self._compact_btn.setChecked(self._compact.isVisible())
 
     def set_controls_enabled(self, enabled: bool):
         QTimer.singleShot(0, lambda: self._set_controls_enabled_main(enabled))
@@ -6097,7 +6251,9 @@ class App(QWidget):
             wav_bytes = wav_buf.getvalue()
 
             self.append_status("Transcribing wake command...")
+            _stt_t0 = time.time()
             transcript = transcribe_audio_wav(wav_bytes, stt_backend=self.settings.get("stt_backend", "OpenAI Whisper API"))
+            self._last_stt_latency_ms = (time.time() - _stt_t0) * 1000.0
             if not transcript:
                 self.append_status("Wake command: empty transcription.")
                 return
@@ -6182,6 +6338,7 @@ class App(QWidget):
             " border: 1px solid #cc4444; border-radius: 8px; color: #fff;"
             " font-size: 13px; font-weight: 700; padding: 8px 18px; }"
         )
+        self._compact.set_rec_state(True)
         self.append_status(f"🎤 Recording from: {input_device_name}")
 
     def _stop_recording(self):
@@ -6192,6 +6349,7 @@ class App(QWidget):
             "QPushButton { background: #1e1e1e; border: 1px solid #555555;"
             " border-radius: 8px; color: #888888; font-size: 13px; font-weight: 700; padding: 8px 18px; }"
         )
+        self._compact.set_rec_state(False)
 
     def do_recording(self, input_device_index: int, input_device_name: str):
         try:
@@ -6282,8 +6440,10 @@ class App(QWidget):
             whisper_lang = _WHISPER_LANG_MAP.get(src_lang_name)  # None = auto-detect
 
             self.append_status(f"Sending {total_seconds:.1f}s audio to Whisper...")
+            _stt_t0 = time.time()
             try:
                 transcribed = transcribe_audio_wav(wav_bytes, language=whisper_lang, stt_backend=self.settings.get("stt_backend", "OpenAI Whisper API"))
+                self._last_stt_latency_ms = (time.time() - _stt_t0) * 1000.0
             except Exception as e:
                 traceback.print_exc()
                 self.append_status(f"Transcription failed: {e}")
@@ -6316,6 +6476,7 @@ class App(QWidget):
             self._start_mic_monitor()
         self.record_button.setEnabled(True)
         self.record_button.setText("🎤  Listen")
+        self._compact.set_rec_state(False)
         self.record_button.setStyleSheet(
             "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
             " stop:0 #3A7BFF, stop:1 #9A4DFF);"
@@ -6844,6 +7005,13 @@ class App(QWidget):
             self._overlay.close()
         except Exception:
             pass
+        try:
+            pos = self._compact.pos()
+            self.settings["compact_pos"] = [pos.x(), pos.y()]
+            save_settings(self.settings)
+            self._compact.close()
+        except Exception:
+            pass
         super().closeEvent(event)
 
     def ask_play_transcribed(self, transcribed: str):
@@ -7195,6 +7363,18 @@ def open_settings_dialog(parent_app: "App") -> None:
         "'Auto (tunnistaa)' — Whisper tunnistaa kielen automaattisesti (suositeltu).\n"
         "Aseta tietty kieli vain jos tunnistus on toistuvasti väärä."
     ))
+
+    stt_latency_label = _lbl("—")
+
+    def _refresh_stt_latency():
+        ms = getattr(parent_app, "_last_stt_latency_ms", None)
+        stt_latency_label.setText(f"{ms:.0f} ms" if ms is not None else "—")
+
+    stt_latency_timer = QTimer(dlg)
+    stt_latency_timer.timeout.connect(_refresh_stt_latency)
+    stt_latency_timer.start(1000)
+    _refresh_stt_latency()
+    f1.addRow(_lbl("Viimeisin vasteaika:"), stt_latency_label)
 
     f1.addRow(_header("Subtitle Overlay"))
 
