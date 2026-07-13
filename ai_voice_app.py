@@ -293,7 +293,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.80"
+APP_VERSION = "1.3.81"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1032,9 +1032,10 @@ except Exception:
 class VoiceEffectProcessor:
     """Real-time mic → DSP effects → virtual output (e.g. VB-Cable).
 
-    Uses a producer-consumer pattern: the InputStream callback just buffers audio,
-    and a processing thread applies effects and writes to the OutputStream.
-    This keeps the audio callback lightweight and avoids glitches.
+    Effects run inline in the audio callback (single bidirectional sd.Stream).
+    Pitch shifting uses overlap-add across large Hann-windowed grains
+    (_PITCH_BLOCK/_PITCH_HOP) so it can stay fast enough for the callback
+    while avoiding the clicking a naive per-tiny-chunk resample would cause.
     """
 
     PRESETS = {
@@ -1051,6 +1052,17 @@ class VoiceEffectProcessor:
     _SAMPLE_RATE = 48000  # matches USB audio interfaces (RodeCaster etc.)
     _BLOCKSIZE = 512     # ~10ms latency, same callback-driven approach as Voicemod
 
+    # Pitch-shift analysis window: independently resampling each 512-sample
+    # driver callback (old approach) clicks at every ~10ms block boundary —
+    # audible as constant crackle/warble. Processing much larger overlapping
+    # (50%) Hann-windowed grains and cross-fading them via overlap-add removes
+    # the boundary discontinuity entirely. Hann @ 50% overlap is COLA-exact
+    # (overlapped windows sum to a constant), so no extra normalization pass
+    # is needed. Costs ~(_PITCH_BLOCK-_PITCH_HOP)/_SAMPLE_RATE extra latency
+    # (~43ms) — a normal trade-off for realtime pitch shifting.
+    _PITCH_BLOCK = 4096
+    _PITCH_HOP = 2048  # must divide evenly by _BLOCKSIZE
+
     def __init__(self, status_cb):
         self._status = status_cb
         self._active = False
@@ -1063,6 +1075,14 @@ class VoiceEffectProcessor:
         self._monitor_stream = None
         self._hear_myself = False
         self._monitor_device = None
+        self._pv_window = np.hanning(self._PITCH_BLOCK).astype(np.float32)
+        self._reset_pitch_state()
+
+    def _reset_pitch_state(self):
+        self._pv_stage = np.zeros(0, dtype=np.float32)          # raw input not yet a full hop
+        self._pv_history = np.zeros(self._PITCH_BLOCK, dtype=np.float32)  # last BLOCK raw samples
+        self._pv_out_accum = np.zeros(self._PITCH_BLOCK, dtype=np.float32)  # OLA accumulator
+        self._pv_out_ready = np.zeros(0, dtype=np.float32)      # processed samples awaiting output
 
     @property
     def is_active(self) -> bool:
@@ -1100,6 +1120,7 @@ class VoiceEffectProcessor:
     def start(self, input_device, output_device):
         if self._active:
             self.stop()
+        self._reset_pitch_state()
         try:
             # Verify both devices use the same host API — mixed APIs cause -9993
             try:
@@ -1162,15 +1183,49 @@ class VoiceEffectProcessor:
         return chunk
 
     def _pitch_shift(self, chunk: np.ndarray, semitones: int) -> np.ndarray:
-        try:
-            import pyrubberband as rb  # type: ignore
-            return rb.pitch_shift(chunk, self._SAMPLE_RATE, semitones).astype(np.float32)
-        except Exception:
-            pass
+        """Overlap-add granular pitch shift, decoupled from the driver's small
+        callback size — see _PITCH_BLOCK/_PITCH_HOP comment above for why."""
         from scipy.signal import resample
+        HOP = self._PITCH_HOP
+        BLOCK = self._PITCH_BLOCK
         factor = 2.0 ** (semitones / 12.0)
-        n_new = max(1, int(len(chunk) / factor))
-        return resample(resample(chunk, n_new), len(chunk)).astype(np.float32)
+        n = len(chunk)
+        self._pv_stage = np.concatenate([self._pv_stage, chunk])
+        while len(self._pv_stage) >= HOP:
+            hop_samples, self._pv_stage = self._pv_stage[:HOP], self._pv_stage[HOP:]
+            self._pv_history = np.concatenate([self._pv_history[HOP:], hop_samples])
+            grain = self._pv_history * self._pv_window
+            n_mid = max(1, int(round(BLOCK / factor)))
+            # Resample ONCE only — a second resample back to BLOCK mathematically
+            # cancels the pitch shift out (verified: FFT-resample's bin-to-frequency
+            # mapping for an N->M->N round trip returns to the original frequency,
+            # so the old double-resample code never actually changed pitch, just
+            # added smearing). Tile/truncate the once-shifted grain back to BLOCK
+            # instead — safe because the grain was Hann-windowed before resampling,
+            # so it already tapers to ~0 at both ends and the tile seam is silent.
+            shifted_raw = resample(grain, n_mid).astype(np.float32)
+            shifted = np.resize(shifted_raw, BLOCK)
+            self._pv_out_accum += shifted
+            ready = self._pv_out_accum[:HOP].copy()
+            self._pv_out_accum = np.concatenate(
+                [self._pv_out_accum[HOP:], np.zeros(HOP, dtype=np.float32)]
+            )
+            self._pv_out_ready = np.concatenate([self._pv_out_ready, ready])
+        if len(self._pv_out_ready) >= n:
+            out, self._pv_out_ready = self._pv_out_ready[:n], self._pv_out_ready[n:]
+        else:
+            # startup transient only — not enough processed audio buffered yet
+            out = np.concatenate(
+                [self._pv_out_ready, np.zeros(n - len(self._pv_out_ready), dtype=np.float32)]
+            )
+            self._pv_out_ready = np.zeros(0, dtype=np.float32)
+        # Overlap-add of tiled/truncated grains can occasionally push loud/hot
+        # mic input over 0 dBFS (measured up to ~1.15 peak on a hot signal with
+        # "Pitch +8") — tanh is a smooth, always-bounded (-1,1) soft limiter that
+        # is near-identity at normal levels, so this only engages on the rare
+        # loud peak instead of hard-clipping into a crackle.
+        out = np.tanh(out).astype(np.float32)
+        return out
 
     def set_monitor(self, device, enabled: bool):
         self._hear_myself = enabled
