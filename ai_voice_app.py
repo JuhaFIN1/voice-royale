@@ -293,7 +293,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.79"
+APP_VERSION = "1.3.80"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -9343,6 +9343,27 @@ class SetupWizard(QDialog):
             "Haluan kuulua peleissä tai Discordissa virtuaalisena mikrofonina.")
         _mw, mixer_cb = _device_row("🎚️", "Minulla on fyysinen mikseri (esim. RodeCaster Pro 2)",
             "Chat-mikin ääni pitää sekoittaa käännösääneen ennen peliä/Discordia.")
+
+        def _detect_has_mixer() -> bool:
+            """Wizard voi avautua uudelleen (esim. versiopäivityksen jälkeen) ilman että
+            käyttäjä muistaa rastia mikseri-ruudun uudelleen — tunnista se sen sijaan
+            olemassa olevasta asennuksesta/laitteistosta niin ettei se koskaan nollaudu
+            väärin ja tarjoa VB-Cablea Voicemeeterin sijaan."""
+            try:
+                if _is_voicemeeter_installed():
+                    return True
+            except Exception:
+                pass
+            try:
+                names = [n for _, n in list_input_devices()] + [n for _, n in list_output_devices()]
+                if any("rode" in n.lower() for n in names):
+                    return True
+            except Exception:
+                pass
+            return False
+
+        if _detect_has_mixer():
+            mixer_cb.setChecked(True)
 
         bl.addWidget(_hw)
         bl.addWidget(_gw)
