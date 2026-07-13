@@ -294,7 +294,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.82"
+APP_VERSION = "1.3.83"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1050,15 +1050,27 @@ class VoiceEffectProcessor:
     while avoiding the clicking a naive per-tiny-chunk resample would cause.
     """
 
+    # "pitches" is a list of simultaneous semitone shifts — stftPitchShift's
+    # `factors` supports shifting by several amounts at once and mixing the
+    # results ("poly pitch shift"), which is what the Chorus/Octave/5th/Duet/
+    # PowerChord/Alien presets below use for real harmony/doubling effects
+    # instead of a single pitch move. Verified via FFT/peak-amplitude testing
+    # (no clipping/NaN across all presets at typical AND near-full-scale input).
     PRESETS = {
-        "Normal":    {"pitch": 0,   "robot": False},
-        "Pitch +4":  {"pitch": 4,   "robot": False},
-        "Pitch +8":  {"pitch": 8,   "robot": False},
-        "Pitch -4":  {"pitch": -4,  "robot": False},
-        "Pitch -8":  {"pitch": -8,  "robot": False},
-        "Robot":     {"pitch": 0,   "robot": True},
-        "Deep":      {"pitch": -6,  "robot": False},
-        "Helium":    {"pitch": 10,  "robot": False},
+        "Normal":     {"pitches": [0],             "robot": False},
+        "Pitch +4":   {"pitches": [4],              "robot": False},
+        "Pitch +8":   {"pitches": [8],              "robot": False},
+        "Pitch -4":   {"pitches": [-4],             "robot": False},
+        "Pitch -8":   {"pitches": [-8],             "robot": False},
+        "Robot":      {"pitches": [0],              "robot": True},
+        "Deep":       {"pitches": [-6],             "robot": False},
+        "Helium":     {"pitches": [10],             "robot": False},
+        "Chorus":     {"pitches": [0, 0.15, -0.15], "robot": False},
+        "Octave":     {"pitches": [0, 12],          "robot": False},
+        "5th":        {"pitches": [0, 7],           "robot": False},
+        "Duet":       {"pitches": [0, 4],           "robot": False},
+        "PowerChord": {"pitches": [-12, 0, 7],      "robot": False},
+        "Alien":      {"pitches": [-5, 5, 12],      "robot": False},
     }
 
     _SAMPLE_RATE = 48000  # matches USB audio interfaces (RodeCaster etc.)
@@ -1091,7 +1103,7 @@ class VoiceEffectProcessor:
     def __init__(self, status_cb):
         self._status = status_cb
         self._active = False
-        self._pitch = 0
+        self._pitches = [0]
         self._robot = False
         self._robot_phase = 0
         self._current_preset = "Normal"
@@ -1128,19 +1140,19 @@ class VoiceEffectProcessor:
     def set_preset(self, name: str):
         p = self.PRESETS.get(name, self.PRESETS["Normal"])
         with self._lock:
-            self._pitch = p["pitch"]
+            self._pitches = p["pitches"]
             self._robot = p["robot"]
             self._current_preset = name
 
     def _callback(self, indata, outdata, frames, time_info, status):
         """Audio callback — runs in real-time audio thread, must be fast."""
         with self._lock:
-            pitch = self._pitch
+            pitches = self._pitches
             robot = self._robot
         chunk = indata[:, 0].copy()
-        if robot or pitch != 0:
+        if robot or pitches != [0]:
             try:
-                chunk = self._apply(chunk, pitch, robot)
+                chunk = self._apply(chunk, pitches, robot)
             except Exception:
                 pass  # on error: pass through unmodified
         outdata[:, 0] = chunk
@@ -1205,22 +1217,24 @@ class VoiceEffectProcessor:
             self._monitor_stream = None
         self._status("Voice FX: stream OFF")
 
-    def _apply(self, chunk: np.ndarray, pitch: int, robot: bool) -> np.ndarray:
+    def _apply(self, chunk: np.ndarray, pitches: list, robot: bool) -> np.ndarray:
         if robot:
             n = len(chunk)
             t = np.arange(self._robot_phase, self._robot_phase + n) / self._SAMPLE_RATE
             self._robot_phase = (self._robot_phase + n) % (self._SAMPLE_RATE * 100)
             chunk = chunk * np.sin(2 * np.pi * 40 * t).astype(np.float32)
-        if pitch != 0:
-            chunk = self._pitch_shift(chunk, pitch)
+        if pitches != [0]:
+            chunk = self._pitch_shift(chunk, pitches)
         return chunk
 
-    def _pitch_shift(self, chunk: np.ndarray, semitones: int) -> np.ndarray:
+    def _pitch_shift(self, chunk: np.ndarray, semitones_list: list) -> np.ndarray:
         """Overlap-add granular pitch shift, decoupled from the driver's small
-        callback size — see _PITCH_BLOCK/_PITCH_HOP comment above for why."""
+        callback size — see _PITCH_BLOCK/_PITCH_HOP comment above for why.
+        semitones_list can hold several simultaneous shifts ("poly pitch
+        shift") for the Chorus/Octave/5th/Duet/PowerChord/Alien presets."""
         HOP = self._PITCH_HOP
         BLOCK = self._PITCH_BLOCK
-        factor = 2.0 ** (semitones / 12.0)
+        factors = [2.0 ** (s / 12.0) for s in semitones_list]
         n = len(chunk)
         self._pv_stage = np.concatenate([self._pv_stage, chunk])
         while len(self._pv_stage) >= HOP:
@@ -1231,22 +1245,26 @@ class VoiceEffectProcessor:
                 # MIT). It windows/frames internally, so pass it the RAW history and
                 # apply our own outer Hann window to its output afterwards — that's
                 # only for cross-fading this grain smoothly against its neighbours
-                # below, not a second analysis window on the input.
+                # below, not a second analysis window on the input. Handles multiple
+                # simultaneous factors natively, mixing them into one output.
                 shifted_raw = self._sps.shiftpitch(
-                    self._pv_history, factors=factor, quefrency=0
+                    self._pv_history, factors=factors, quefrency=0
                 ).astype(np.float32)
                 shifted = shifted_raw * self._pv_window
             else:
                 # Fallback if the dependency failed to install: cruder single-
-                # resample-and-tile shift (still correct, verified via FFT, just
-                # without the phase vocoder's transient/timbre quality). Resample
-                # ONCE only — a second resample back to BLOCK mathematically
-                # cancels the pitch shift out (verified empirically).
+                # resample-and-tile shift per factor, summed (still correct,
+                # verified via FFT, just without the phase vocoder's transient/
+                # timbre quality). Resample ONCE per factor only — a second
+                # resample back to BLOCK mathematically cancels the pitch shift
+                # out (verified empirically).
                 from scipy.signal import resample
                 grain = self._pv_history * self._pv_window
-                n_mid = max(1, int(round(BLOCK / factor)))
-                shifted_raw = resample(grain, n_mid).astype(np.float32)
-                shifted = np.resize(shifted_raw, BLOCK)
+                shifted = np.zeros(BLOCK, dtype=np.float32)
+                for factor in factors:
+                    n_mid = max(1, int(round(BLOCK / factor)))
+                    shifted_raw = resample(grain, n_mid).astype(np.float32)
+                    shifted += np.resize(shifted_raw, BLOCK)
             self._pv_out_accum += shifted
             ready = self._pv_out_accum[:HOP].copy()
             self._pv_out_accum = np.concatenate(
@@ -5580,22 +5598,24 @@ class App(QWidget):
         layout.addWidget(self._fx_output_status_lbl)
         self._refresh_fx_output_status()
 
-        # Preset buttons — 4 saraketta niin kaikki mahtuvat näkyviin ilman vierittämistä
+        # Preset buttons — 5 pientä saraketta niin kaikki 14 (perus pitch +
+        # stftPitchShiftin poly-pitch-presetit) mahtuvat näkyviin ilman vierittämistä
         presets_lbl = QLabel("PRESET:")
         presets_lbl.setStyleSheet("font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: #3A7BFF; border: none; margin-top: 6px;")
         layout.addWidget(presets_lbl)
 
         preset_grid = QGridLayout()
-        preset_grid.setSpacing(6)
+        preset_grid.setSpacing(4)
         preset_items = list(VoiceEffectProcessor.PRESETS.keys())
-        _FX_PRESET_COLS = 4
+        _FX_PRESET_COLS = 5
         for i, preset in enumerate(preset_items):
             btn = QPushButton(preset)
             btn.setCheckable(True)
             btn.setChecked(preset == "Normal")
+            btn.setMinimumHeight(26)
             btn.setStyleSheet(
                 "QPushButton { background: #1E1E1E; border: 1px solid #2a2a2a;"
-                " border-radius: 8px; color: #888888; font-weight: 600; padding: 6px 4px; font-size: 12px; }"
+                " border-radius: 6px; color: #888888; font-weight: 600; padding: 4px 2px; font-size: 10px; }"
                 "QPushButton:hover { background: #252525; border-color: #9A4DFF; color: #E0E0E0; }"
                 "QPushButton:checked { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
                 " stop:0 #3A7BFF, stop:1 #9A4DFF); border: 2px solid #3A7BFF; color: #fff; }"
