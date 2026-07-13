@@ -293,7 +293,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.74"
+APP_VERSION = "1.3.75"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -740,28 +740,86 @@ def _disable_unused_voicemeeter_endpoints(status_cb) -> None:
     """
     if sys.platform != "win32":
         return
-    ps_cmd = (
-        "Get-PnpDevice -Class AudioEndpoint | Where-Object { "
-        "$_.FriendlyName -like '*Voicemeeter*' -and "
-        "$_.FriendlyName -notlike '*Voicemeeter Input (*' -and "
-        "$_.FriendlyName -notlike '*Voicemeeter Out B1 (*' -and "
-        "$_.Status -eq 'OK' "
-        "} | Disable-PnpDevice -Confirm:$false"
-    )
-    outer_cmd = (
-        f"Start-Process powershell -Verb RunAs -Wait -ArgumentList "
-        f"'-NoProfile -Command \"{ps_cmd}\"'"
+    import tempfile
+
+    # The PnP-filter script is written to its own .ps1 file and invoked with -File +
+    # an array -ArgumentList, instead of embedding it as a nested -Command string
+    # (avoids the quote-nesting that used to break the outer Start-Process call
+    # silently before the UAC prompt could even appear).
+    #
+    # Device MATCHING is registry-based, not PnP FriendlyName-based. Verified directly
+    # on real hardware: Get-PnpDevice -Class AudioEndpoint reports every Voicemeeter
+    # endpoint's Status as "Error" (never "OK") and its FriendlyName as a generic,
+    # indistinguishable string ("Speakers (VB-Audio Voicemeeter VAIO)", "Voicemeeter
+    # Out 1..8") that does NOT match the names Windows/sd.query_devices() actually show
+    # ("Voicemeeter Input", "Voicemeeter Out B1", etc). The real, distinguishable name
+    # lives in the registry (same property _set_windows_default_recording() already
+    # reads), and that registry GUID appears verbatim inside Get-PnpDevice's InstanceId
+    # (SWD\MMDEVAPI\{0.0.1.00000000}.{GUID} for capture, {0.0.0.00000000}.{GUID} for
+    # render) — so endpoints are identified by GUID lookup instead of by name/status.
+    tmp_dir = tempfile.mkdtemp(prefix="vr_vmcleanup_")
+    script_path = os.path.join(tmp_dir, "cleanup.ps1")
+    result_path = os.path.join(tmp_dir, "result.txt")
+    ps_script = (
+        "try {\n"
+        "  $renderBase = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Render'\n"
+        "  $captureBase = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Capture'\n"
+        "  $keep = @('Voicemeeter Input', 'Voicemeeter Out B1')\n"
+        "  $guids = @()\n"
+        "  foreach ($base in @($renderBase, $captureBase)) {\n"
+        "    Get-ChildItem $base -ErrorAction SilentlyContinue | ForEach-Object {\n"
+        "      $propPath = Join-Path $_.PSPath 'Properties'\n"
+        "      $name = (Get-ItemProperty -Path $propPath -Name '{a45c254e-df1c-4efd-8020-67d146a850e0},2' -ErrorAction SilentlyContinue).'{a45c254e-df1c-4efd-8020-67d146a850e0},2'\n"
+        "      if ($name -like '*Voicemeeter*' -and ($keep -notcontains $name)) {\n"
+        "        $guids += $_.PSChildName\n"
+        "      }\n"
+        "    }\n"
+        "  }\n"
+        "  $disabledCount = 0\n"
+        "  foreach ($guid in $guids) {\n"
+        "    Get-PnpDevice -Class AudioEndpoint -PresentOnly | Where-Object { $_.InstanceId -like \"*$guid*\" } | ForEach-Object {\n"
+        "      Disable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false -ErrorAction SilentlyContinue\n"
+        "      $disabledCount++\n"
+        "    }\n"
+        "  }\n"
+        f"  \"OK:$disabledCount\" | Out-File -FilePath '{result_path}' -Encoding utf8\n"
+        "} catch {\n"
+        f"  \"ERROR: $_\" | Out-File -FilePath '{result_path}' -Encoding utf8\n"
+        "}\n"
     )
     try:
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(ps_script)
         status_cb("Siivotaan turhat Voicemeeter-virtuaalilaitteet — hyväksy UAC-pyyntö...")
         subprocess.run(
-            ["powershell", "-NoProfile", "-Command", outer_cmd],
+            ["powershell", "-NoProfile", "-Command",
+             "Start-Process -FilePath powershell -Verb RunAs -Wait -ArgumentList "
+             f"@('-NoProfile','-ExecutionPolicy','Bypass','-File','{script_path}')"],
             capture_output=True, timeout=60,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
-        status_cb("✅ Turhat Voicemeeter-virtuaalilaitteet piilotettu (Voicemeeter Input + Out B1 jäivät käyttöön).")
+        result_text = ""
+        if os.path.isfile(result_path):
+            with open(result_path, "r", encoding="utf-8") as f:
+                result_text = f.read().strip()
+        if result_text.startswith("OK:"):
+            count = result_text.split(":", 1)[1]
+            if count != "0":
+                status_cb(
+                    f"✅ {count} turhaa Voicemeeter-virtuaalilaitetta piilotettu "
+                    "(Voicemeeter Input + Out B1 jäivät käyttöön)."
+                )
+            else:
+                status_cb("⚠ Ei löytynyt piilotettavia Voicemeeter-laitteita.")
+        elif result_text.startswith("ERROR"):
+            status_cb(f"Laitteiden siivous epäonnistui: {result_text}")
+        else:
+            status_cb("⚠ UAC-pyyntöä ei hyväksytty tai se peruttiin — laitteita ei siivottu.")
     except Exception as exc:
         status_cb(f"Laitteiden siivous epäonnistui: {exc}")
+    finally:
+        import shutil as _sh_cleanup
+        _sh_cleanup.rmtree(tmp_dir, ignore_errors=True)
 
 
 def _check_voicemeeter_routing() -> tuple[str, bool]:
@@ -8939,7 +8997,7 @@ class SetupWizard(QDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Voice Royale — Asennus")
-        self.setFixedSize(680, 600)
+        self.setFixedSize(780, 900)
         self.setStyleSheet(self._STYLE)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
         self._api_key = ""
@@ -8974,17 +9032,16 @@ class SetupWizard(QDialog):
         self._svc_tts = "edge"          # "edge" | "elevenlabs"
         self._svc_routing = "simple"    # "simple" | "gaming"
         self._svc_mixer = False         # bool — fyysinen mikseri (RodeCaster ym.) → Voicemeeter
-        self._svc_streamdeck = False    # bool
-        self._svc_ha = False            # bool
-        # Chat-reititys (Voicemeeter) -alivelhon tila — pakottaa oikean järjestyksen:
-        # asenna -> valitse laite -> konfiguroi/testaa. Ks. _page_vm_install/_page_vm_device/_page_vm_configure.
-        self._wiz_vm_auto_configured = False   # onko konfigurointi jo ajettu automaattisesti tälle sivulle tultaessa
-        self._wiz_vm_device_tested = False     # onko käyttäjä testannut valitun mikrofonin ennen jatkoa
-        # Wizard HA credentials (saved to settings in _finish_setup)
-        self._wiz_ha_url = ""
-        self._wiz_ha_token = ""
+        # Dynaaminen "Vaihe X/Y" -mekanismi: _header() rekisteröi jokaisen sivun subtitle-labelin
+        # tähän sanakirjaan rakennusjärjestyksessä (== stack-indeksi), ja _navigate() päivittää
+        # tekstin joka kerta senhetkisen _get_page_sequence()-tuloksen mukaan. Näin numerointi on
+        # AINA oikein riippumatta käyttäjän valitsemasta polusta — ei enää kovakoodattuja "Vaihe
+        # X/6" -merkkijonoja jotka menevät sekaisin kun sivupolku muuttuu.
+        self._step_labels = {}
+        self._header_counter = 0
         self._build_ui()
         self._stack.setCurrentIndex(0)
+        self._refresh_step_label(0)
 
     # ── helpers ──────────────────────────────────────────────────────────
 
@@ -8996,11 +9053,12 @@ class SetupWizard(QDialog):
         lbl = QLabel(title)
         lbl.setStyleSheet("font-size: 20px; font-weight: bold; color: #e6edf3; background: transparent;")
         lay.addWidget(lbl)
-        if subtitle:
-            sub = QLabel(subtitle)
-            sub.setStyleSheet("font-size: 12px; color: #8b949e; background: transparent;")
-            sub.setWordWrap(True)
-            lay.addWidget(sub)
+        sub = QLabel("")
+        sub.setStyleSheet("font-size: 12px; color: #8b949e; background: transparent;")
+        sub.setWordWrap(True)
+        lay.addWidget(sub)
+        self._step_labels[self._header_counter] = (sub, subtitle)
+        self._header_counter += 1
         return w
 
     def _back_btn(self):
@@ -9010,13 +9068,16 @@ class SetupWizard(QDialog):
         btn.clicked.connect(self._nav_back)
         return btn
 
-    # Sivuindeksit (ks. _build_ui): 0 welcome, 1 services, 2 packages, 3 api_key,
-    # 4 vbcable, 5 vm_install, 6 vm_device, 7 vm_configure, 8 streamdeck, 9 ha_setup,
-    # 10 devices, 11 final_test.
-    _PAGE_DEVICES = 10
-    _PAGE_VM_INSTALL = 5
-    _PAGE_VM_DEVICE = 6
-    _PAGE_VM_CONFIGURE = 7
+    # Sivuindeksit (ks. _build_ui) — lyhyt, suoraviivainen polku:
+    # 0 welcome, 1 services, 2 packages (vain dev-tilassa), 3 api_key, 4 devices,
+    # 5 chat_routing (vain jos mikseri tai pelit/Discord valittu), 6 finish.
+    _PAGE_WELCOME = 0
+    _PAGE_SERVICES = 1
+    _PAGE_PACKAGES = 2
+    _PAGE_API_KEY = 3
+    _PAGE_DEVICES = 4
+    _PAGE_CHAT_ROUTING = 5
+    _PAGE_FINISH = 6
 
     def _navigate(self, page):
         coming_from = self._stack.currentIndex()
@@ -9025,18 +9086,22 @@ class SetupWizard(QDialog):
         self._stack.setCurrentIndex(page)
         if page == self._PAGE_DEVICES and coming_from != self._PAGE_DEVICES:
             self._start_dev_monitoring()
+        if page == self._PAGE_CHAT_ROUTING:
+            self._refresh_chat_routing_page()
+        self._refresh_step_label(page)
+
+    def _refresh_step_label(self, page):
+        entry = self._step_labels.get(page)
+        if not entry:
             return
-        # Chat-reititys-alivelho: pakota oikea järjestys — laitelista päivitetään aina
-        # kun sivulle tullaan (laitteisto on voinut muuttua, esim. rebootin jälkeen),
-        # ja konfigurointi ajetaan automaattisesti kerran heti kun laite on valittu.
-        if page == self._PAGE_VM_DEVICE and hasattr(self, "_wiz_vm_refresh_devices_fn"):
-            self._wiz_vm_refresh_devices_fn()
-            if hasattr(self, "_wiz_vm_device_next_btn"):
-                self._wiz_vm_device_next_btn.setEnabled(self._wiz_vm_device_tested)
-        if (page == self._PAGE_VM_CONFIGURE and not self._wiz_vm_auto_configured
-                and hasattr(self, "_wiz_vm_configure_fn")):
-            self._wiz_vm_auto_configured = True
-            self._wiz_vm_configure_fn(auto=True)
+        label, desc = entry
+        seq = self._get_page_sequence()
+        try:
+            pos = seq.index(page) + 1
+            total = len(seq)
+            label.setText(f"Vaihe {pos}/{total}  —  {desc}" if desc else f"Vaihe {pos}/{total}")
+        except ValueError:
+            label.setText(desc)
 
     def _detected_mixer_name(self) -> str | None:
         """Return a clean display name for a physical mixer (e.g. RodeCaster) if plugged in.
@@ -9058,26 +9123,21 @@ class SetupWizard(QDialog):
         return None
 
     def _get_page_sequence(self) -> list:
-        seq = [0, 1, 2]  # welcome, services, packages
+        seq = [self._PAGE_WELCOME, self._PAGE_SERVICES]
+        # Python-pakettitarkistus on hyödyllinen vain kehitystilassa (source-ajossa) — pakattuun
+        # exe:hen kaikki kirjastot on jo bundlattu, joten sivu ei näytä normaalikäyttäjälle
+        # mitään tehtävää. Ei näytetä sitä valmiiksi asennetulle käyttäjälle turhaan.
+        if not getattr(sys, "frozen", False):
+            seq.append(self._PAGE_PACKAGES)
         needs_api = (self._svc_stt == "openai" or
                      self._svc_trans == "openai" or
                      self._svc_tts == "elevenlabs")
         if needs_api:
-            seq.append(3)  # api keys
-        if self._svc_mixer:
-            if sys.platform == "win32":
-                # Pakotettu järjestys: asenna -> valitse mikserin laite -> konfiguroi/testaa.
-                seq += [self._PAGE_VM_INSTALL, self._PAGE_VM_DEVICE, self._PAGE_VM_CONFIGURE]
-            else:
-                seq.append(self._PAGE_VM_INSTALL)  # ei-Windows: pelkkä info-sivu
-        elif self._svc_routing == "gaming":
-            seq.append(4)  # vb-cable (riittää ilman fyysistä mikseriä)
-        if self._svc_streamdeck:
-            seq.append(8)  # stream deck
-        if self._svc_ha:
-            seq.append(9)  # home assistant
-        seq.append(self._PAGE_DEVICES)  # devices
-        seq.append(11)  # final test
+            seq.append(self._PAGE_API_KEY)
+        seq.append(self._PAGE_DEVICES)
+        if self._svc_mixer or self._svc_routing == "gaming":
+            seq.append(self._PAGE_CHAT_ROUTING)
+        seq.append(self._PAGE_FINISH)
         return seq
 
     def _nav_next(self):
@@ -9219,16 +9279,18 @@ class SetupWizard(QDialog):
             "Haluan kuulua peleissä tai Discordissa virtuaalisena mikrofonina.")
         _mw, mixer_cb = _device_row("🎚️", "Minulla on fyysinen mikseri (esim. RodeCaster Pro 2)",
             "Chat-mikin ääni pitää sekoittaa käännösääneen ennen peliä/Discordia.")
-        _sw, sd_cb = _device_row("🎛️", "Elgato Stream Deck",
-            "Fyysiset näppäimet Voice Royalen ohjaukseen.")
-        _haw, ha_cb = _device_row("🏠", "Home Assistant",
-            "Älykotijärjestelmä — ohjaa medialaitteitasi soundboardista.")
 
         bl.addWidget(_hw)
         bl.addWidget(_gw)
         bl.addWidget(_mw)
-        bl.addWidget(_sw)
-        bl.addWidget(_haw)
+
+        hint = QLabel(
+            "Stream Deck ja Home Assistant asetetaan tarvittaessa myöhemmin "
+            "Asetukset-ikkunasta — ei kuulu ensiasennukseen."
+        )
+        hint.setStyleSheet("color: #484f58; font-size: 10px; background: transparent;")
+        hint.setWordWrap(True)
+        bl.addWidget(hint)
 
         sep1 = QFrame()
         sep1.setFrameShape(QFrame.Shape.HLine)
@@ -9461,8 +9523,6 @@ class SetupWizard(QDialog):
             self._svc_tts = tts
             self._svc_routing = routing
             self._svc_mixer = mixer
-            self._svc_streamdeck = sd_cb.isChecked()
-            self._svc_ha = ha_cb.isChecked()
             needs = []
             if stt == "openai" or trans == "openai" or tts == "elevenlabs":
                 needs.append("OpenAI API-avain")
@@ -9474,10 +9534,6 @@ class SetupWizard(QDialog):
                 needs.append("Voicemeeter Banana (ilmainen)")
             elif routing == "gaming":
                 needs.append("VB-Cable (ilmainen)")
-            if sd_cb.isChecked():
-                needs.append("Stream Deck -lisäosa")
-            if ha_cb.isChecked():
-                needs.append("HA URL + token")
             if needs:
                 summary_lbl.setText("Tarvitaan vielä:  " + "  •  ".join(needs))
                 summary_lbl.setStyleSheet(
@@ -9522,8 +9578,6 @@ class SetupWizard(QDialog):
 
         gaming_cb.toggled.connect(lambda *_: _update_summary())
         mixer_cb.toggled.connect(lambda *_: _update_summary())
-        sd_cb.toggled.connect(lambda *_: _update_summary())
-        ha_cb.toggled.connect(lambda *_: _update_summary())
         stt_grp.buttonToggled.connect(lambda *_: _update_summary())
         trans_grp.buttonToggled.connect(lambda *_: _update_summary())
         tts_grp.buttonToggled.connect(lambda *_: _update_summary())
@@ -9590,7 +9644,7 @@ class SetupWizard(QDialog):
         lay.setSpacing(0)
         lay.addWidget(self._header(
             "Python-paketit",
-            "Vaihe 1/6  —  Tarkistetaan tarvittavat kirjastot."
+            "Tarkistetaan tarvittavat kirjastot."
         ))
         body = QWidget()
         body.setStyleSheet("background: #0d1117;")
@@ -9885,7 +9939,7 @@ class SetupWizard(QDialog):
         lay.setSpacing(0)
         lay.addWidget(self._header(
             "OpenAI API-avain",
-            "Vaihe 2/6  —  Tarvitaan puheentunnistukseen. Ohitettavissa."
+            "Tarvitaan puheentunnistukseen. Ohitettavissa."
         ))
         body = QWidget()
         body.setStyleSheet("background: #0d1117;")
@@ -9993,15 +10047,20 @@ class SetupWizard(QDialog):
         lay.addWidget(body)
         return page
 
-    def _page_vbcable(self):
+    def _page_chat_routing(self):
+        """Chat-reititys — YKSI sivu, YKSI nappi. Aiemmin tämä oli 3 pakotettua alisivua
+        (asenna -> valitse laite -> konfiguroi/testaa); nyt "Määritä automaattisesti" tekee
+        kaiken sen taustalla peräkkäin, ja laitetunnistus (mikserin Chat-kanava) on oma
+        riippumaton avainsanahaku joka ei enää edellytä että käyttäjä valitsisi saman
+        laitteen erikseen jollain toisella sivulla."""
         page = QWidget()
         page.setStyleSheet("background: #0d1117;")
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         lay.addWidget(self._header(
-            "Virtuaalimikrofoni (VB-Cable)",
-            "Vaihe 3/6  —  Valinnainen. Tarvitaan jos haluat äänen näkyvän mikrofonina peleissä."
+            "Chat-reititys",
+            "Yksi nappi hoitaa asennuksen, määrityksen ja testauksen."
         ))
         body = QWidget()
         body.setStyleSheet("background: #0d1117;")
@@ -10009,122 +10068,11 @@ class SetupWizard(QDialog):
         bl.setContentsMargins(32, 20, 32, 20)
         bl.setSpacing(12)
 
-        vbc = _is_vbcable_installed()
-        self._vbc_status_lbl = QLabel(
-            "✅ Virtuaalimikrofoni löytyi — ei toimia tarvita." if vbc
-            else "Virtuaalimikrofonia ei löydy."
-        )
-        self._vbc_status_lbl.setStyleSheet(
-            f"color: {'#3fb950' if vbc else '#e3b341'};"
-            " font-size: 13px; font-weight: bold; background: transparent;"
-        )
-        self._vbc_status_lbl.setWordWrap(True)
-        bl.addWidget(self._vbc_status_lbl)
-
-        desc = QLabel(
-            "VB-Audio Virtual Cable on ilmainen virtuaaliäänilaite — luo vain "
-            "2 laitetta Windowsiin (CABLE Input + CABLE Output). Riittää useimmille.\n\n"
-            "Jos sinulla on fyysinen mikseri (esim. RodeCaster Pro 2), käytä sen sijaan "
-            "Voicemeeter Bananaa (valitse se edellisellä sivulla) — älä asenna molempia, "
-            "se tuplaa virtuaalilaitteiden määrän Windowsin ääniasetuksissa."
-        )
-        desc.setStyleSheet(
-            "color: #8b949e; font-size: 12px; background: transparent; line-height: 150%;"
-        )
-        desc.setWordWrap(True)
-        bl.addWidget(desc)
-
-        self._vbc_install_btn = QPushButton(
-            "VB-Cable on jo asennettu" if vbc else "Asenna VB-Cable (ilmainen)"
-        )
-        self._vbc_install_btn.setFixedHeight(36)
-        self._vbc_install_btn.setEnabled(not vbc)
-
-        def _do_vbc():
-            self._vbc_install_btn.setEnabled(False)
-            self._vbc_install_btn.setText("Asennetaan…")
-            import queue as _q_vbc
-            _rq_vbc = _q_vbc.Queue()
-
-            def _cb(msg):
-                _rq_vbc.put(msg)
-
-            def _poll_vbc():
-                while True:
-                    try:
-                        msg = _rq_vbc.get_nowait()
-                    except Exception:
-                        break
-                    ok = "✅" in msg or "installed" in msg.lower()
-                    is_final = ok or any(w in msg.lower() for w in ("error", "virhe", "failed", "manual"))
-                    self._vbc_status_lbl.setText(msg)
-                    self._vbc_status_lbl.setStyleSheet(
-                        f"color: {'#3fb950' if ok else '#f85149' if is_final else '#8b949e'};"
-                        " font-size: 12px; background: transparent;"
-                    )
-                    if is_final:
-                        _ptmr_vbc.stop()
-                        if ok:
-                            self._vbc_install_btn.setText("VB-Cable asennettu")
-                        else:
-                            self._vbc_install_btn.setEnabled(True)
-                            self._vbc_install_btn.setText("Yritä uudelleen")
-
-            _ptmr_vbc = QTimer(self)
-            _ptmr_vbc.timeout.connect(_poll_vbc)
-            _ptmr_vbc.start(100)
-            threading.Thread(target=_install_vbcable, args=(_cb,), daemon=True).start()
-
-        self._vbc_install_btn.clicked.connect(_do_vbc)
-        bl.addWidget(self._vbc_install_btn)
-
-        skip_note = QLabel(
-            "Ei pakollinen — ohita jos käytät Voiceметеriа tai et tarvitse peliäänireititystä."
-        )
-        skip_note.setStyleSheet("color: #484f58; font-size: 11px; background: transparent;")
-        skip_note.setWordWrap(True)
-        bl.addWidget(skip_note)
-        bl.addStretch()
-
-        nav = QHBoxLayout()
-        nav.addWidget(self._back_btn())
-        nav.addStretch()
-        nxt = QPushButton("Seuraava  →")
-        nxt.setFixedHeight(42)
-        nxt.setMinimumWidth(140)
-        nxt.clicked.connect(self._nav_next)
-        nav.addWidget(nxt)
-        bl.addLayout(nav)
-        lay.addWidget(body)
-        return page
-
-    def _page_vm_install(self):
-        """Chat-reititys 1/3 — Voicemeeter Bananan asennus.
-
-        Ensimmäinen pakollinen portti: 'Seuraava' pysyy lukittuna kunnes Voicemeeter on
-        todella asennettu (tai käyttäjä tietoisesti ohittaa varoituksen kautta) — muuten
-        seuraavat vaiheet (laitevalinta, konfigurointi) eivät voi onnistua.
-        """
-        page = QWidget()
-        page.setStyleSheet("background: #0d1117;")
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(self._header(
-            "Chat-reititys 1/3 — Asenna Voicemeeter Banana",
-            "Vaihe 4/6  —  Valinnainen. Tarvitaan fyysiselle mikserille (esim. RodeCaster Pro 2)."
-        ))
-        body = QWidget()
-        body.setStyleSheet("background: #0d1117;")
-        bl = QVBoxLayout(body)
-        bl.setContentsMargins(32, 20, 32, 20)
-        bl.setSpacing(10)
-
         if sys.platform != "win32":
             note = QLabel(
-                "Chat-reititys Voicemeeterin kautta on tuettu vain Windowsissa.\n"
-                "Mac/Linux: reititä äänet käyttöjärjestelmän omalla virtuaalikaapelilla "
-                "(esim. BlackHole macOS:llä) ja käytä sitä Voice Royalen lähtölaitteena."
+                "Chat-reititys on tuettu vain Windowsissa.\n"
+                "Mac/Linux: käytä käyttöjärjestelmän omaa virtuaalikaapelia "
+                "(esim. BlackHole macOS:llä) ja valitse se Voice Royalen lähtölaitteeksi."
             )
             note.setStyleSheet("color: #8b949e; font-size: 13px; background: transparent;")
             note.setWordWrap(True)
@@ -10142,174 +10090,44 @@ class SetupWizard(QDialog):
             lay.addWidget(body)
             return page
 
-        mixer_name = self._detected_mixer_name()
-        if mixer_name:
-            why_text = (
-                f"Havaitsimme laitteesi: {mixer_name}\n\n"
-                "Mitä tapahtuu: Voicemeeter Banana yhdistää mikserisi Chat-mikin ja Voice Royalen "
-                "käännösäänen SAMAAN virtuaaliseen mikrofoniin, jota Discord/pelit käyttävät "
-                "automaattisesti. Ilman tätä ohjelmat kuulisivat vain toisen äänilähteistä kerrallaan.\n\n"
-                "Miksi juuri Voicemeeter: se osaa sekoittaa kaksi äänilähdettä yhdeksi mikrofoniksi — "
-                "tavallinen Windows-ääniasetus ei osaa tätä."
-            )
-        else:
-            why_text = (
-                "Mitä tapahtuu: Voicemeeter Banana yhdistää fyysisen mikserisi (esim. RodeCaster Pro 2) "
-                "Chat-mikin ja Voice Royalen käännösäänen SAMAAN virtuaaliseen mikrofoniin, jota "
-                "Discord/pelit käyttävät automaattisesti. Ilman tätä ohjelmat kuulisivat vain toisen "
-                "äänilähteistä kerrallaan.\n\n"
-                "Miksi juuri Voicemeeter: se osaa sekoittaa kaksi äänilähdettä yhdeksi mikrofoniksi — "
-                "tavallinen Windows-ääniasetus ei osaa tätä."
-            )
-        why = QLabel(why_text)
-        why.setStyleSheet(
+        # Selitysteksti ja tilariippuvat osat täytetään/päivitetään _refresh_chat_routing_page():ssä
+        # (kutsutaan sekä täältä alussa että joka kerta kun sivulle navigoidaan — _svc_mixer on
+        # voinut muuttua käyttäjän palattua sivulle 1 sen jälkeen kun tämä sivu jo rakennettiin).
+        self._chat_why_lbl = QLabel("")
+        self._chat_why_lbl.setStyleSheet(
             "color: #8b949e; font-size: 12px; background: transparent; line-height: 145%;"
         )
-        why.setWordWrap(True)
-        bl.addWidget(why)
+        self._chat_why_lbl.setWordWrap(True)
+        bl.addWidget(self._chat_why_lbl)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet("color: #21262d;")
         bl.addWidget(sep)
 
-        vm_ok = _is_voicemeeter_installed()
-        self._wiz_vm_status_lbl = QLabel(
-            "✅ Voicemeeter Banana on jo asennettu — voit siirtyä seuraavaan vaiheeseen."
-            if vm_ok else "Ei asennettu vielä — paina alta asentaaksesi (ilmainen, ~1 min)."
-        )
-        self._wiz_vm_status_lbl.setStyleSheet(
-            f"color: {'#3fb950' if vm_ok else '#e3b341'};"
-            " font-size: 13px; font-weight: bold; background: transparent;"
-        )
-        self._wiz_vm_status_lbl.setWordWrap(True)
-        bl.addWidget(self._wiz_vm_status_lbl)
+        self._chat_result_lbl = QLabel("")
+        self._chat_result_lbl.setWordWrap(True)
+        self._chat_result_lbl.setStyleSheet("color: #8b949e; font-size: 12px; background: transparent;")
+        bl.addWidget(self._chat_result_lbl)
 
-        self._wiz_vm_install_btn = QPushButton(
-            "Voicemeeter Banana asennettu" if vm_ok
-            else "Asenna Voicemeeter Banana (ilmainen)"
-        )
-        self._wiz_vm_install_btn.setFixedHeight(36)
-        self._wiz_vm_install_btn.setEnabled(not vm_ok)
-        self._wiz_vm_install_btn.setStyleSheet(self._BTN_PRIMARY)
-        bl.addWidget(self._wiz_vm_install_btn)
+        self._chat_cfg_btn = QPushButton("🔧  Määritä automaattisesti")
+        self._chat_cfg_btn.setFixedHeight(42)
+        self._chat_cfg_btn.setStyleSheet(self._BTN_PRIMARY)
+        bl.addWidget(self._chat_cfg_btn)
 
-        utility_row = QHBoxLayout()
-        utility_row.setSpacing(8)
+        self._chat_reboot_btn = QPushButton("🔄  Käynnistä tietokone uudelleen")
+        self._chat_reboot_btn.setFixedHeight(34)
+        self._chat_reboot_btn.setStyleSheet(self._BTN_SEC)
+        self._chat_reboot_btn.setVisible(False)
 
-        self._wiz_vm_cleanup_btn = QPushButton("Siivoa turhat virtuaalilaitteet")
-        self._wiz_vm_cleanup_btn.setFixedHeight(30)
-        self._wiz_vm_cleanup_btn.setStyleSheet(self._BTN_SEC)
-        self._wiz_vm_cleanup_btn.setToolTip(
-            "Piilottaa Windowsin ääniasetuksista Voicemeeterin ylimääräiset "
-            "In2-5/AUX/VAIO3/Out A1-A5/Out B2-B3 -laitteet. Vain Voicemeeter Input "
-            "ja Out B1 jäävät näkyviin (näitä Voice Royale käyttää). Palautettavissa "
-            "Laitehallinnasta jos tarvitset niitä myöhemmin."
-        )
-
-        self._wiz_vm_reboot_btn = QPushButton("🔄 Käynnistä tietokone uudelleen")
-        self._wiz_vm_reboot_btn.setFixedHeight(30)
-        self._wiz_vm_reboot_btn.setStyleSheet(self._BTN_SEC)
-        self._wiz_vm_reboot_btn.setToolTip(
-            "Voicemeeter-ajuri vaatii uudelleenkäynnistyksen ennen kuin se toimii "
-            "täysin. Sovellus avaa tämän saman sivun automaattisesti uudelleenkäynnistyksen jälkeen."
-        )
-
-        utility_row.addWidget(self._wiz_vm_cleanup_btn)
-        utility_row.addWidget(self._wiz_vm_reboot_btn)
-        utility_row.addStretch()
-        self._wiz_vm_utility_w = QWidget()
-        self._wiz_vm_utility_w.setStyleSheet("background: transparent;")
-        self._wiz_vm_utility_w.setLayout(utility_row)
-        self._wiz_vm_utility_w.setVisible(vm_ok)
-        bl.addWidget(self._wiz_vm_utility_w)
-
-        reboot_hint = QLabel(
-            "Huom: tuore asennus vaatii yleensä uudelleenkäynnistyksen ennen kuin ajuri "
-            "toimii täysin luotettavasti. Jos laite puuttuu seuraavan vaiheen listalta, "
-            "käynnistä tietokone uudelleen — Voice Royale avaa tämän sivun automaattisesti "
-            "uudelleenkäynnistyksen jälkeen ja jatkaa mistä jäit."
-        )
-        reboot_hint.setStyleSheet("color: #6e7681; font-size: 11px; background: transparent;")
-        reboot_hint.setWordWrap(True)
-        bl.addWidget(reboot_hint)
-
-        def _do_vm_install():
-            self._wiz_vm_install_btn.setEnabled(False)
-            self._wiz_vm_install_btn.setText("Asennetaan…")
-            import queue as _q_vm
-            _rq_vm = _q_vm.Queue()
-
-            def _cb(msg):
-                _rq_vm.put(msg)
-
-            def _poll_vm():
-                while True:
-                    try:
-                        msg = _rq_vm.get_nowait()
-                    except Exception:
-                        break
-                    ok = "✅" in msg
-                    is_final = ok or any(w in msg.lower() for w in ("error", "virhe", "failed", "manuaalinen"))
-                    self._wiz_vm_status_lbl.setText(msg)
-                    self._wiz_vm_status_lbl.setStyleSheet(
-                        f"color: {'#3fb950' if ok else '#f85149' if is_final else '#8b949e'};"
-                        " font-size: 13px; font-weight: bold; background: transparent;"
-                    )
-                    if is_final:
-                        _ptmr_vm.stop()
-                        if ok:
-                            self._wiz_vm_install_btn.setText("Voicemeeter Banana asennettu")
-                            self._wiz_vm_utility_w.setVisible(True)
-                            self._wiz_vm_install_next_btn.setEnabled(True)
-                        else:
-                            self._wiz_vm_install_btn.setEnabled(True)
-                            self._wiz_vm_install_btn.setText("Yritä uudelleen")
-
-            _ptmr_vm = QTimer(self)
-            _ptmr_vm.timeout.connect(_poll_vm)
-            _ptmr_vm.start(100)
-            threading.Thread(target=_install_voicemeeter, args=(_cb,), daemon=True).start()
-
-        def _do_vm_cleanup():
-            self._wiz_vm_cleanup_btn.setEnabled(False)
-            self._wiz_vm_cleanup_btn.setText("Siivotaan…")
-            import queue as _q_vmc
-            _rq_vmc = _q_vmc.Queue()
-
-            def _cb(msg):
-                _rq_vmc.put(msg)
-
-            def _poll_vmc():
-                try:
-                    msg = _rq_vmc.get_nowait()
-                except Exception:
-                    return
-                _ptmr_vmc.stop()
-                self._wiz_vm_status_lbl.setText(msg)
-                ok = "✅" in msg
-                self._wiz_vm_status_lbl.setStyleSheet(
-                    f"color: {'#3fb950' if ok else '#f85149'};"
-                    " font-size: 13px; font-weight: bold; background: transparent;"
-                )
-                self._wiz_vm_cleanup_btn.setEnabled(True)
-                self._wiz_vm_cleanup_btn.setText("Siivoa turhat virtuaalilaitteet")
-
-            _ptmr_vmc = QTimer(self)
-            _ptmr_vmc.timeout.connect(_poll_vmc)
-            _ptmr_vmc.start(200)
-            threading.Thread(
-                target=_disable_unused_voicemeeter_endpoints, args=(_cb,), daemon=True
-            ).start()
-
-        def _do_vm_reboot():
+        def _do_reboot():
             from PyQt6.QtWidgets import QMessageBox
             reply = QMessageBox.question(
                 self, "Käynnistä uudelleen",
-                "Voicemeeter-ajurin viimeistely vaatii uudelleenkäynnistyksen.\n\n"
+                "Ajurin viimeistely vaatii uudelleenkäynnistyksen.\n\n"
                 "Tietokone käynnistyy uudelleen 15 sekunnin kuluttua — tallenna avoimet "
-                "tiedostot muissa ohjelmissa.\n\n"
-                "Voice Royale avaa tämän saman sivun automaattisesti käynnistyksen jälkeen.",
+                "tiedostot muissa ohjelmissa.\n\nVoice Royale avaa tämän saman sivun "
+                "automaattisesti käynnistyksen jälkeen.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
@@ -10317,7 +10135,7 @@ class SetupWizard(QDialog):
                 return
             try:
                 _rs = load_settings()
-                _rs["_resume_wizard_page"] = self._PAGE_VM_INSTALL
+                _rs["_resume_wizard_page"] = self._PAGE_CHAT_ROUTING
                 save_settings(_rs)
             except Exception:
                 pass
@@ -10329,477 +10147,261 @@ class SetupWizard(QDialog):
             except Exception as e:
                 QMessageBox.warning(self, "Virhe", f"Uudelleenkäynnistystä ei voitu käynnistää: {e}")
                 return
-            self._wiz_vm_reboot_btn.setEnabled(False)
-            self._wiz_vm_reboot_btn.setText("Käynnistyy uudelleen 15 s kuluttua…")
+            self._chat_reboot_btn.setEnabled(False)
+            self._chat_reboot_btn.setText("Käynnistyy uudelleen 15 s kuluttua…")
 
-        self._wiz_vm_install_btn.clicked.connect(_do_vm_install)
-        self._wiz_vm_cleanup_btn.clicked.connect(_do_vm_cleanup)
-        self._wiz_vm_reboot_btn.clicked.connect(_do_vm_reboot)
+        self._chat_reboot_btn.clicked.connect(_do_reboot)
+        bl.addWidget(self._chat_reboot_btn)
 
-        bl.addStretch()
-
-        nav = QHBoxLayout()
-        nav.addWidget(self._back_btn())
-
-        def _skip_install():
-            from PyQt6.QtWidgets import QMessageBox
-            reply = QMessageBox.question(
-                self, "Ohita Voicemeeter-asennus",
-                "Ilman Voicemeeteria chat-mikkisi ja Voice Royalen käännösääni EIVÄT sekoitu "
-                "samaksi mikrofoniksi peleissä/Discordissa. Voit asentaa ja määrittää tämän "
-                "myöhemmin Asetukset-ikkunan Asennukset-välilehdeltä.\n\n"
-                "Ohitetaanko tämä vaihe silti?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Cancel,
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                self._nav_next()
-
-        skip_btn = QPushButton("Ohita (asennan itse myöhemmin)")
-        skip_btn.setFixedHeight(36)
-        skip_btn.setStyleSheet(self._BTN_SKIP)
-        skip_btn.clicked.connect(_skip_install)
-        nav.addWidget(skip_btn)
-        nav.addStretch()
-
-        self._wiz_vm_install_next_btn = QPushButton("Seuraava  →")
-        self._wiz_vm_install_next_btn.setFixedHeight(42)
-        self._wiz_vm_install_next_btn.setMinimumWidth(140)
-        # Explicit style (not the dialog's default cascade): this page can be shown as the
-        # very FIRST page via _navigate(5) before .exec() (post-reboot resume), and a bare
-        # cascade style was previously found to silently fail to render on first-shown pages.
-        self._wiz_vm_install_next_btn.setStyleSheet(self._BTN_PRIMARY)
-        self._wiz_vm_install_next_btn.setEnabled(vm_ok)
-        self._wiz_vm_install_next_btn.clicked.connect(self._nav_next)
-        nav.addWidget(self._wiz_vm_install_next_btn)
-        bl.addLayout(nav)
-        lay.addWidget(body)
-        return page
-
-    def _page_vm_device(self):
-        """Chat-reititys 2/3 — valitse mikserin Chat/Mix-Minus-laite.
-
-        Toinen portti: käyttäjän täytyy testata valittu laite (puhumalla siihen) ennen kuin
-        'Seuraava' vapautuu — näin väärä laitevalinta huomataan TÄSSÄ, ei vasta konfiguroinnin
-        jälkeen kun reititys 'ei vain toimi'.
-        """
-        page = QWidget()
-        page.setStyleSheet("background: #0d1117;")
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(self._header(
-            "Chat-reititys 2/3 — Valitse mikrofonisi",
-            "Vaihe 4/6  —  Kerro mikä laite tuo mikserisi Chat/Mix-Minus-äänen tietokoneelle."
-        ))
-        body = QWidget()
-        body.setStyleSheet("background: #0d1117;")
-        bl = QVBoxLayout(body)
-        bl.setContentsMargins(32, 20, 32, 20)
-        bl.setSpacing(10)
-
-        why = QLabel(
-            "Mitä tapahtuu: seuraavassa vaiheessa Voice Royale ohjaa tässä valitun laitteen äänen "
-            "Voicemeeterin Hardware Input 1:een. Väärä valinta tarkoittaa, ettei chat-mikkisi ääni "
-            "kuulu pelissä/Discordissa lainkaan.\n\n"
-            "Valitse laite joka vastaa mikserisi Chat- tai Mix-Minus-tuloa — EI päämikrofonia "
-            "(sen kuulevat pelikaverisi jo suoraan pelin omaa reittiä)."
-        )
-        why.setStyleSheet(
-            "color: #8b949e; font-size: 12px; background: transparent; line-height: 145%;"
-        )
-        why.setWordWrap(True)
-        bl.addWidget(why)
-
-        self._wiz_vm_dev_combo = QComboBox()
-        self._wiz_vm_dev_combo.setFixedHeight(34)
-        self._wiz_vm_dev_combo.setStyleSheet(
+        # -- manuaalinen laitevalinta: näkyy VAIN jos automaattinen tunnistus epäonnistuu --
+        self._chat_manual_row = QWidget()
+        self._chat_manual_row.setVisible(False)
+        manual_lay = QVBoxLayout(self._chat_manual_row)
+        manual_lay.setContentsMargins(0, 4, 0, 0)
+        manual_lay.setSpacing(6)
+        manual_hint = QLabel("Emme tunnistaneet mikseriäsi automaattisesti — valitse laite:")
+        manual_hint.setStyleSheet("color: #e3b341; font-size: 11px; background: transparent;")
+        manual_hint.setWordWrap(True)
+        self._chat_dev_combo = QComboBox()
+        self._chat_dev_combo.setFixedHeight(32)
+        self._chat_dev_combo.setStyleSheet(
             "QComboBox { background: #161b22; border: 1px solid #30363d; border-radius: 6px;"
             " color: #e6edf3; padding: 4px 10px; font-size: 12px; }"
             "QComboBox::drop-down { border: none; }"
             "QComboBox QAbstractItemView { background: #161b22; color: #e6edf3; }"
         )
-        bl.addWidget(self._wiz_vm_dev_combo)
+        manual_lay.addWidget(manual_hint)
+        manual_lay.addWidget(self._chat_dev_combo)
+        bl.addWidget(self._chat_manual_row)
 
-        self._wiz_vm_dev_auto_lbl = QLabel("")
-        self._wiz_vm_dev_auto_lbl.setWordWrap(True)
-        self._wiz_vm_dev_auto_lbl.setStyleSheet(
-            "color: #3fb950; font-size: 11px; background: transparent;"
-        )
-        bl.addWidget(self._wiz_vm_dev_auto_lbl)
-
-        def _refresh_vm_devices():
-            self._wiz_vm_dev_combo.blockSignals(True)
-            self._wiz_vm_dev_combo.clear()
+        def _refresh_chat_dev_combo():
+            self._chat_dev_combo.blockSignals(True)
+            self._chat_dev_combo.clear()
             try:
-                devs = sd.query_devices()
+                for d in sd.query_devices():
+                    if d["max_input_channels"] > 0:
+                        self._chat_dev_combo.addItem(d["name"])
             except Exception:
-                devs = []
-            for idx, d in enumerate(devs):
-                if d["max_input_channels"] > 0:
-                    self._wiz_vm_dev_combo.addItem(d["name"], idx)
-            # Prioritized keyword passes: "Chat"/"Mix Minus" name the exact channel we need;
-            # a bare "RodeCaster" match could be any of the mixer's several sub-devices
-            # (Main, Loopback, etc.) so it's only used as a last resort.
-            auto_idx = -1
-            for keywords in (("chat",), ("mix minus", "mix-minus"), ("rodecaster", "rode caster")):
-                for i in range(self._wiz_vm_dev_combo.count()):
-                    n = self._wiz_vm_dev_combo.itemText(i).lower()
-                    if any(k in n for k in keywords):
-                        auto_idx = i
-                        break
-                if auto_idx >= 0:
-                    break
-            if auto_idx >= 0:
-                self._wiz_vm_dev_combo.setCurrentIndex(auto_idx)
-                self._wiz_vm_dev_auto_lbl.setText(
-                    f"✓ Automaattisesti valittu: {self._wiz_vm_dev_combo.itemText(auto_idx)}"
-                )
-                self._wiz_vm_dev_auto_lbl.setStyleSheet(
-                    "color: #3fb950; font-size: 11px; background: transparent;"
-                )
-            else:
-                self._wiz_vm_dev_auto_lbl.setText(
-                    "Ei automaattista tunnistusta — valitse laite listalta manuaalisesti."
-                )
-                self._wiz_vm_dev_auto_lbl.setStyleSheet(
-                    "color: #e3b341; font-size: 11px; background: transparent;"
-                )
-            self._wiz_vm_dev_combo.blockSignals(False)
-            _fit_combo_dropdown(self._wiz_vm_dev_combo)
-
-        _refresh_vm_devices()
-        self._wiz_vm_refresh_devices_fn = _refresh_vm_devices
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #21262d;")
-        bl.addWidget(sep)
-
-        test_hdr = QLabel("Vahvista laite — puhu mikserisi Chat-mikkiin")
-        test_hdr.setStyleSheet(
-            "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;"
-        )
-        bl.addWidget(test_hdr)
-
-        test_btn = QPushButton("🎤 Testaa laite (puhu 2 s)")
-        test_btn.setFixedHeight(34)
-        test_btn.setStyleSheet(self._BTN_SEC)
-        bl.addWidget(test_btn)
-
-        test_result = QLabel("Testaa ennen kuin jatkat — näin näet heti onko laite oikea.")
-        test_result.setWordWrap(True)
-        test_result.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
-        bl.addWidget(test_result)
-
-        def _do_test_device():
-            idx = self._wiz_vm_dev_combo.currentData()
-            if idx is None:
-                return
-            test_btn.setEnabled(False)
-            test_btn.setText("Kuunnellaan 2 s...")
-            import queue as _qd
-            _rq = _qd.Queue()
-
-            def _record():
-                try:
-                    buf = []
-                    done_evt = threading.Event()
-                    _CONFIGS = [(1, 16000), (1, 48000), (2, 48000), (1, 44100)]
-                    err = None
-                    for ch, sr in _CONFIGS:
-                        buf.clear()
-                        done_evt.clear()
-                        collected = [0]
-
-                        def _cb(data, frames, t, status, _sr=sr):
-                            buf.append(data[:, 0].copy() if data.ndim > 1 else data.copy())
-                            collected[0] += frames
-                            if collected[0] >= _sr * 2:
-                                done_evt.set()
-                                raise sd.CallbackStop()
-
-                        try:
-                            with sd.InputStream(
-                                device=idx, channels=ch, samplerate=sr,
-                                blocksize=512, dtype="float32", callback=_cb
-                            ):
-                                done_evt.wait(timeout=4)
-                            err = None
-                            break
-                        except Exception as e:
-                            err = e
-                    if err is not None:
-                        _rq.put(("err", str(err)))
-                        return
-                    if not buf:
-                        _rq.put(("err", "Ei ääntä nauhoitettu"))
-                        return
-                    audio = np.concatenate(buf)
-                    peak = float(np.max(np.abs(audio)))
-                    _rq.put(("ok", peak))
-                except Exception as exc:
-                    _rq.put(("err", str(exc)))
-
-            def _poll():
-                try:
-                    kind, val = _rq.get_nowait()
-                except Exception:
-                    return
-                _ptmr.stop()
-                test_btn.setEnabled(True)
-                test_btn.setText("🎤 Testaa laite (puhu 2 s)")
-                self._wiz_vm_device_tested = True
-                self._wiz_vm_device_next_btn.setEnabled(True)
-                if kind == "err":
-                    test_result.setText(f"⚠️ Virhe: {val} — kokeile toista laitetta listalta.")
-                    test_result.setStyleSheet("color: #f85149; font-size: 11px; background: transparent;")
-                elif val > 0.02:
-                    test_result.setText(f"✅ Ääni kuuluu (taso {val:.3f}) — oikea laite valittu.")
-                    test_result.setStyleSheet("color: #3fb950; font-size: 11px; background: transparent;")
-                else:
-                    test_result.setText(
-                        f"⚠️ Äänitaso hyvin matala ({val:.4f}) — puhuitko mikserin Chat-mikkiin? "
-                        "Voit silti jatkaa, mutta tarkista laite jos reititys ei myöhemmin toimi."
-                    )
-                    test_result.setStyleSheet("color: #e3b341; font-size: 11px; background: transparent;")
-
-            _ptmr = QTimer(self)
-            _ptmr.timeout.connect(_poll)
-            _ptmr.start(100)
-            threading.Thread(target=_record, daemon=True).start()
-
-        test_btn.clicked.connect(_do_test_device)
+                pass
+            self._chat_dev_combo.blockSignals(False)
+            _fit_combo_dropdown(self._chat_dev_combo)
 
         bl.addStretch()
 
-        nav = QHBoxLayout()
-        nav.addWidget(self._back_btn())
-        nav.addStretch()
-        self._wiz_vm_device_next_btn = QPushButton("Seuraava  →")
-        self._wiz_vm_device_next_btn.setFixedHeight(42)
-        self._wiz_vm_device_next_btn.setMinimumWidth(140)
-        self._wiz_vm_device_next_btn.setEnabled(self._wiz_vm_device_tested)
-        self._wiz_vm_device_next_btn.clicked.connect(self._nav_next)
-        nav.addWidget(self._wiz_vm_device_next_btn)
-        bl.addLayout(nav)
-        lay.addWidget(body)
-        return page
-
-    def _page_vm_configure(self):
-        """Chat-reititys 3/3 — konfiguroi Voicemeeter-reititys ja varmista se toimivaksi.
-
-        Kolmas vaihe ajetaan AUTOMAATTISESTI kerran heti kun sivulle tullaan (edellisten
-        vaiheiden — asennus + laitevalinta — jälkeen kaikki tarvittava tieto on jo olemassa),
-        ja tulos näytetään heti selkeällä tekstillä. Manuaaliset uudelleenyritys- ja
-        varatoiminnot pysyvät näkyvissä jos automaattinen reititys ei riitä.
-        """
-        page = QWidget()
-        page.setStyleSheet("background: #0d1117;")
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(self._header(
-            "Chat-reititys 3/3 — Konfiguroi ja testaa",
-            "Vaihe 4/6  —  Reititys asetetaan automaattisesti heti kun tälle sivulle tullaan."
-        ))
-        body = QWidget()
-        body.setStyleSheet("background: #0d1117;")
-        bl = QVBoxLayout(body)
-        bl.setContentsMargins(32, 16, 32, 16)
-        bl.setSpacing(8)
-
-        why = QLabel(
-            "Mitä tapahtuu, järjestyksessä:\n"
-            "  1. Valitsemasi laite → Voicemeeter Hardware Input 1 → B1-väylä\n"
-            "  2. Voice Royalen käännösääni → Voicemeeter Input (virtuaalikaapeli) → B1-väylä\n"
-            "  3. Windowsin oletusmikrofoniksi asetetaan 'Voicemeeter Out B1'\n\n"
-            "Miksi juuri näin: Discord/pelit kuuntelevat vain YHTÄ mikrofonia (Windowsin oletusta). "
-            "B1-väylä on se paikka jossa mikserisi chat-ääni ja Voice Royalen käännösääni "
-            "yhdistyvät samaksi mikrofoniksi."
-        )
-        why.setStyleSheet(
-            "color: #8b949e; font-size: 12px; background: transparent; line-height: 145%;"
-        )
-        why.setWordWrap(True)
-        bl.addWidget(why)
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #21262d;")
-        bl.addWidget(sep)
-
-        self._wiz_vm_result_lbl = QLabel("Odottaa...")
-        self._wiz_vm_result_lbl.setWordWrap(True)
-        self._wiz_vm_result_lbl.setStyleSheet(
-            "color: #8b949e; font-size: 12px; background: transparent;"
-        )
-        bl.addWidget(self._wiz_vm_result_lbl)
-
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
-        self._wiz_vm_cfg_btn = QPushButton("Konfiguroi uudelleen")
-        self._wiz_vm_cfg_btn.setFixedHeight(34)
-        self._wiz_vm_cfg_btn.setStyleSheet(self._BTN_SEC)
-        self._wiz_vm_test_btn = QPushButton("Testaa reititys uudelleen")
-        self._wiz_vm_test_btn.setFixedHeight(34)
-        self._wiz_vm_test_btn.setStyleSheet(
-            "QPushButton { background: #1a4731; color: #3fb950; border: 1px solid #3fb950;"
-            " border-radius: 6px; padding: 5px 12px; font-size: 12px; }"
-            "QPushButton:hover { background: #22603c; }"
-        )
-        btn_row.addWidget(self._wiz_vm_cfg_btn)
-        btn_row.addWidget(self._wiz_vm_test_btn)
-        btn_row.addStretch()
-        bl.addLayout(btn_row)
-
-        def _do_vm_test():
-            msg, ok = _check_voicemeeter_routing()
-            prev = self._wiz_vm_result_lbl.text()
-            self._wiz_vm_result_lbl.setText(prev + ("\n\n" if prev and prev != "Odottaa..." else "") + msg)
-            self._wiz_vm_result_lbl.setStyleSheet(
-                f"color: {'#3fb950' if ok else '#e3b341'};"
-                " font-size: 12px; background: transparent;"
-            )
-
-        def _do_vm_configure(auto=False):
-            mic_name = self._wiz_vm_dev_combo.currentText() if hasattr(self, "_wiz_vm_dev_combo") else ""
-            self._wiz_vm_cfg_btn.setEnabled(False)
-            self._wiz_vm_cfg_btn.setText("Konfiguroidaan...")
-            self._wiz_vm_result_lbl.setText(
-                "Konfiguroidaan automaattisesti..." if auto else "Konfiguroidaan..."
-            )
-            self._wiz_vm_result_lbl.setStyleSheet(
-                "color: #8b949e; font-size: 12px; background: transparent;"
-            )
-            import queue as _q2
-            _rq = _q2.Queue()
-
-            def _bg():
-                _ensure_voicemeeter_running()
-                result_lines = []
-                _voicemeeter_configure(mic_name, lambda m: result_lines.append(m))
-                vm_msg = result_lines[-1] if result_lines else "Ei vastausta"
-                ok = "✅" in vm_msg
-                win_msg = ""
-                dev_names = []
-                if ok:
-                    new_indices = _get_voicemeeter_output_device_indices()
-                    if new_indices:
-                        try:
-                            hd = {}
-                            if os.path.exists(HISTORY_FILE):
-                                with open(HISTORY_FILE, "r", encoding="utf-8") as _f:
-                                    hd = json.load(_f)
-                            hd["selected_output_devices"] = new_indices
-                            with open(HISTORY_FILE, "w", encoding="utf-8") as _f:
-                                json.dump(hd, _f, ensure_ascii=False, indent=2)
-                            devs = list_output_devices()
-                            dev_names = [n for idx, n in devs if idx in new_indices]
-                        except Exception:
-                            pass
-                    _, win_msg = _set_windows_default_recording("Voicemeeter Out B1")
-                _rq.put((vm_msg, ok, win_msg, dev_names))
-
-            def _poll():
-                try:
-                    vm_msg, ok, win_msg, dev_names = _rq.get_nowait()
-                except Exception:
-                    return
-                _ptmr.stop()
-                lines = [vm_msg]
-                if win_msg:
-                    lines.append(win_msg)
-                if dev_names:
-                    lines.append(f"Voice Royale -lähtölaite: {', '.join(dev_names)}")
-                self._wiz_vm_result_lbl.setText("\n".join(lines))
-                self._wiz_vm_result_lbl.setStyleSheet(
-                    f"color: {'#3fb950' if ok else '#f85149'};"
-                    " font-size: 12px; background: transparent;"
-                )
-                self._wiz_vm_cfg_btn.setEnabled(True)
-                self._wiz_vm_cfg_btn.setText("Konfiguroi uudelleen")
-                if ok:
-                    _do_vm_test()
-
-            _ptmr = QTimer(self)
-            _ptmr.timeout.connect(_poll)
-            _ptmr.start(100)
-            threading.Thread(target=_bg, daemon=True).start()
-
-        self._wiz_vm_cfg_btn.clicked.connect(lambda: _do_vm_configure(auto=False))
-        self._wiz_vm_test_btn.clicked.connect(_do_vm_test)
-        self._wiz_vm_configure_fn = _do_vm_configure
-
-        game_note = QLabel(
-            "Konfigurointi asettaa Windows-oletusmikrofonin automaattisesti (Voicemeeter Out B1). "
-            "Discord, Fortnite ym. käyttävät sitä suoraan — ei muutoksia peleissä tarvita."
-        )
-        game_note.setStyleSheet("color: #3fb950; font-size: 11px; background: transparent;")
-        game_note.setWordWrap(True)
-        bl.addWidget(game_note)
-
+        # -- toissijaiset työkalut: rakennetaan aina, mutta näkyvyys (vain mikseri-polulla)
+        # päätetään dynaamisesti _refresh_chat_routing_page():ssä, koska _svc_mixer voi vielä
+        # muuttua käyttäjän palatessa sivulle 1 sen jälkeen kun tämä sivu on jo rakennettu kerran.
+        self._chat_utility_w = QWidget()
+        self._chat_utility_w.setStyleSheet("background: transparent;")
+        utility_outer = QVBoxLayout(self._chat_utility_w)
+        utility_outer.setContentsMargins(0, 0, 0, 0)
+        utility_outer.setSpacing(8)
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
         sep2.setStyleSheet("color: #21262d;")
-        bl.addWidget(sep2)
+        utility_outer.addWidget(sep2)
 
-        fallback_lbl = QLabel("Jos automaattinen reititys ei toiminut, kokeile manuaalisesti:")
-        fallback_lbl.setStyleSheet(
-            "color: #8b949e; font-size: 11px; font-weight: bold; background: transparent;"
-        )
-        bl.addWidget(fallback_lbl)
+        utility_row = QHBoxLayout()
+        utility_row.setSpacing(8)
+        cleanup_btn = QPushButton("Siivoa turhat virtuaalilaitteet")
+        cleanup_btn.setFixedHeight(28)
+        cleanup_btn.setStyleSheet(self._BTN_SKIP)
+        manual_mic_btn = QPushButton("Aseta Windows-mikrofoni manuaalisesti")
+        manual_mic_btn.setFixedHeight(28)
+        manual_mic_btn.setStyleSheet(self._BTN_SKIP)
+        utility_row.addWidget(cleanup_btn)
+        utility_row.addWidget(manual_mic_btn)
+        utility_row.addStretch()
+        utility_outer.addLayout(utility_row)
+        bl.addWidget(self._chat_utility_w)
 
-        self._wiz_win_mic_lbl = QLabel("")
-        self._wiz_win_mic_lbl.setStyleSheet(
-            "color: #8b949e; font-size: 11px; background: transparent;"
-        )
-        self._wiz_win_mic_lbl.setWordWrap(True)
-        bl.addWidget(self._wiz_win_mic_lbl)
+        def _do_cleanup():
+            cleanup_btn.setEnabled(False)
+            cleanup_btn.setText("Siivotaan…")
+            import queue as _qc
+            rqc = _qc.Queue()
 
-        win_mic_btn = QPushButton("Aseta Windows oletusmikrofoni → Voicemeeter Output")
-        win_mic_btn.setFixedHeight(30)
-        win_mic_btn.setStyleSheet(self._BTN_SEC)
+            def _cbc(msg):
+                rqc.put(msg)
 
-        def _do_set_win_mic():
-            import queue as _q3
-            win_mic_btn.setEnabled(False)
-            win_mic_btn.setText("Asetetaan...")
-            _rq3 = _q3.Queue()
-
-            def _bg():
-                ok, msg = _set_windows_default_recording("Voicemeeter Out B1")
-                _rq3.put((ok, msg))
-
-            def _poll():
+            def _pollc():
                 try:
-                    ok, msg = _rq3.get_nowait()
+                    msg = rqc.get_nowait()
                 except Exception:
                     return
-                _ptmr3.stop()
-                self._wiz_win_mic_lbl.setText(msg)
-                self._wiz_win_mic_lbl.setStyleSheet(
-                    f"color: {'#3fb950' if ok else '#e3b341'};"
-                    " font-size: 11px; background: transparent;"
+                _ptmrc.stop()
+                self._chat_result_lbl.setText(msg)
+                self._chat_result_lbl.setStyleSheet(
+                    f"color: {'#3fb950' if '✅' in msg else '#f85149'};"
+                    " font-size: 12px; background: transparent;"
                 )
-                win_mic_btn.setEnabled(True)
-                win_mic_btn.setText("Aseta Windows oletusmikrofoni → Voicemeeter Output")
+                cleanup_btn.setEnabled(True)
+                cleanup_btn.setText("Siivoa turhat virtuaalilaitteet")
 
-            _ptmr3 = QTimer(self)
-            _ptmr3.timeout.connect(_poll)
-            _ptmr3.start(100)
+            _ptmrc = QTimer(self)
+            _ptmrc.timeout.connect(_pollc)
+            _ptmrc.start(200)
+            threading.Thread(
+                target=_disable_unused_voicemeeter_endpoints, args=(_cbc,), daemon=True
+            ).start()
+
+        cleanup_btn.clicked.connect(_do_cleanup)
+
+        def _do_manual_mic():
+            manual_mic_btn.setEnabled(False)
+            manual_mic_btn.setText("Asetetaan…")
+            import queue as _qm
+            rqm = _qm.Queue()
+
+            def _bgm():
+                _, msg = _set_windows_default_recording("Voicemeeter Out B1")
+                rqm.put(msg)
+
+            def _pollm():
+                try:
+                    msg = rqm.get_nowait()
+                except Exception:
+                    return
+                _ptmrm.stop()
+                self._chat_result_lbl.setText(msg)
+                manual_mic_btn.setEnabled(True)
+                manual_mic_btn.setText("Aseta Windows-mikrofoni manuaalisesti")
+
+            _ptmrm = QTimer(self)
+            _ptmrm.timeout.connect(_pollm)
+            _ptmrm.start(200)
+            threading.Thread(target=_bgm, daemon=True).start()
+
+        manual_mic_btn.clicked.connect(_do_manual_mic)
+
+        # -- pääpainike: asenna (jos tarpeen) + konfiguroi + testaa, kaikki yhdessä --
+
+        def _auto_detect_mixer_input_name():
+            try:
+                devs = sd.query_devices()
+            except Exception:
+                return None
+            names = [d["name"] for d in devs if d["max_input_channels"] > 0]
+            for keywords in (("chat",), ("mix minus", "mix-minus"), ("rodecaster", "rode caster")):
+                for n in names:
+                    if any(k in n.lower() for k in keywords):
+                        return n
+            return None
+
+        def _do_configure_all():
+            self._chat_cfg_btn.setEnabled(False)
+            self._chat_cfg_btn.setText("Määritetään...")
+            self._chat_manual_row.setVisible(False)
+            self._chat_reboot_btn.setVisible(False)
+            self._chat_result_lbl.setText("Käynnistetään...")
+            self._chat_result_lbl.setStyleSheet(
+                "color: #8b949e; font-size: 12px; background: transparent;"
+            )
+            import queue as _q
+            rq = _q.Queue()
+            log_lines = []
+
+            def _cb(msg):
+                rq.put(("progress", msg))
+
+            def _bg():
+                try:
+                    if self._svc_mixer:
+                        if not _is_voicemeeter_installed():
+                            _cb("Asennetaan Voicemeeter Banana...")
+                            _install_voicemeeter(_cb)
+                            if not _is_voicemeeter_installed():
+                                rq.put(("need_reboot", None))
+                                return
+                        mic_name = (
+                            self._chat_dev_combo.currentText()
+                            if self._chat_manual_row.isVisible() and self._chat_dev_combo.count()
+                            else _auto_detect_mixer_input_name()
+                        )
+                        if not mic_name:
+                            rq.put(("need_manual", None))
+                            return
+                        _cb(f"Konfiguroidaan reititystä laitteelle: {mic_name}")
+                        _ensure_voicemeeter_running()
+                        cfg_lines = []
+                        _voicemeeter_configure(mic_name, lambda m: cfg_lines.append(m))
+                        cfg_msg = cfg_lines[-1] if cfg_lines else "Ei vastausta"
+                        ok = "✅" in cfg_msg
+                        _cb(cfg_msg)
+                        if ok:
+                            _, win_msg = _set_windows_default_recording("Voicemeeter Out B1")
+                            if win_msg:
+                                _cb(win_msg)
+                            test_msg, test_ok = _check_voicemeeter_routing()
+                            _cb(test_msg)
+                            ok = ok and test_ok
+                        rq.put(("done", ok))
+                    else:
+                        if not _is_vbcable_installed():
+                            _cb("Asennetaan VB-Cable...")
+                            _install_vbcable(_cb)
+                        ok = _is_vbcable_installed()
+                        if ok:
+                            _cb(
+                                "✅ VB-Cable asennettu. Valitse 'CABLE Input' kaiuttimeksi "
+                                "edellisellä sivulla."
+                            )
+                        rq.put(("done", ok))
+                except Exception as exc:
+                    _cb(f"Virhe: {exc}")
+                    rq.put(("done", False))
+
+            def _poll():
+                final = None
+                while True:
+                    try:
+                        kind, payload = rq.get_nowait()
+                    except Exception:
+                        break
+                    if kind == "progress":
+                        log_lines.append(payload)
+                        self._chat_result_lbl.setText("\n".join(log_lines))
+                    else:
+                        final = (kind, payload)
+                if final is None:
+                    return
+                _ptmr.stop()
+                self._chat_cfg_btn.setEnabled(True)
+                self._chat_cfg_btn.setText("🔧  Määritä automaattisesti")
+                kind, payload = final
+                if kind == "need_reboot":
+                    log_lines.append(
+                        "Asennus suoritettu. Ajuri vaatii yleensä uudelleenkäynnistyksen ennen "
+                        "kuin se toimii täysin — käynnistä tietokone uudelleen ja yritä sitten "
+                        "uudelleen."
+                    )
+                    self._chat_result_lbl.setText("\n".join(log_lines))
+                    self._chat_result_lbl.setStyleSheet(
+                        "color: #e3b341; font-size: 12px; background: transparent;"
+                    )
+                    self._chat_reboot_btn.setVisible(True)
+                elif kind == "need_manual":
+                    log_lines.append("Emme tunnistaneet mikseriäsi automaattisesti.")
+                    self._chat_result_lbl.setText("\n".join(log_lines))
+                    self._chat_result_lbl.setStyleSheet(
+                        "color: #e3b341; font-size: 12px; background: transparent;"
+                    )
+                    _refresh_chat_dev_combo()
+                    self._chat_manual_row.setVisible(True)
+                elif kind == "done":
+                    ok = payload
+                    self._chat_result_lbl.setText("\n".join(log_lines))
+                    self._chat_result_lbl.setStyleSheet(
+                        f"color: {'#3fb950' if ok else '#f85149'};"
+                        " font-size: 12px; background: transparent;"
+                    )
+
+            _ptmr = QTimer(self)
+            _ptmr.timeout.connect(_poll)
+            _ptmr.start(100)
             threading.Thread(target=_bg, daemon=True).start()
 
-        win_mic_btn.clicked.connect(_do_set_win_mic)
-        bl.addWidget(win_mic_btn)
-
-        manual_btn = QPushButton("Avaa Windows Ääni → Tallennuslaitteet (manuaalinen)")
-        manual_btn.setFixedHeight(28)
-        manual_btn.setStyleSheet(self._BTN_SKIP)
-        manual_btn.clicked.connect(_open_windows_sound_recording)
-        bl.addWidget(manual_btn)
-
-        bl.addStretch()
+        self._chat_cfg_btn.clicked.connect(_do_configure_all)
 
         nav = QHBoxLayout()
         nav.addWidget(self._back_btn())
@@ -10811,337 +10413,102 @@ class SetupWizard(QDialog):
         nav.addWidget(nxt)
         bl.addLayout(nav)
         lay.addWidget(body)
+        self._refresh_chat_routing_page()
         return page
 
-    def _page_streamdeck(self):
-        import os, shutil as _shu, subprocess as _sdsp
-
-        page = QWidget()
-        page.setStyleSheet("background: #0d1117;")
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(self._header(
-            "Stream Deck -lisäosa",
-            "Voice Royale -lisäosa tuo äänipaneelin Stream Deck -näppäimistöön."
-        ))
-
-        body = QWidget()
-        body.setStyleSheet("background: #0d1117;")
-        bl = QVBoxLayout(body)
-        bl.setContentsMargins(40, 24, 40, 16)
-        bl.setSpacing(14)
-
-        # Check install state
-        _plugins_dir = os.path.join(
-            os.environ.get("APPDATA", ""), "Elgato", "StreamDeck", "Plugins"
-        )
-        _plugin_installed = os.path.isdir(
-            os.path.join(_plugins_dir, "com.voiceroyale.sdPlugin")
-        )
-        _sd_app_installed = os.path.isdir(
-            os.path.join(os.environ.get("APPDATA", ""), "Elgato", "StreamDeck")
-        )
-
-        status_lbl = QLabel()
-        status_lbl.setWordWrap(True)
-        status_lbl.setStyleSheet("font-size: 12px; background: transparent;")
-
-        install_btn = QPushButton()
-        install_btn.setFixedHeight(40)
-        install_btn.setMinimumWidth(200)
-
-        def _find_plugin_file():
-            base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
-            candidates = [
-                os.path.join(base, "streamdeck-plugin", "com.voiceroyale.streamDeckPlugin"),
-                os.path.join(base, "com.voiceroyale.streamDeckPlugin"),
-            ]
-            for p in candidates:
-                if os.path.isfile(p):
-                    return p
-            return None
-
-        _plugin_file = _find_plugin_file()
-
-        if _plugin_installed:
-            status_lbl.setText("Lisäosa on jo asennettu.")
-            status_lbl.setStyleSheet("color: #3fb950; font-size: 13px; background: transparent;")
-            install_btn.setText("Asenna uudelleen")
-            install_btn.setStyleSheet(
-                "QPushButton { background: #161b22; border: 1px solid #30363d; border-radius: 6px;"
-                " color: #8b949e; font-size: 12px; }"
-                "QPushButton:hover { border-color: #58a6ff; color: #c9d1d9; }"
+    def _refresh_chat_routing_page(self):
+        """Päivittää chat-reititys-sivun selitystekstin, tilaviestin ja työkalurivin näkyvyyden
+        senhetkisen _svc_mixer/_svc_routing-valinnan mukaan. Sivu rakennetaan vain kerran
+        _build_ui():ssä, mutta käyttäjä voi vaihtaa mikseri/pelit-valintaansa sivulla 1 sen
+        JÄLKEEN — ilman tätä päivitystä sivu näyttäisi pysyvästi ensimmäisellä rakennuskerralla
+        vallinneen (oletusarvoisen) tilan."""
+        if not hasattr(self, "_chat_why_lbl") or sys.platform != "win32":
+            return
+        mixer_name = self._detected_mixer_name() if self._svc_mixer else None
+        if self._svc_mixer and mixer_name:
+            why_text = (
+                f"Havaitsimme laitteesi: {mixer_name}.\n\n"
+                "Mitä tapahtuu: Voicemeeter Banana yhdistää mikserisi Chat-mikin ja Voice Royalen "
+                "käännösäänen SAMAAN virtuaaliseen mikrofoniin, jota Discord/pelit käyttävät "
+                "automaattisesti."
             )
-        elif not _sd_app_installed:
-            status_lbl.setText(
-                "Stream Deck -sovellus ei löydy.\n"
-                "Lataa ja asenna ensin SD-sovellus osoitteesta elgato.com/downloads."
+        elif self._svc_mixer:
+            why_text = (
+                "Mitä tapahtuu: Voicemeeter Banana yhdistää fyysisen mikserisi (esim. RodeCaster "
+                "Pro 2) Chat-mikin ja Voice Royalen käännösäänen SAMAAN virtuaaliseen mikrofoniin, "
+                "jota Discord/pelit käyttävät automaattisesti."
             )
-            status_lbl.setStyleSheet("color: #e3b341; font-size: 12px; background: transparent;")
-            install_btn.setText("Avaa elgato.com/downloads")
-            install_btn.setStyleSheet(
-                "QPushButton { background: #0f4c75; border: 1px solid #1e6fa5; border-radius: 6px;"
-                " color: #c9d1d9; font-size: 12px; font-weight: 700; }"
-                "QPushButton:hover { border-color: #58a6ff; }"
-            )
-            def _open_elgato():
-                import webbrowser
-                webbrowser.open("https://www.elgato.com/en/downloads")
-            install_btn.clicked.connect(_open_elgato)
-        elif _plugin_file:
-            status_lbl.setText("Lisäosa löytyy — klikattuasi SD-sovellus avautuu ja pyytää asennuslupaa.")
-            status_lbl.setStyleSheet("color: #8b949e; font-size: 12px; background: transparent;")
-            install_btn.setText("Asenna Voice Royale -lisäosa")
-            install_btn.setStyleSheet(
-                "QPushButton { background: #0f4c75; border: 1px solid #1e6fa5; border-radius: 6px;"
-                " color: #e6edf3; font-size: 12px; font-weight: 700; }"
-                "QPushButton:hover { border-color: #58a6ff; }"
-                "QPushButton:pressed { background: #0d3d61; }"
-            )
-            def _do_install_sd():
-                try:
-                    os.startfile(_plugin_file)
-                    status_lbl.setText(
-                        "Asennustiedosto avattu — hyväksy SD-sovelluksen pyyntö."
-                    )
-                    status_lbl.setStyleSheet("color: #3fb950; font-size: 12px; background: transparent;")
-                    install_btn.setText("Avattu — odota SD-sovellusta")
-                    install_btn.setEnabled(False)
-                except Exception as e:
-                    status_lbl.setText(f"Virhe: {e}\nVoit asentaa manuaalisesti: kopioi tiedosto SD Plugins -kansioon.")
-                    status_lbl.setStyleSheet("color: #f85149; font-size: 12px; background: transparent;")
-            install_btn.clicked.connect(_do_install_sd)
         else:
-            status_lbl.setText("Lisäosatiedostoa ei löydy paikallisesti.\nLataa se GitHub Releases -sivulta.")
-            status_lbl.setStyleSheet("color: #e3b341; font-size: 12px; background: transparent;")
-            install_btn.setText("Lataa lisäosa GitHubista")
-            install_btn.setStyleSheet(
-                "QPushButton { background: #0f4c75; border: 1px solid #1e6fa5; border-radius: 6px;"
-                " color: #e6edf3; font-size: 12px; font-weight: 700; }"
-                "QPushButton:hover { border-color: #58a6ff; }"
+            why_text = (
+                "Mitä tapahtuu: VB-Cable luo virtuaalisen mikrofonin (\"CABLE Input\") johon Voice "
+                "Royalen käännösääni ohjataan. Valitse se kaiuttimeksi edellisellä sivulla, ja "
+                "Discord/pelit kuulevat käännöksesi."
             )
-            def _open_gh_releases():
-                import webbrowser
-                webbrowser.open("https://github.com/JuhaFIN1/voice-royale/releases/latest")
-            install_btn.clicked.connect(_open_gh_releases)
-
-        bl.addWidget(status_lbl)
-        bl.addWidget(install_btn)
-
-        manual_lbl = QLabel(
-            "Manuaalinen asennus:\n"
-            f"Pura lisäosatiedosto kansioon:\n{_plugins_dir}\\com.voiceroyale.sdPlugin\\"
+        self._chat_why_lbl.setText(why_text)
+        already_ok = (
+            _is_voicemeeter_installed() if self._svc_mixer else _is_vbcable_installed()
         )
-        manual_lbl.setStyleSheet("color: #484f58; font-size: 10px; background: transparent;")
-        manual_lbl.setWordWrap(True)
-        bl.addWidget(manual_lbl)
-
-        bl.addStretch()
-        lay.addWidget(body, 1)
-
-        nav = QHBoxLayout()
-        nav.setContentsMargins(32, 8, 32, 16)
-        nav.addWidget(self._back_btn())
-        nav.addStretch()
-        skip = QPushButton("Ohita →")
-        skip.setFixedHeight(36)
-        skip.setStyleSheet(
-            "QPushButton { background: transparent; border: 1px solid #30363d; border-radius: 6px;"
-            " color: #8b949e; font-size: 12px; padding: 0 16px; }"
-            "QPushButton:hover { border-color: #6e7681; color: #c9d1d9; }"
+        self._chat_result_lbl.setText(
+            "✅ Jo asennettu — paina silti varmistaaksesi että reititys toimii."
+            if already_ok else
+            "Ei vielä asennettu — paina alta, hoidamme asennuksen, määrityksen ja testauksen."
         )
-        skip.clicked.connect(self._nav_next)
-        nxt = QPushButton("Seuraava  →")
-        nxt.setFixedHeight(42)
-        nxt.setMinimumWidth(140)
-        nxt.clicked.connect(self._nav_next)
-        nav.addWidget(skip)
-        nav.addWidget(nxt)
-        nav_w = QWidget()
-        nav_w.setStyleSheet("background: #0d1117;")
-        nav_w.setLayout(nav)
-        lay.addWidget(nav_w)
-        return page
-
-    def _page_ha_setup(self):
-        page = QWidget()
-        page.setStyleSheet("background: #0d1117;")
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(self._header(
-            "Home Assistant",
-            "Yhdistä HA-asennukseesi — voit ohjata media-laitteita soundboardista."
-        ))
-
-        body = QWidget()
-        body.setStyleSheet("background: #0d1117;")
-        bl = QVBoxLayout(body)
-        bl.setContentsMargins(40, 24, 40, 16)
-        bl.setSpacing(10)
-
-        def _lbl(txt):
-            l = QLabel(txt)
-            l.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
-            return l
-
-        bl.addWidget(_lbl("Home Assistant -osoite"))
-        url_edit = QLineEdit()
-        url_edit.setPlaceholderText("http://homeassistant.local:8123  tai  https://ha.esimerkki.com")
-        url_edit.setFixedHeight(34)
-        url_edit.setStyleSheet(
-            "QLineEdit { background: #161b22; border: 1px solid #30363d; border-radius: 6px;"
-            " color: #c9d1d9; padding: 0 10px; font-size: 12px; }"
-            "QLineEdit:focus { border-color: #388bfd; }"
+        self._chat_result_lbl.setStyleSheet(
+            "color: #8b949e; font-size: 12px; background: transparent;"
         )
-        bl.addWidget(url_edit)
-
-        bl.addWidget(_lbl("Long-Lived Access Token  (HA → Profiili → Pitkäaikaiset käyttöoikeustietueet)"))
-        token_edit = QLineEdit()
-        token_edit.setPlaceholderText("eyJhbGciOi...")
-        token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        token_edit.setFixedHeight(34)
-        token_edit.setStyleSheet(url_edit.styleSheet())
-        bl.addWidget(token_edit)
-
-        connect_btn = QPushButton("Testaa yhteys")
-        connect_btn.setFixedHeight(38)
-        connect_btn.setStyleSheet(
-            "QPushButton { background: #0f4c75; border: 1px solid #1e6fa5; border-radius: 6px;"
-            " color: #e6edf3; font-size: 12px; font-weight: 700; }"
-            "QPushButton:hover { border-color: #58a6ff; }"
-            "QPushButton:pressed { background: #0d3d61; }"
-            "QPushButton:disabled { background: #161b22; border-color: #21262d; color: #484f58; }"
-        )
-        bl.addWidget(connect_btn)
-
-        status_lbl = QLabel("Anna osoite ja token, sitten testaa yhteys.")
-        status_lbl.setWordWrap(True)
-        status_lbl.setStyleSheet("color: #6e7681; font-size: 11px; background: transparent;")
-        bl.addWidget(status_lbl)
-
-        import queue as _qha2
-        _rq2 = _qha2.Queue()
-        _ptmr2_holder = [None]
-
-        def _test_ha():
-            url = url_edit.text().strip()
-            token = token_edit.text().strip()
-            if not url or not token:
-                status_lbl.setText("Anna sekä osoite että token.")
-                return
-            connect_btn.setEnabled(False)
-            connect_btn.setText("Yhdistetään…")
-            status_lbl.setText("Yhdistetään…")
-            status_lbl.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
-            self._wiz_ha_url = url
-            self._wiz_ha_token = token
-
-            def _run():
-                try:
-                    import urllib3 as _u3
-                    _u3.disable_warnings(_u3.exceptions.InsecureRequestWarning)
-                    import requests as _rq_req
-                    _creds = {"ha_url": url, "ha_token": token}
-                    _ha_api("GET", "/states", _creds)
-                    _rq2.put(("ok", ""))
-                except Exception as e:
-                    _rq2.put(("err", str(e)))
-
-            def _poll2():
-                try:
-                    kind, payload = _rq2.get_nowait()
-                except Exception:
-                    return
-                _ptmr2_holder[0].stop()
-                connect_btn.setEnabled(True)
-                connect_btn.setText("Testaa yhteys")
-                if kind == "ok":
-                    status_lbl.setText("Yhdistetty! Tallenna asetukset Seuraava-napilla.")
-                    status_lbl.setStyleSheet("color: #3fb950; font-size: 11px; background: transparent;")
-                else:
-                    err = payload
-                    if "SSL" in err or "CERTIFICATE" in err.upper():
-                        msg = f"SSL-virhe — kokeile http:// etuliitettä\n({err[:80]})"
-                    elif "timed out" in err.lower():
-                        msg = f"Yhteys aikakatkaistiin — tarkista osoite ja portti\n({err[:80]})"
-                    elif "401" in err or "Unauthorized" in err:
-                        msg = "Token virheellinen — tarkista Long-lived token"
-                    elif "refused" in err.lower():
-                        msg = f"Yhteys evätty — onko HA käynnissä? ({err[:60]})"
-                    else:
-                        msg = err[:120]
-                    status_lbl.setText(f"Virhe: {msg}")
-                    status_lbl.setStyleSheet("color: #f85149; font-size: 11px; background: transparent;")
-
-            t = QTimer(self)
-            t.timeout.connect(_poll2)
-            t.start(200)
-            _ptmr2_holder[0] = t
-            import threading as _thr2
-            _thr2.Thread(target=_run, daemon=True).start()
-
-        connect_btn.clicked.connect(_test_ha)
-
-        def _save_and_next():
-            self._wiz_ha_url = url_edit.text().strip()
-            self._wiz_ha_token = token_edit.text().strip()
-            self._nav_next()
-
-        bl.addStretch()
-        lay.addWidget(body, 1)
-
-        nav = QHBoxLayout()
-        nav.setContentsMargins(32, 8, 32, 16)
-        nav.addWidget(self._back_btn())
-        nav.addStretch()
-        skip = QPushButton("Ohita →")
-        skip.setFixedHeight(36)
-        skip.setStyleSheet(
-            "QPushButton { background: transparent; border: 1px solid #30363d; border-radius: 6px;"
-            " color: #8b949e; font-size: 12px; padding: 0 16px; }"
-            "QPushButton:hover { border-color: #6e7681; color: #c9d1d9; }"
-        )
-        skip.clicked.connect(self._nav_next)
-        nxt = QPushButton("Tallenna ja jatka  →")
-        nxt.setFixedHeight(42)
-        nxt.setMinimumWidth(160)
-        nxt.clicked.connect(_save_and_next)
-        nav.addWidget(skip)
-        nav.addWidget(nxt)
-        nav_w = QWidget()
-        nav_w.setStyleSheet("background: #0d1117;")
-        nav_w.setLayout(nav)
-        lay.addWidget(nav_w)
-        return page
+        if hasattr(self, "_chat_utility_w"):
+            self._chat_utility_w.setVisible(self._svc_mixer)
 
     def _page_devices(self):
+        """Mikrofoni + kaiuttimet, progressive disclosure -periaatteella: oletusnäkymä näyttää
+        vain automaattisen tunnistuksen tuloksen ja yhden testinapin, koko laitelista/lisäasetukset
+        avautuvat vain jos käyttäjä itse haluaa tarkistaa/vaihtaa laitteen."""
         page = QWidget()
         page.setStyleSheet("background: #0d1117;")
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         lay.addWidget(self._header(
-            "Äänilaitteet",
-            "Vaihe 5/6  —  Puhu mikrofoniisi → tunnistetaan automaattisesti. Beep-testaa kaiuttimet."
+            "Mikrofoni ja kaiuttimet",
+            "Puhu mikrofoniisi — tunnistamme sen automaattisesti."
         ))
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: #0d1117; }")
         body = QWidget()
         body.setStyleSheet("background: #0d1117;")
         bl = QVBoxLayout(body)
-        bl.setContentsMargins(28, 12, 28, 12)
-        bl.setSpacing(8)
+        bl.setContentsMargins(28, 16, 28, 12)
+        bl.setSpacing(10)
 
-        # ── Input ─────────────────────────────────────────────────────
-        in_lbl = QLabel("Mikrofoni (puhu → automaattinen tunnistus)")
-        in_lbl.setStyleSheet(
-            "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;"
+        # ── Mikrofoni: iso tilakortti + piilotettu tarkka lista ─────────
+        self._dev_input_status_lbl = QLabel("🎤  Puhu mikrofoniisi...")
+        self._dev_input_status_lbl.setWordWrap(True)
+        self._dev_input_status_lbl.setStyleSheet(
+            "color: #e6edf3; font-size: 15px; font-weight: bold; background: #161b22;"
+            " border: 1px solid #30363d; border-radius: 8px; padding: 16px;"
         )
-        bl.addWidget(in_lbl)
+        bl.addWidget(self._dev_input_status_lbl)
+
+        mic_toggle_btn = QPushButton("▸  Väärä laite? Näytä kaikki mikrofonit")
+        mic_toggle_btn.setFlat(True)
+        mic_toggle_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; color: #388bfd;"
+            " font-size: 11px; text-align: left; padding: 2px 0; }"
+            "QPushButton:hover { color: #58a6ff; }"
+        )
+        bl.addWidget(mic_toggle_btn)
+
+        mic_list_w = QWidget()
+        mic_list_w.setVisible(False)
+        mic_list_bl = QVBoxLayout(mic_list_w)
+        mic_list_bl.setContentsMargins(0, 4, 0, 0)
+        mic_list_bl.setSpacing(6)
 
         in_scroll = QScrollArea()
         in_scroll.setWidgetResizable(True)
-        in_scroll.setFixedHeight(165)
+        in_scroll.setFixedHeight(150)
         in_scroll.setStyleSheet(
             "QScrollArea { background: #161b22; border: 1px solid #30363d; border-radius: 6px; }"
         )
@@ -11228,46 +10595,28 @@ class SetupWizard(QDialog):
             self._dev_bars_layout.addWidget(row)
 
         if not self._dev_input_devices:
-            self._dev_bars_layout.addWidget(
-                QLabel("Ei äänitulolaittеita löytynyt")
-            )
+            self._dev_bars_layout.addWidget(QLabel("Ei äänitulolaitteita löytynyt"))
         self._dev_bars_layout.addStretch()
         in_scroll.setWidget(in_cnt)
-        bl.addWidget(in_scroll)
+        mic_list_bl.addWidget(in_scroll)
+        bl.addWidget(mic_list_w)
 
-        self._dev_input_status_lbl = QLabel("Odottaa puhetta...")
-        self._dev_input_status_lbl.setStyleSheet(
-            "color: #484f58; font-size: 11px; background: transparent;"
-        )
-        bl.addWidget(self._dev_input_status_lbl)
+        def _toggle_mic_list():
+            vis = not mic_list_w.isVisible()
+            mic_list_w.setVisible(vis)
+            mic_toggle_btn.setText(
+                "▾  Piilota mikrofonilista" if vis
+                else "▸  Väärä laite? Näytä kaikki mikrofonit"
+            )
+
+        mic_toggle_btn.clicked.connect(_toggle_mic_list)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet("color: #21262d;")
         bl.addWidget(sep)
 
-        # ── Output ────────────────────────────────────────────────────
-        out_lbl = QLabel(
-            "Kaiuttimet / kuulokkeet  (▶ Beep testaa — fyysiset rastittuvat automaattisesti)"
-        )
-        out_lbl.setStyleSheet(
-            "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;"
-        )
-        out_lbl.setWordWrap(True)
-        bl.addWidget(out_lbl)
-
-        out_scroll = QScrollArea()
-        out_scroll.setWidgetResizable(True)
-        out_scroll.setFixedHeight(145)
-        out_scroll.setStyleSheet(
-            "QScrollArea { background: #161b22; border: 1px solid #30363d; border-radius: 6px; }"
-        )
-        out_cnt = QWidget()
-        out_cnt.setStyleSheet("background: #161b22;")
-        out_lay = QVBoxLayout(out_cnt)
-        out_lay.setContentsMargins(10, 8, 10, 8)
-        out_lay.setSpacing(5)
-
+        # ── Kaiuttimet: oletuslaite + testi, muut laitteet piilotettuna ──
         _raw_out = [
             (idx, name) for idx, name in list_output_devices()
             if not name.startswith("{") and not any(
@@ -11293,9 +10642,58 @@ class SetupWizard(QDialog):
         self._dev_output_devices = sorted(
             _raw_out, key=lambda x: 0 if x[0] == _def_out else 1
         )
-        self._dev_out_checkboxes = {}
-
         self._dev_default_out = _def_out
+
+        out_hdr = QLabel("Kaiuttimet / kuulokkeet")
+        out_hdr.setStyleSheet(
+            "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;"
+        )
+        bl.addWidget(out_hdr)
+
+        _def_out_name = next((n for i, n in self._dev_output_devices if i == _def_out), "")
+        out_row = QHBoxLayout()
+        out_default_lbl = QLabel(f"🔊  {_def_out_name or 'Ei oletuslaitetta löytynyt'}")
+        out_default_lbl.setStyleSheet("color: #c9d1d9; font-size: 12px; background: transparent;")
+        out_default_lbl.setWordWrap(True)
+        out_test_btn = QPushButton("▶ Testaa")
+        out_test_btn.setFixedWidth(90)
+        out_test_btn.setFixedHeight(30)
+        out_test_btn.setStyleSheet(self._BTN_SEC)
+        if _def_out >= 0:
+            out_test_btn.clicked.connect(lambda _, i=_def_out, b=out_test_btn: self._dev_test_output(i, b))
+        else:
+            out_test_btn.setEnabled(False)
+        out_row.addWidget(out_default_lbl, 1)
+        out_row.addWidget(out_test_btn)
+        bl.addLayout(out_row)
+
+        out_toggle_btn = QPushButton("▸  Käytä useampaa laitetta / valitse toinen")
+        out_toggle_btn.setFlat(True)
+        out_toggle_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; color: #388bfd;"
+            " font-size: 11px; text-align: left; padding: 2px 0; }"
+            "QPushButton:hover { color: #58a6ff; }"
+        )
+        bl.addWidget(out_toggle_btn)
+
+        out_list_w = QWidget()
+        out_list_w.setVisible(False)
+        out_list_bl = QVBoxLayout(out_list_w)
+        out_list_bl.setContentsMargins(0, 4, 0, 0)
+
+        out_scroll = QScrollArea()
+        out_scroll.setWidgetResizable(True)
+        out_scroll.setFixedHeight(130)
+        out_scroll.setStyleSheet(
+            "QScrollArea { background: #161b22; border: 1px solid #30363d; border-radius: 6px; }"
+        )
+        out_cnt = QWidget()
+        out_cnt.setStyleSheet("background: #161b22;")
+        out_lay = QVBoxLayout(out_cnt)
+        out_lay.setContentsMargins(10, 8, 10, 8)
+        out_lay.setSpacing(5)
+
+        self._dev_out_checkboxes = {}
         for idx, name in self._dev_output_devices:
             r = QWidget()
             r.setStyleSheet("background: transparent;")
@@ -11337,264 +10735,76 @@ class SetupWizard(QDialog):
             out_lay.addWidget(r)
 
         if not self._dev_output_devices:
-            out_lay.addWidget(QLabel("Ei äänilähtölaittеita löytynyt"))
+            out_lay.addWidget(QLabel("Ei äänilähtölaitteita löytynyt"))
         out_lay.addStretch()
         out_scroll.setWidget(out_cnt)
-        bl.addWidget(out_scroll)
+        out_list_bl.addWidget(out_scroll)
+        bl.addWidget(out_list_w)
 
-        self._dev_out_status_lbl = QLabel(
-            "Paina ▶ Beep — fyysiset laitteet rastittuvat automaattisesti"
-        )
+        def _toggle_out_list():
+            vis = not out_list_w.isVisible()
+            out_list_w.setVisible(vis)
+            out_toggle_btn.setText(
+                "▾  Piilota laitelista" if vis
+                else "▸  Käytä useampaa laitetta / valitse toinen"
+            )
+
+        out_toggle_btn.clicked.connect(_toggle_out_list)
+
+        self._dev_out_status_lbl = QLabel("")
         self._dev_out_status_lbl.setStyleSheet(
             "color: #8b949e; font-size: 11px; background: transparent;"
         )
         bl.addWidget(self._dev_out_status_lbl)
-
-        nav = QHBoxLayout()
-        nav.addWidget(self._back_btn())
-        nav.addStretch()
-        nxt = QPushButton("Seuraava  →")
-        nxt.setFixedHeight(42)
-        nxt.setMinimumWidth(140)
-        nxt.clicked.connect(self._nav_next)
-        nav.addWidget(nxt)
-        bl.addLayout(nav)
-        lay.addWidget(body)
-        return page
-
-    def _page_final_test(self):
-        page = QWidget()
-        page.setStyleSheet("background: #0d1117;")
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(self._header(
-            "Lopputesti",
-            "Vaihe 6/6  —  Testaa mikrofoni, TTS ja soundboard ennen kuin aloitat."
-        ))
-        body = QWidget()
-        body.setStyleSheet("background: #0d1117;")
-        bl = QVBoxLayout(body)
-        bl.setContentsMargins(32, 16, 32, 16)
-        bl.setSpacing(10)
-
-        # ── 1. Mikrofoni ───────────────────────────────────────────────
-        mic_hdr = QLabel("1. Mikrofoni")
-        mic_hdr.setStyleSheet(
-            "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;"
-        )
-        bl.addWidget(mic_hdr)
-        mic_hint = QLabel("Paina nappi ja puhu — appi tarkistaa kuuleeko mikrofoni äänen.")
-        mic_hint.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
-        mic_hint.setWordWrap(True)
-        bl.addWidget(mic_hint)
-        mic_btn = QPushButton("▶ Testaa mikrofoni (3 s)")
-        mic_btn.setFixedHeight(34)
-        mic_result = QLabel("")
-        mic_result.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
-        mic_result.setWordWrap(True)
-        bl.addWidget(mic_btn)
-        bl.addWidget(mic_result)
-
-        def _do_mic_test():
-            import queue as _q
-            selected = self._dev_selected_input
-            if selected is None:
-                mic_result.setText(
-                    "⚠️ Ei mikrofonia valittu — palaa sivulle 5 ja puhu mikrofoniisi."
-                )
-                mic_result.setStyleSheet(
-                    "color: #e3b341; font-size: 11px; background: transparent;"
-                )
-                return
-            mic_btn.setEnabled(False)
-            mic_btn.setText("Kuunnellaan 3 s...")
-            _rq = _q.Queue()
-
-            def _record():
-                try:
-                    buf = []
-                    done_evt = threading.Event()
-                    target_frames = 16000 * 3
-                    _CONFIGS = [(1, 16000), (1, 48000), (2, 48000), (1, 44100)]
-                    stream_err = None
-                    for ch, sr in _CONFIGS:
-                        buf.clear()
-                        done_evt.clear()
-                        _collected = [0]
-
-                        def _cb(data, frames, t, status, _ch=ch, _sr=sr):
-                            buf.append(data[:, 0].copy() if data.ndim > 1 else data.copy())
-                            _collected[0] += frames
-                            if _collected[0] >= _sr * 3:
-                                done_evt.set()
-                                raise sd.CallbackStop()
-
-                        try:
-                            with sd.InputStream(
-                                device=selected, channels=ch, samplerate=sr,
-                                blocksize=512, dtype="float32", callback=_cb
-                            ):
-                                done_evt.wait(timeout=5)
-                            stream_err = None
-                            break
-                        except Exception as e:
-                            stream_err = e
-
-                    if stream_err is not None:
-                        _rq.put(("err", str(stream_err)))
-                        return
-                    if not buf:
-                        _rq.put(("err", "Ei ääntä nauhoitettu"))
-                        return
-                    audio = np.concatenate(buf)
-                    peak = float(np.max(np.abs(audio)))
-                    _rq.put(("ok", peak))
-                except Exception as exc:
-                    _rq.put(("err", str(exc)))
-
-            def _poll_mic():
-                try:
-                    kind, val = _rq.get_nowait()
-                except Exception:
-                    return
-                _ptmr.stop()
-                try:
-                    self._dev_active_poll_timers.remove(_ptmr)
-                except ValueError:
-                    pass
-                mic_btn.setEnabled(True)
-                mic_btn.setText("▶ Testaa mikrofoni (3 s)")
-                if kind == "err":
-                    mic_result.setText(f"⚠️ Virhe: {val}")
-                    mic_result.setStyleSheet(
-                        "color: #f85149; font-size: 11px; background: transparent;"
-                    )
-                elif val > 0.02:
-                    mic_result.setText(f"✅ Mikrofoni kuuluu (taso: {val:.3f})")
-                    mic_result.setStyleSheet(
-                        "color: #3fb950; font-size: 11px; background: transparent;"
-                    )
-                else:
-                    mic_result.setText(
-                        f"⚠️ Äänitaso hyvin matala ({val:.4f}) — tarkista mikrofoni ja luvat."
-                    )
-                    mic_result.setStyleSheet(
-                        "color: #e3b341; font-size: 11px; background: transparent;"
-                    )
-
-            _ptmr = QTimer(self)
-            _ptmr.timeout.connect(_poll_mic)
-            _ptmr.start(100)
-            self._dev_active_poll_timers.append(_ptmr)
-            threading.Thread(target=_record, daemon=True).start()
-
-        mic_btn.clicked.connect(_do_mic_test)
-
-        sep1 = QFrame()
-        sep1.setFrameShape(QFrame.Shape.HLine)
-        sep1.setStyleSheet("color: #21262d;")
-        bl.addWidget(sep1)
-
-        # ── 2. TTS ────────────────────────────────────────────────────
-        tts_hdr = QLabel("2. TTS — teksti puheeksi")
-        tts_hdr.setStyleSheet(
-            "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;"
-        )
-        bl.addWidget(tts_hdr)
-        tts_hint = QLabel("Kuuletko äänen kaiuttimistasi / kuulokkeistasi?")
-        tts_hint.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
-        bl.addWidget(tts_hint)
-        tts_btn = QPushButton("▶ Testaa TTS")
-        tts_btn.setFixedHeight(34)
-        tts_result = QLabel("")
-        tts_result.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
-        tts_result.setWordWrap(True)
-        bl.addWidget(tts_btn)
-        bl.addWidget(tts_result)
-
-        def _do_tts_test():
-            import shutil as _shutil2
-            if not _shutil2.which("ffmpeg"):
-                tts_result.setText(
-                    "⚠️  ffmpeg puuttuu — Edge TTS vaatii sen MP3→WAV-konversioon.\n"
-                    "Asenna: Settings → Asennukset → ffmpeg  tai  winget install ffmpeg terminaalissa."
-                )
-                tts_result.setStyleSheet(
-                    "color: #e3b341; font-size: 11px; background: transparent;"
-                )
-                return
-            import queue as _q
-            selected_out = [idx for idx, cb in self._dev_out_checkboxes.items() if cb.isChecked()]
-            tts_btn.setEnabled(False)
-            tts_btn.setText("Generoidaan...")
-            _rq = _q.Queue()
-
-            def _bg():
-                try:
-                    import asyncio
-                    wav = asyncio.run(
-                        request_edge_tts_wav("Voice Royale on valmis. Testi onnistui.", "Finnish")
-                    )
-                    play_wav_bytes(wav, device_indices=selected_out if selected_out else None)
-                    _rq.put((True, "✅ TTS toimii"))
-                except Exception as exc:
-                    _rq.put((False, f"⚠️ Virhe: {exc}"))
-
-            def _poll_tts():
-                try:
-                    ok, msg = _rq.get_nowait()
-                except Exception:
-                    return
-                _ptmr.stop()
-                try:
-                    self._dev_active_poll_timers.remove(_ptmr)
-                except ValueError:
-                    pass
-                tts_btn.setEnabled(True)
-                tts_btn.setText("▶ Testaa TTS")
-                tts_result.setText(msg)
-                tts_result.setStyleSheet(
-                    f"color: {'#3fb950' if ok else '#e3b341'};"
-                    " font-size: 11px; background: transparent;"
-                )
-
-            _ptmr = QTimer(self)
-            _ptmr.timeout.connect(_poll_tts)
-            _ptmr.start(100)
-            self._dev_active_poll_timers.append(_ptmr)
-            threading.Thread(target=_bg, daemon=True).start()
-
-        tts_btn.clicked.connect(_do_tts_test)
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
         sep2.setStyleSheet("color: #21262d;")
         bl.addWidget(sep2)
 
-        # ── 3. Soundboard ─────────────────────────────────────────────
-        sb_hdr = QLabel("3. Soundboard")
-        sb_hdr.setStyleSheet(
+        # ── Yhdistetty ääntesti (TTS + soundboard yhdellä napilla) ──────
+        test_hdr = QLabel("Testaa ääni")
+        test_hdr.setStyleSheet(
             "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;"
         )
-        bl.addWidget(sb_hdr)
-        sb_hint = QLabel("Kuuletko 660 Hz testiäänen?")
-        sb_hint.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
-        bl.addWidget(sb_hint)
-        sb_btn = QPushButton("▶ Testaa soundboard")
-        sb_btn.setFixedHeight(34)
-        sb_result = QLabel("")
-        sb_result.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
-        bl.addWidget(sb_btn)
-        bl.addWidget(sb_result)
+        bl.addWidget(test_hdr)
+        test_hint = QLabel("Kuuletko käännösäänen ja soundboard-piippauksen kaiuttimistasi?")
+        test_hint.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        bl.addWidget(test_hint)
+        sound_test_btn = QPushButton("🔊  Testaa ääni")
+        sound_test_btn.setFixedHeight(36)
+        sound_test_btn.setStyleSheet(self._BTN_SEC)
+        sound_result = QLabel("")
+        sound_result.setWordWrap(True)
+        sound_result.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        bl.addWidget(sound_test_btn)
+        bl.addWidget(sound_result)
 
-        def _do_sb_test():
-            import queue as _q
+        def _do_sound_test():
+            import shutil as _shutil2
             selected_out = [idx for idx, cb in self._dev_out_checkboxes.items() if cb.isChecked()]
-            sb_btn.setEnabled(False)
-            _rq = _q.Queue()
+            sound_test_btn.setEnabled(False)
+            sound_test_btn.setText("Testataan...")
+            sound_result.setText("")
+            import queue as _q_snd
+            rq = _q_snd.Queue()
 
-            def _play():
+            def _bg():
+                results = []
+                if not _shutil2.which("ffmpeg"):
+                    results.append(
+                        "⚠️ TTS: ffmpeg puuttuu (Asetukset → Asennukset → ffmpeg)"
+                    )
+                else:
+                    try:
+                        import asyncio
+                        wav = asyncio.run(
+                            request_edge_tts_wav("Voice Royale on valmis. Testi onnistui.", "Finnish")
+                        )
+                        play_wav_bytes(wav, device_indices=selected_out if selected_out else None)
+                        results.append("✅ TTS toimii")
+                    except Exception as exc:
+                        results.append(f"⚠️ TTS-virhe: {exc}")
                 try:
                     target = selected_out[0] if selected_out else None
                     info = (
@@ -11607,13 +10817,15 @@ class SetupWizard(QDialog):
                     mono = (np.sin(2 * np.pi * 660.0 * t) * 0.45).astype("float32")
                     tone = np.column_stack([mono] * ch) if ch > 1 else mono.reshape(-1, 1)
                     sd.play(tone, samplerate=sr, device=target, blocking=True)
-                    _rq.put((True, "✅ Soundboard toimii"))
+                    results.append("✅ Soundboard toimii")
                 except Exception as exc:
-                    _rq.put((False, f"⚠️ Virhe: {exc}"))
+                    results.append(f"⚠️ Soundboard-virhe: {exc}")
+                ok = all(r.startswith("✅") for r in results)
+                rq.put((ok, " · ".join(results)))
 
-            def _poll_sb():
+            def _poll():
                 try:
-                    ok, msg = _rq.get_nowait()
+                    ok, msg = rq.get_nowait()
                 except Exception:
                     return
                 _ptmr.stop()
@@ -11621,21 +10833,67 @@ class SetupWizard(QDialog):
                     self._dev_active_poll_timers.remove(_ptmr)
                 except ValueError:
                     pass
-                sb_btn.setEnabled(True)
-                sb_result.setText(msg)
-                sb_result.setStyleSheet(
-                    f"color: {'#3fb950' if ok else '#e3b341'};"
-                    " font-size: 11px; background: transparent;"
+                sound_test_btn.setEnabled(True)
+                sound_test_btn.setText("🔊  Testaa ääni")
+                sound_result.setText(msg)
+                sound_result.setStyleSheet(
+                    f"color: {'#3fb950' if ok else '#e3b341'}; font-size: 11px; background: transparent;"
                 )
 
             _ptmr = QTimer(self)
-            _ptmr.timeout.connect(_poll_sb)
+            _ptmr.timeout.connect(_poll)
             _ptmr.start(100)
             self._dev_active_poll_timers.append(_ptmr)
-            threading.Thread(target=_play, daemon=True).start()
+            threading.Thread(target=_bg, daemon=True).start()
 
-        sb_btn.clicked.connect(_do_sb_test)
+        sound_test_btn.clicked.connect(_do_sound_test)
 
+        bl.addStretch()
+
+        nav = QHBoxLayout()
+        nav.addWidget(self._back_btn())
+        nav.addStretch()
+        self._dev_next_btn = QPushButton("Seuraava  →")
+        self._dev_next_btn.setFixedHeight(42)
+        self._dev_next_btn.setMinimumWidth(140)
+        self._dev_next_btn.setEnabled(self._dev_selected_input is not None)
+        self._dev_next_btn.clicked.connect(self._nav_next)
+        nav.addWidget(self._dev_next_btn)
+        bl.addLayout(nav)
+        scroll.setWidget(body)
+        lay.addWidget(scroll, 1)
+        return page
+
+    def _page_final_test(self):
+        """Viimeistelysivu. Mikrofoni-, TTS- ja soundboard-testit tehdään jo devices-sivulla
+        (samalla sivulla missä laitteet valitaan) — ei toisteta niitä enää tässä."""
+        page = QWidget()
+        page.setStyleSheet("background: #0d1117;")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._header(
+            "Valmis!",
+            "Asennus on valmis."
+        ))
+        body = QWidget()
+        body.setStyleSheet("background: #0d1117;")
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(32, 24, 32, 20)
+        bl.setSpacing(14)
+
+        summary = QLabel(
+            "Kaikki tarvittavat vaiheet on käyty läpi:\n\n"
+            "  •  Puheentunnistus, käännös ja äänisynteesi valittu\n"
+            "  •  Mikrofoni ja kaiuttimet valittu ja testattu\n"
+            "  •  TTS ja soundboard testattu\n\n"
+            "Voit muuttaa mitä tahansa näistä myöhemmin Asetukset-ikkunasta."
+        )
+        summary.setStyleSheet(
+            "color: #c9d1d9; font-size: 13px; background: transparent; line-height: 1.6;"
+        )
+        summary.setWordWrap(True)
+        bl.addWidget(summary)
         bl.addStretch()
 
         nav = QHBoxLayout()
@@ -11746,10 +11004,13 @@ class SetupWizard(QDialog):
         name = next((n for i, n in self._dev_input_devices if i == idx), str(idx))
         prefix = "Automaattisesti tunnistettu" if auto else "Valittu"
         if self._dev_input_status_lbl:
-            self._dev_input_status_lbl.setText(f"✓ {prefix}: {name}")
+            self._dev_input_status_lbl.setText(f"✓  {prefix}: {name}")
             self._dev_input_status_lbl.setStyleSheet(
-                "color: #3fb950; font-size: 11px; background: transparent;"
+                "color: #3fb950; font-size: 15px; font-weight: bold; background: #0d2b14;"
+                " border: 1px solid #238636; border-radius: 8px; padding: 16px;"
             )
+        if hasattr(self, "_dev_next_btn"):
+            self._dev_next_btn.setEnabled(True)
 
     def _dev_test_output(self, device_idx, btn):
         import queue as _q
@@ -11830,16 +11091,11 @@ class SetupWizard(QDialog):
         main.addWidget(self._stack)
         self._stack.addWidget(self._page_welcome())        # 0
         self._stack.addWidget(self._page_services())       # 1
-        self._stack.addWidget(self._page_packages())       # 2
+        self._stack.addWidget(self._page_packages())       # 2  (vain dev-tilassa sekvenssissä)
         self._stack.addWidget(self._page_api_key())        # 3
-        self._stack.addWidget(self._page_vbcable())        # 4
-        self._stack.addWidget(self._page_vm_install())     # 5  Chat-reititys 1/3 — asennus
-        self._stack.addWidget(self._page_vm_device())      # 6  Chat-reititys 2/3 — laitevalinta
-        self._stack.addWidget(self._page_vm_configure())   # 7  Chat-reititys 3/3 — konfig+testi
-        self._stack.addWidget(self._page_streamdeck())     # 8
-        self._stack.addWidget(self._page_ha_setup())       # 9
-        self._stack.addWidget(self._page_devices())        # 10
-        self._stack.addWidget(self._page_final_test())     # 11
+        self._stack.addWidget(self._page_devices())        # 4  mikrofoni + kaiuttimet + ääntesti
+        self._stack.addWidget(self._page_chat_routing())   # 5  chat-reititys (mikseri TAI pelit/Discord)
+        self._stack.addWidget(self._page_final_test())     # 6  Valmis
 
     def _on_key_changed(self, text):
         valid = text.strip().startswith("sk-") and len(text.strip()) > 20
@@ -11952,10 +11208,6 @@ class SetupWizard(QDialog):
         except Exception:
             pass
         settings = load_settings()
-        if self._wiz_ha_url:
-            settings["ha_url"] = self._wiz_ha_url
-            if self._wiz_ha_token:
-                settings["ha_token"] = self._wiz_ha_token
         # Save STT/TTS/translation backends chosen in wizard
         if getattr(self, "_svc_stt", "openai") == "local":
             settings["stt_backend"] = "Local Whisper (base)"
