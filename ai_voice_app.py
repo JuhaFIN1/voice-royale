@@ -293,7 +293,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.76"
+APP_VERSION = "1.3.77"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -6845,6 +6845,11 @@ class App(QWidget):
     # ============ Voice FX ============
 
     def _autostart_voice_fx(self):
+        if self.settings.get("voice_fx_output_device") is None:
+            # User has never explicitly picked an FX Output device — don't start
+            # a hidden mic passthrough stream just because the combo box defaults
+            # to its first entry.
+            return
         in_dev = self.get_selected_input_device()
         out_dev = self._fx_output_combo.currentData()
         if in_dev is not None and out_dev is not None:
