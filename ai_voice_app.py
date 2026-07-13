@@ -293,7 +293,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.78"
+APP_VERSION = "1.3.79"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -5432,7 +5432,8 @@ class App(QWidget):
     def _build_voice_fx_card(self) -> QWidget:
         frame, layout = self._make_card("Voice FX — real-time voice morphing via virtual output")
 
-        # FX effects toggle — ON starts the mic passthrough stream, OFF stops it fully
+        # Top row: FX ON/OFF + Hear Myself ON/OFF side by side (saves vertical space)
+        top_row = QHBoxLayout()
         self._fx_toggle = QPushButton("Voice FX: OFF")
         self._fx_toggle.setCheckable(True)
         self._fx_toggle.setChecked(self.settings.get("voice_fx_enabled", False))
@@ -5446,21 +5447,8 @@ class App(QWidget):
         if self.settings.get("voice_fx_enabled", False):
             self._fx_toggle.setText("Voice FX: ON")
         self._fx_toggle.clicked.connect(self._toggle_voice_fx)
-        layout.addWidget(self._fx_toggle)
+        top_row.addWidget(self._fx_toggle, 1)
 
-        # FX output device selector
-        out_row = QHBoxLayout()
-        out_lbl = QLabel("FX OUTPUT:")
-        out_lbl.setStyleSheet("border: none; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: #666666;")
-        out_row.addWidget(out_lbl)
-        self._fx_output_combo = QComboBox()
-        self._populate_fx_output_combo()
-        self._fx_output_combo.activated.connect(self._on_fx_device_changed)
-        out_row.addWidget(self._fx_output_combo, 1)
-        layout.addLayout(out_row)
-
-        # Hear myself toggle + monitor device selector
-        hear_row = QHBoxLayout()
         self._hear_myself_btn = QPushButton("Hear Myself: OFF")
         self._hear_myself_btn.setCheckable(True)
         self._hear_myself_btn.setChecked(self.settings.get("voice_fx_hear_myself", False))
@@ -5470,16 +5458,32 @@ class App(QWidget):
             "QPushButton:hover { border-color: #FF9500; color: #E0E0E0; }"
             "QPushButton:checked { background: #2A1A00; border: 1px solid #FF9500; color: #FF9500; }"
         )
-        self._hear_myself_btn.clicked.connect(self._toggle_hear_myself)
-        hear_row.addWidget(self._hear_myself_btn)
-        self._fx_monitor_combo = QComboBox()
-        self._populate_fx_monitor_combo()
-        hear_row.addWidget(self._fx_monitor_combo, 1)
-        layout.addLayout(hear_row)
         if self.settings.get("voice_fx_hear_myself", False):
             self._hear_myself_btn.setText("Hear Myself: ON")
+        self._hear_myself_btn.clicked.connect(self._toggle_hear_myself)
+        top_row.addWidget(self._hear_myself_btn, 1)
+        layout.addLayout(top_row)
 
-        # Preset buttons
+        # Hear Myself monitor device — omat kuulokkeet/kaiuttimet, oletuksena Windowsin
+        # oletus-toistolaite (ei tarvitse etsiä käsin)
+        mon_row = QHBoxLayout()
+        mon_lbl = QLabel("KUULEN ITSENI:")
+        mon_lbl.setStyleSheet("border: none; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: #666666;")
+        mon_row.addWidget(mon_lbl)
+        self._fx_monitor_combo = QComboBox()
+        self._populate_fx_monitor_combo()
+        self._fx_monitor_combo.activated.connect(self._on_fx_monitor_device_changed)
+        mon_row.addWidget(self._fx_monitor_combo, 1)
+        layout.addLayout(mon_row)
+
+        # FX Output — ei enää käsivalikkoa, aina sama chat-virtuaalikaapeli joka on jo
+        # valittuna Output-laitteissa (TTS/soundboard käyttävät samaa listaa)
+        self._fx_output_status_lbl = QLabel()
+        self._fx_output_status_lbl.setWordWrap(True)
+        layout.addWidget(self._fx_output_status_lbl)
+        self._refresh_fx_output_status()
+
+        # Preset buttons — 4 saraketta niin kaikki mahtuvat näkyviin ilman vierittämistä
         presets_lbl = QLabel("PRESET:")
         presets_lbl.setStyleSheet("font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: #3A7BFF; border: none; margin-top: 6px;")
         layout.addWidget(presets_lbl)
@@ -5487,50 +5491,48 @@ class App(QWidget):
         preset_grid = QGridLayout()
         preset_grid.setSpacing(6)
         preset_items = list(VoiceEffectProcessor.PRESETS.keys())
+        _FX_PRESET_COLS = 4
         for i, preset in enumerate(preset_items):
             btn = QPushButton(preset)
             btn.setCheckable(True)
             btn.setChecked(preset == "Normal")
             btn.setStyleSheet(
                 "QPushButton { background: #1E1E1E; border: 1px solid #2a2a2a;"
-                " border-radius: 8px; color: #888888; font-weight: 600; padding: 7px 10px; }"
+                " border-radius: 8px; color: #888888; font-weight: 600; padding: 6px 4px; font-size: 12px; }"
                 "QPushButton:hover { background: #252525; border-color: #9A4DFF; color: #E0E0E0; }"
                 "QPushButton:checked { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
                 " stop:0 #3A7BFF, stop:1 #9A4DFF); border: 2px solid #3A7BFF; color: #fff; }"
             )
             btn.clicked.connect(lambda checked, p=preset: self._select_fx_preset(p))
-            preset_grid.addWidget(btn, i // 2, i % 2)
+            preset_grid.addWidget(btn, i // _FX_PRESET_COLS, i % _FX_PRESET_COLS)
             self._fx_preset_buttons[preset] = btn
         layout.addLayout(preset_grid)
 
         layout.addStretch()
 
-        hint = QLabel("Aseta FX Output: Voicemeeter Input (VB-Audio Voicemeeter VAIO).\nPelissä mikrofoni: Voicemeeter Out B1 (VB-Audio Voicemeeter VAIO).\n\"Voice FX: ON\" käynnistää koko äänivirran, \"OFF\" pysäyttää sen kokonaan.")
+        hint = QLabel("FX Output on aina sama chat-virtuaalikaapeli (esim. Voicemeeter Input) jonka olet valinnut Output-laitteissa — ei erillistä valintaa. \"Voice FX: ON\" käynnistää koko äänivirran, \"OFF\" pysäyttää sen kokonaan.")
         hint.setStyleSheet("color: #444444; font-size: 11px; border: none; margin-top: 4px;")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         return frame
 
-    def _populate_fx_output_combo(self):
-        self._fx_output_combo.clear()
-        saved = self.settings.get("voice_fx_output_device")
-        virtual_kw = ("cable", "voicemeeter", "voicemod", "virtual")
-        virtual, other = [], []
-        for i, n in list_output_devices():
-            if any(k in n.lower() for k in virtual_kw):
-                virtual.append((i, n))
-            elif not n.startswith("{"):
-                other.append((i, n))
-        for i, n in virtual:
-            self._fx_output_combo.addItem(f"🔌 {n}", i)
-        for i, n in other[:8]:
-            self._fx_output_combo.addItem(f"🔊 {n}", i)
-        if saved is not None:
-            for idx in range(self._fx_output_combo.count()):
-                if self._fx_output_combo.itemData(idx) == saved:
-                    self._fx_output_combo.setCurrentIndex(idx)
-                    break
-        _fit_combo_dropdown(self._fx_output_combo)
+    def _refresh_fx_output_status(self):
+        if not hasattr(self, "_fx_output_status_lbl"):
+            return
+        out_dev = self._get_auto_fx_output_device()
+        if out_dev is not None:
+            try:
+                name = sd.query_devices(out_dev)["name"]
+            except Exception:
+                name = str(out_dev)
+            self._fx_output_status_lbl.setText(f"✅ FX Output (automaattinen): {name}")
+            self._fx_output_status_lbl.setStyleSheet("border: none; font-size: 11px; color: #00CC66; margin-top: 2px;")
+        else:
+            self._fx_output_status_lbl.setText(
+                "⚠️ Ei chat-virtuaalikaapelia valittuna Output-laitteissa — valitse esim. "
+                "\"Voicemeeter Input\" Laitteet-listasta jotta Voice FX voi käynnistyä."
+            )
+            self._fx_output_status_lbl.setStyleSheet("border: none; font-size: 11px; color: #FF9500; margin-top: 2px;")
 
     def _populate_fx_monitor_combo(self):
         self._fx_monitor_combo.clear()
@@ -5539,12 +5541,27 @@ class App(QWidget):
         for i, n in list_output_devices():
             if not n.startswith("{") and not any(k in n.lower() for k in virtual_kw):
                 self._fx_monitor_combo.addItem(f"🎧 {n}", i)
-        if saved is not None:
+        target = saved
+        if target is None:
+            try:
+                target = sd.default.device[1]
+            except Exception:
+                target = None
+        if target is not None:
             for idx in range(self._fx_monitor_combo.count()):
-                if self._fx_monitor_combo.itemData(idx) == saved:
+                if self._fx_monitor_combo.itemData(idx) == target:
                     self._fx_monitor_combo.setCurrentIndex(idx)
                     break
         _fit_combo_dropdown(self._fx_monitor_combo)
+
+    def _on_fx_monitor_device_changed(self):
+        mon_dev = self._fx_monitor_combo.currentData()
+        if mon_dev is None:
+            return
+        self.settings["voice_fx_monitor_device"] = mon_dev
+        save_settings(self.settings)
+        if self._hear_myself_btn.isChecked():
+            self._voice_fx.set_monitor(mon_dev, True)
 
     def _toggle_hear_myself(self):
         enabled = self._hear_myself_btn.isChecked()
@@ -6193,6 +6210,9 @@ class App(QWidget):
                 w["meter"].setValue(0)
                 w["db_label"].setText("-∞ dB")
         self._refresh_bottom_meters()
+        self._refresh_fx_output_status()
+        if hasattr(self, "_voice_fx"):
+            self._restart_voice_fx_output()
 
     def on_input_device_changed(self):
         selected_device = self.get_selected_input_device()
@@ -6848,15 +6868,34 @@ class App(QWidget):
 
     # ============ Voice FX ============
 
+    _FX_AUTO_OUTPUT_KEYWORDS = ("voicemeeter", "vb-audio", "vb cable", "cable")
+
+    def _get_auto_fx_output_device(self):
+        """Voice FX always feeds the same chat-facing virtual cable already picked
+        for TTS/soundboard output (get_selected_devices()) — never a separately
+        hand-picked device. Only matches software virtual cables, never physical/
+        hardware outputs (e.g. RodeCaster channels), to avoid mic->speaker->mic
+        feedback loops on a continuous stream."""
+        selected = self.get_selected_devices() or []
+        if not selected:
+            return None
+        try:
+            names = dict(list_output_devices())
+        except Exception:
+            return None
+        for idx in selected:
+            name = names.get(idx, "")
+            if any(k in name.lower() for k in self._FX_AUTO_OUTPUT_KEYWORDS):
+                return idx
+        return None
+
     def _autostart_voice_fx(self):
         if not self.settings.get("voice_fx_enabled", False):
             # User has never turned "Voice FX: ON" (or explicitly turned it back
             # off) — don't silently start a mic passthrough stream in the background.
             return
-        if self.settings.get("voice_fx_output_device") is None:
-            return
         in_dev = self.get_selected_input_device()
-        out_dev = self._fx_output_combo.currentData()
+        out_dev = self._get_auto_fx_output_device()
         if in_dev is not None and out_dev is not None:
             mon_dev = self._fx_monitor_combo.currentData()
             hear_on = self._hear_myself_btn.isChecked()
@@ -6866,32 +6905,41 @@ class App(QWidget):
             self._fx_toggle.setChecked(True)
             self._fx_toggle.setText("Voice FX: ON")
             self.append_status("Voice FX: stream jatkettu (oli päällä edellisellä kerralla)")
+        else:
+            self.append_status("Voice FX: ei voitu jatkaa — valitse chat-virtuaalikaapeli (esim. Voicemeeter Input) output-laitteeksi")
 
-    def _on_fx_device_changed(self):
-        out_dev = self._fx_output_combo.currentData()
-        if out_dev is not None:
-            self.settings["voice_fx_output_device"] = out_dev
+    def _restart_voice_fx_output(self):
+        """Called when the user's chat output selection (get_selected_devices())
+        changes while Voice FX is running — follow the new device, or stop
+        cleanly if no virtual cable is selected anymore."""
+        if not self._voice_fx.is_active:
+            return
+        out_dev = self._get_auto_fx_output_device()
+        in_dev = self.get_selected_input_device()
+        if out_dev is None or in_dev is None:
+            self._voice_fx.stop()
+            self._fx_toggle.setChecked(False)
+            self._fx_toggle.setText("Voice FX: OFF")
+            self.settings["voice_fx_enabled"] = False
             save_settings(self.settings)
-        if self._voice_fx.is_active:
-            in_dev = self.get_selected_input_device()
-            if in_dev is not None and out_dev is not None:
-                was_on = self._fx_toggle.isChecked()
-                self._voice_fx.set_preset("Normal")
-                self._voice_fx.start(in_dev, out_dev)
-                if was_on:
-                    self._voice_fx.set_preset(self._current_fx_preset)
+            self.append_status("Voice FX: pysäytetty — chat-virtuaalikaapelia ei ole enää valittuna output-laitteissa")
+            return
+        preset = self._current_fx_preset
+        mon_dev = self._fx_monitor_combo.currentData()
+        hear_on = self._hear_myself_btn.isChecked()
+        self._voice_fx.set_monitor(mon_dev, hear_on)
+        self._voice_fx.start(in_dev, out_dev)
+        self._voice_fx.set_preset(preset)
 
     def _toggle_voice_fx(self):
         if self._fx_toggle.isChecked():
             if not self._voice_fx.is_active:
                 in_dev = self.get_selected_input_device()
-                out_dev = self._fx_output_combo.currentData()
+                out_dev = self._get_auto_fx_output_device()
                 if in_dev is None or out_dev is None:
-                    self.append_status("Voice FX: valitse mikrofoni ja FX Output ensin")
+                    self.append_status("Voice FX: valitse mikrofoni ja chat-virtuaalikaapeli (esim. Voicemeeter Input) output-laitteeksi ensin")
                     self._fx_toggle.setChecked(False)
                     return
-                self.settings["voice_fx_output_device"] = out_dev
-                save_settings(self.settings)
                 mon_dev = self._fx_monitor_combo.currentData()
                 hear_on = self._hear_myself_btn.isChecked()
                 self._voice_fx.set_monitor(mon_dev, hear_on)
