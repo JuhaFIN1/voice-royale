@@ -293,7 +293,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.75"
+APP_VERSION = "1.3.76"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -10105,10 +10105,46 @@ class SetupWizard(QDialog):
         sep.setStyleSheet("color: #21262d;")
         bl.addWidget(sep)
 
+        # Yksi lyhyt, selkeä lopputulosrivi (✅/⚠️/❌) — EI raakaa tekniikkalokia. Tekniset
+        # yksityiskohdat (mm. Voicemeeterin oma "Hardware Input 1 -kohtaan pitää näkyä..."
+        # -varoitusteksti, joka tulee MUKANA myös onnistuneen konfiguroinnin viestissä ja
+        # näytti aiemmin sekavalta kun se liimattiin suoraan pääviestin perään) ovat erikseen
+        # "Näytä tekniset tiedot" -linkin takana.
+        self._chat_verdict_lbl = QLabel("")
+        self._chat_verdict_lbl.setWordWrap(True)
+        self._chat_verdict_lbl.setStyleSheet(
+            "color: #e6edf3; font-size: 14px; font-weight: bold; background: transparent;"
+        )
+        bl.addWidget(self._chat_verdict_lbl)
+
+        self._chat_details_toggle_btn = QPushButton("▸  Näytä tekniset tiedot")
+        self._chat_details_toggle_btn.setFlat(True)
+        self._chat_details_toggle_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; color: #388bfd;"
+            " font-size: 11px; text-align: left; padding: 2px 0; }"
+            "QPushButton:hover { color: #58a6ff; }"
+        )
+        self._chat_details_toggle_btn.setVisible(False)
+        bl.addWidget(self._chat_details_toggle_btn)
+
+        self._chat_details_w = QWidget()
+        self._chat_details_w.setVisible(False)
+        details_lay = QVBoxLayout(self._chat_details_w)
+        details_lay.setContentsMargins(0, 4, 0, 0)
         self._chat_result_lbl = QLabel("")
         self._chat_result_lbl.setWordWrap(True)
-        self._chat_result_lbl.setStyleSheet("color: #8b949e; font-size: 12px; background: transparent;")
-        bl.addWidget(self._chat_result_lbl)
+        self._chat_result_lbl.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        details_lay.addWidget(self._chat_result_lbl)
+        bl.addWidget(self._chat_details_w)
+
+        def _toggle_chat_details():
+            vis = not self._chat_details_w.isVisible()
+            self._chat_details_w.setVisible(vis)
+            self._chat_details_toggle_btn.setText(
+                "▾  Piilota tekniset tiedot" if vis else "▸  Näytä tekniset tiedot"
+            )
+
+        self._chat_details_toggle_btn.clicked.connect(_toggle_chat_details)
 
         self._chat_cfg_btn = QPushButton("🔧  Määritä automaattisesti")
         self._chat_cfg_btn.setFixedHeight(42)
@@ -10195,13 +10231,28 @@ class SetupWizard(QDialog):
         self._chat_utility_w.setStyleSheet("background: transparent;")
         utility_outer = QVBoxLayout(self._chat_utility_w)
         utility_outer.setContentsMargins(0, 0, 0, 0)
-        utility_outer.setSpacing(8)
+        utility_outer.setSpacing(6)
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
         sep2.setStyleSheet("color: #21262d;")
         utility_outer.addWidget(sep2)
 
-        utility_row = QHBoxLayout()
+        # Piilotettu oletuksena "Lisäasetukset"-linkin taakse — nämä eivät ole osa normaalia
+        # polkua (automaatio hoitaa 95% tapauksista), joten harmaana aina näkyvillä ne vain
+        # sekoittivat käyttäjää siitä mitä pitäisi tehdä (käyttäjäpalaute).
+        adv_toggle_btn = QPushButton("▸  Lisäasetukset")
+        adv_toggle_btn.setFlat(True)
+        adv_toggle_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; color: #388bfd;"
+            " font-size: 11px; text-align: left; padding: 2px 0; }"
+            "QPushButton:hover { color: #58a6ff; }"
+        )
+        utility_outer.addWidget(adv_toggle_btn)
+
+        adv_content_w = QWidget()
+        adv_content_w.setVisible(False)
+        utility_row = QHBoxLayout(adv_content_w)
+        utility_row.setContentsMargins(0, 4, 0, 0)
         utility_row.setSpacing(8)
         cleanup_btn = QPushButton("Siivoa turhat virtuaalilaitteet")
         cleanup_btn.setFixedHeight(28)
@@ -10212,8 +10263,15 @@ class SetupWizard(QDialog):
         utility_row.addWidget(cleanup_btn)
         utility_row.addWidget(manual_mic_btn)
         utility_row.addStretch()
-        utility_outer.addLayout(utility_row)
+        utility_outer.addWidget(adv_content_w)
         bl.addWidget(self._chat_utility_w)
+
+        def _toggle_adv_content():
+            vis = not adv_content_w.isVisible()
+            adv_content_w.setVisible(vis)
+            adv_toggle_btn.setText("▾  Piilota lisäasetukset" if vis else "▸  Lisäasetukset")
+
+        adv_toggle_btn.clicked.connect(_toggle_adv_content)
 
         def _do_cleanup():
             cleanup_btn.setEnabled(False)
@@ -10289,14 +10347,19 @@ class SetupWizard(QDialog):
             return None
 
         def _do_configure_all():
+            self._chat_run_started = True
             self._chat_cfg_btn.setEnabled(False)
             self._chat_cfg_btn.setText("Määritetään...")
             self._chat_manual_row.setVisible(False)
             self._chat_reboot_btn.setVisible(False)
-            self._chat_result_lbl.setText("Käynnistetään...")
-            self._chat_result_lbl.setStyleSheet(
-                "color: #8b949e; font-size: 12px; background: transparent;"
+            self._chat_details_w.setVisible(False)
+            self._chat_details_toggle_btn.setVisible(False)
+            self._chat_details_toggle_btn.setText("▸  Näytä tekniset tiedot")
+            self._chat_verdict_lbl.setText("⏳  Määritetään...")
+            self._chat_verdict_lbl.setStyleSheet(
+                "color: #8b949e; font-size: 14px; font-weight: bold; background: transparent;"
             )
+            self._chat_result_lbl.setText("")
             import queue as _q
             rq = _q.Queue()
             log_lines = []
@@ -10367,33 +10430,54 @@ class SetupWizard(QDialog):
                     return
                 _ptmr.stop()
                 self._chat_cfg_btn.setEnabled(True)
-                self._chat_cfg_btn.setText("🔧  Määritä automaattisesti")
+                self._chat_result_lbl.setText("\n".join(log_lines))
+                # Tekniset tiedot -linkki tulee näkyviin heti kun on jotain näytettävää,
+                # mutta pysyy PIILOSSA ellei tulos vaadi käyttäjän huomiota (ks. alla) —
+                # onnistuessa käyttäjän ei tarvitse lukea teknistä lokia ollenkaan.
+                self._chat_details_toggle_btn.setVisible(bool(log_lines))
+                # Ajo on nyt LOPPUNUT (onnistuipa se tai ei) — vapauta "Seuraava".
+                self._chat_next_btn.setEnabled(True)
                 kind, payload = final
                 if kind == "need_reboot":
-                    log_lines.append(
-                        "Asennus suoritettu. Ajuri vaatii yleensä uudelleenkäynnistyksen ennen "
-                        "kuin se toimii täysin — käynnistä tietokone uudelleen ja yritä sitten "
-                        "uudelleen."
+                    self._chat_verdict_lbl.setText(
+                        "🔄  Asennus vaatii uudelleenkäynnistyksen ennen jatkoa."
                     )
-                    self._chat_result_lbl.setText("\n".join(log_lines))
-                    self._chat_result_lbl.setStyleSheet(
-                        "color: #e3b341; font-size: 12px; background: transparent;"
+                    self._chat_verdict_lbl.setStyleSheet(
+                        "color: #e3b341; font-size: 14px; font-weight: bold; background: transparent;"
                     )
+                    self._chat_cfg_btn.setText("🔧  Yritä uudelleen")
+                    self._chat_cfg_btn.setStyleSheet(self._BTN_PRIMARY)
                     self._chat_reboot_btn.setVisible(True)
+                    self._chat_details_w.setVisible(True)
+                    self._chat_details_toggle_btn.setText("▾  Piilota tekniset tiedot")
                 elif kind == "need_manual":
-                    log_lines.append("Emme tunnistaneet mikseriäsi automaattisesti.")
-                    self._chat_result_lbl.setText("\n".join(log_lines))
-                    self._chat_result_lbl.setStyleSheet(
-                        "color: #e3b341; font-size: 12px; background: transparent;"
+                    self._chat_verdict_lbl.setText(
+                        "⚠️  Emme tunnistaneet mikseriäsi automaattisesti — valitse laite alta."
                     )
+                    self._chat_verdict_lbl.setStyleSheet(
+                        "color: #e3b341; font-size: 14px; font-weight: bold; background: transparent;"
+                    )
+                    self._chat_cfg_btn.setText("🔧  Yritä uudelleen")
+                    self._chat_cfg_btn.setStyleSheet(self._BTN_PRIMARY)
                     _refresh_chat_dev_combo()
                     self._chat_manual_row.setVisible(True)
                 elif kind == "done":
                     ok = payload
-                    self._chat_result_lbl.setText("\n".join(log_lines))
-                    self._chat_result_lbl.setStyleSheet(
+                    if ok:
+                        self._chat_verdict_lbl.setText("✅  Reititys toimii — kaikki valmista.")
+                        self._chat_cfg_btn.setText("🔧  Määritä uudelleen")
+                        self._chat_cfg_btn.setStyleSheet(self._BTN_SEC)
+                    else:
+                        self._chat_verdict_lbl.setText(
+                            "❌  Jokin meni pieleen — katso tekniset tiedot alta tai yritä uudelleen."
+                        )
+                        self._chat_cfg_btn.setText("🔧  Yritä uudelleen")
+                        self._chat_cfg_btn.setStyleSheet(self._BTN_PRIMARY)
+                        self._chat_details_w.setVisible(True)
+                        self._chat_details_toggle_btn.setText("▾  Piilota tekniset tiedot")
+                    self._chat_verdict_lbl.setStyleSheet(
                         f"color: {'#3fb950' if ok else '#f85149'};"
-                        " font-size: 12px; background: transparent;"
+                        " font-size: 14px; font-weight: bold; background: transparent;"
                     )
 
             _ptmr = QTimer(self)
@@ -10406,11 +10490,15 @@ class SetupWizard(QDialog):
         nav = QHBoxLayout()
         nav.addWidget(self._back_btn())
         nav.addStretch()
-        nxt = QPushButton("Seuraava  →")
-        nxt.setFixedHeight(42)
-        nxt.setMinimumWidth(140)
-        nxt.clicked.connect(self._nav_next)
-        nav.addWidget(nxt)
+        # "Seuraava" lukossa kunnes käyttäjä on ajanut "Määritä automaattisesti" ainakin
+        # kerran LOPPUUN (onnistuipa se tai ei) — muuten tätä sivua voisi ohittaa koskematta
+        # reititykseen ollenkaan eikä käyttäjä koskaan saisi tietää ettei se toimi.
+        self._chat_next_btn = QPushButton("Seuraava  →")
+        self._chat_next_btn.setFixedHeight(42)
+        self._chat_next_btn.setMinimumWidth(140)
+        self._chat_next_btn.setEnabled(False)
+        self._chat_next_btn.clicked.connect(self._nav_next)
+        nav.addWidget(self._chat_next_btn)
         bl.addLayout(nav)
         lay.addWidget(body)
         self._refresh_chat_routing_page()
@@ -10445,17 +10533,21 @@ class SetupWizard(QDialog):
                 "Discord/pelit kuulevat käännöksesi."
             )
         self._chat_why_lbl.setText(why_text)
-        already_ok = (
-            _is_voicemeeter_installed() if self._svc_mixer else _is_vbcable_installed()
-        )
-        self._chat_result_lbl.setText(
-            "✅ Jo asennettu — paina silti varmistaaksesi että reititys toimii."
-            if already_ok else
-            "Ei vielä asennettu — paina alta, hoidamme asennuksen, määrityksen ja testauksen."
-        )
-        self._chat_result_lbl.setStyleSheet(
-            "color: #8b949e; font-size: 12px; background: transparent;"
-        )
+        # Verdict/nappitila päivitetään vain ENNEN ensimmäistä "Määritä automaattisesti" -ajoa
+        # tällä sivukäynnillä — muuten palaaminen sivulle esim. takaisin-napilla ylikirjoittaisi
+        # juuri saadun tuloksen ("✅ Reititys toimii") takaisin geneeriseksi alkutilaksi.
+        if not getattr(self, "_chat_run_started", False):
+            already_ok = (
+                _is_voicemeeter_installed() if self._svc_mixer else _is_vbcable_installed()
+            )
+            self._chat_verdict_lbl.setText(
+                "✅  Jo asennettu — paina silti varmistaaksesi että reititys toimii."
+                if already_ok else
+                "Ei vielä asennettu — paina alta, hoidamme asennuksen, määrityksen ja testauksen."
+            )
+            self._chat_verdict_lbl.setStyleSheet(
+                "color: #8b949e; font-size: 14px; font-weight: bold; background: transparent;"
+            )
         if hasattr(self, "_chat_utility_w"):
             self._chat_utility_w.setVisible(self._svc_mixer)
 
@@ -10482,7 +10574,11 @@ class SetupWizard(QDialog):
         bl.setContentsMargins(28, 16, 28, 12)
         bl.setSpacing(10)
 
-        # ── Mikrofoni: iso tilakortti + piilotettu tarkka lista ─────────
+        # ── Mikrofoni: iso tilakortti + AINA näkyvä äänitasomittari + piilotettu tarkka lista ──
+        # Aiempi versio piilotti KOKO laitelistan (ja sen ainoat äänitasopalkit) oletuksena, jolloin
+        # käyttäjä ei nähnyt MITÄÄN todistetta siitä että sovellus ylipäätään kuulee mitään —
+        # "ei toimi vaikka puhun mikkiin" -ilmoitus tästä. Yhdistetty mittari on AINA näkyvissä
+        # heti kortin alla, joten puhuminen näkyy visuaalisesti vaikka tunnistus ei vielä osuisi.
         self._dev_input_status_lbl = QLabel("🎤  Puhu mikrofoniisi...")
         self._dev_input_status_lbl.setWordWrap(True)
         self._dev_input_status_lbl.setStyleSheet(
@@ -10490,6 +10586,14 @@ class SetupWizard(QDialog):
             " border: 1px solid #30363d; border-radius: 8px; padding: 16px;"
         )
         bl.addWidget(self._dev_input_status_lbl)
+
+        self._dev_combined_bar = QProgressBar()
+        self._dev_combined_bar.setRange(0, 1000)
+        self._dev_combined_bar.setValue(0)
+        self._dev_combined_bar.setTextVisible(False)
+        self._dev_combined_bar.setFixedHeight(10)
+        self._dev_combined_bar.setStyleSheet(self._BAR_IDLE)
+        bl.addWidget(self._dev_combined_bar)
 
         mic_toggle_btn = QPushButton("▸  Väärä laite? Näytä kaikki mikrofonit")
         mic_toggle_btn.setFlat(True)
@@ -10610,6 +10714,10 @@ class SetupWizard(QDialog):
             )
 
         mic_toggle_btn.clicked.connect(_toggle_mic_list)
+        # Referenssit talteen, jotta _update_dev_levels() voi avata listan automaattisesti
+        # jos mikään laite ei ole reagoinut muutamassa sekunnissa (ks. alla _dev_no_speech_ticks).
+        self._dev_mic_list_w = mic_list_w
+        self._dev_mic_toggle_btn = mic_toggle_btn
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
@@ -10914,6 +11022,7 @@ class SetupWizard(QDialog):
         self._stop_dev_monitoring()
         self._dev_auto_selected = False
         self._dev_stream_opened = set()
+        self._dev_no_speech_ticks = 0
         import queue as _q
         self._dev_level_queue = _q.Queue()
         _CONFIGS = [(1, 16000), (2, 48000), (1, 48000), (2, 44100), (1, 44100)]
@@ -10978,6 +11087,19 @@ class SetupWizard(QDialog):
             else:
                 self._dev_sustained[idx] = max(0, self._dev_sustained.get(idx, 0) - 1)
 
+        # Yhdistetty mittari (aina näkyvissä, ks. _page_devices) — näyttää suurimman tason
+        # KAIKISTA tarkkailtavista laitteista, jotta käyttäjä näkee heti onko ääntä tulossa
+        # ollenkaan, vaikka tarkka per-laite-lista olisi piilossa.
+        if hasattr(self, "_dev_combined_bar"):
+            combined_peak = max(
+                (self._dev_level_peak.get(i, 0.0) for i in self._dev_stream_opened),
+                default=0.0,
+            )
+            self._dev_combined_bar.setValue(int(min(combined_peak * 1000, 1000)))
+            self._dev_combined_bar.setStyleSheet(
+                self._BAR_ACTIVE if combined_peak > THRESHOLD else self._BAR_IDLE
+            )
+
         if not self._dev_auto_selected:
             cands = {
                 k: v for k, v in self._dev_sustained.items()
@@ -10986,6 +11108,22 @@ class SetupWizard(QDialog):
             best, cnt = max(cands.items(), key=lambda x: x[1], default=(None, 0))
             if cnt >= SUSTAIN and best is not None:
                 self._dev_select_input(best, auto=True)
+            else:
+                # Ei vielä osunut mihinkään laitteeseen. Jos ~6s on kulunut eikä mikään laite
+                # ole reagoinut ollenkaan, avaa tarkka laitelista AUTOMAATTISESTI sen sijaan
+                # että käyttäjä jää tuijottamaan muuttumatonta korttia ilman että tietää mitä
+                # tehdä seuraavaksi (ks. käyttäjäpalaute: "ei näy mitä mikkiä yrittää").
+                self._dev_no_speech_ticks = getattr(self, "_dev_no_speech_ticks", 0) + 1
+                if (self._dev_no_speech_ticks == 75
+                        and hasattr(self, "_dev_mic_list_w")
+                        and not self._dev_mic_list_w.isVisible()):
+                    self._dev_mic_list_w.setVisible(True)
+                    self._dev_mic_toggle_btn.setText("▾  Piilota mikrofonilista")
+                    if self._dev_input_status_lbl:
+                        self._dev_input_status_lbl.setText(
+                            "🎤  Emme vielä kuulleet sinua — puhu kovempaa, tarkista "
+                            "mikrofonilupa tai valitse laite alta listalta."
+                        )
 
     def _dev_select_input(self, idx, auto=False):
         self._dev_selected_input = idx
@@ -11223,6 +11361,7 @@ class SetupWizard(QDialog):
             settings.setdefault("translation_backend", "DeepL")
         else:
             settings.setdefault("translation_backend", "Google (free)")
+        settings["_last_wizard_version"] = APP_VERSION
         save_settings(settings)
         self.accept()
 
@@ -11258,6 +11397,7 @@ if __name__ == "__main__":
         OPENAI_API_KEY = wizard.get_api_key()
         if OPENAI_API_KEY:
             client = OpenAI(api_key=OPENAI_API_KEY)
+        # _finish_setup() already stamps _last_wizard_version = APP_VERSION on Accept.
     elif os.path.exists(_settings_path):
         # Resume the wizard on the same page after a wizard-triggered reboot
         # (e.g. Voicemeeter Banana driver install) so it shows as installed.
@@ -11269,6 +11409,17 @@ if __name__ == "__main__":
             resume_wizard._svc_mixer = True
             resume_wizard._navigate(_resume_page)
             resume_wizard.exec()
+        elif _resume_settings.get("_last_wizard_version") != APP_VERSION:
+            # New version since the wizard was last seen — reopen the full wizard so the
+            # user can review/re-check their setup after an update that touched it.
+            update_wizard = SetupWizard()
+            update_wizard.exec()
+            try:
+                _s2 = load_settings()
+                _s2["_last_wizard_version"] = APP_VERSION
+                save_settings(_s2)
+            except Exception:
+                pass
 
     # Match App.__init__ geometry exactly so splash and main window occupy the same spot
     _WIN_X, _WIN_Y, _WIN_W, _WIN_H = 100, 100, 1320, 637
