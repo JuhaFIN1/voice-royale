@@ -35,6 +35,7 @@ echo.
     --add-data "juhalempiainensoftware.png;." ^
     --add-data "iconimage.ico;." ^
     --hidden-import scipy.signal ^
+    --hidden-import stftpitchshift ^
     --hidden-import pyttsx3.drivers ^
     --hidden-import pyttsx3.drivers.sapi5 ^
     --hidden-import comtypes.stream ^

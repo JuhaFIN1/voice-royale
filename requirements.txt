@@ -10,3 +10,4 @@ edge-tts
 pvporcupine
 scipy
 deep-translator
+stftpitchshift

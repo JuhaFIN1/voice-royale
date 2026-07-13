@@ -24,6 +24,7 @@ REQUIRED = {
     "pyttsx3": "pyttsx3",
     "edge_tts": "edge-tts",
     "deep_translator": "deep-translator",
+    "stftpitchshift": "stftpitchshift",
 }
 # keyboard requires root/accessibility permissions on macOS and crashes on import without them
 if sys.platform != "darwin":
@@ -293,7 +294,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.81"
+APP_VERSION = "1.3.82"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1027,6 +1028,17 @@ except Exception:
 
 
 # =========================
+# OPTIONAL: stftPitchShift (proper phase-vocoder pitch shifting)
+# =========================
+try:
+    from stftpitchshift import StftPitchShift  # type: ignore
+    STFTPITCHSHIFT_AVAILABLE = True
+except Exception:
+    StftPitchShift = None
+    STFTPITCHSHIFT_AVAILABLE = False
+
+
+# =========================
 # VOICE EFFECT PROCESSOR
 # =========================
 class VoiceEffectProcessor:
@@ -1063,6 +1075,19 @@ class VoiceEffectProcessor:
     _PITCH_BLOCK = 4096
     _PITCH_HOP = 2048  # must divide evenly by _BLOCKSIZE
 
+    # Internal STFT frame/hop for stftpitchshift's phase vocoder. Must match
+    # _PITCH_BLOCK — measured that a smaller internal frame (2048) makes the
+    # library's formant/cepstral path return wildly wrong frequencies for
+    # pitch-DOWN shifts specifically (verified via FFT: "Deep" -6 semitones
+    # came out ~2x HIGHER, not lower). At framesize=4096 that failure mode
+    # goes away for a single whole-buffer call, but still reappears once
+    # wired into our streaming/overlap-add grain loop — root cause not fully
+    # isolated, so formant preservation (quefrency) is left at 0 (disabled)
+    # until that's understood; plain (non-formant) shifting measured reliable
+    # across all presets and loudness levels in both cases.
+    _SPS_FRAMESIZE = 4096
+    _SPS_HOPSIZE = 1024
+
     def __init__(self, status_cb):
         self._status = status_cb
         self._active = False
@@ -1076,6 +1101,14 @@ class VoiceEffectProcessor:
         self._hear_myself = False
         self._monitor_device = None
         self._pv_window = np.hanning(self._PITCH_BLOCK).astype(np.float32)
+        self._sps = (
+            StftPitchShift(
+                framesize=self._SPS_FRAMESIZE,
+                hopsize=self._SPS_HOPSIZE,
+                samplerate=int(self._SAMPLE_RATE),
+            )
+            if STFTPITCHSHIFT_AVAILABLE else None
+        )
         self._reset_pitch_state()
 
     def _reset_pitch_state(self):
@@ -1185,7 +1218,6 @@ class VoiceEffectProcessor:
     def _pitch_shift(self, chunk: np.ndarray, semitones: int) -> np.ndarray:
         """Overlap-add granular pitch shift, decoupled from the driver's small
         callback size — see _PITCH_BLOCK/_PITCH_HOP comment above for why."""
-        from scipy.signal import resample
         HOP = self._PITCH_HOP
         BLOCK = self._PITCH_BLOCK
         factor = 2.0 ** (semitones / 12.0)
@@ -1194,17 +1226,27 @@ class VoiceEffectProcessor:
         while len(self._pv_stage) >= HOP:
             hop_samples, self._pv_stage = self._pv_stage[:HOP], self._pv_stage[HOP:]
             self._pv_history = np.concatenate([self._pv_history[HOP:], hop_samples])
-            grain = self._pv_history * self._pv_window
-            n_mid = max(1, int(round(BLOCK / factor)))
-            # Resample ONCE only — a second resample back to BLOCK mathematically
-            # cancels the pitch shift out (verified: FFT-resample's bin-to-frequency
-            # mapping for an N->M->N round trip returns to the original frequency,
-            # so the old double-resample code never actually changed pitch, just
-            # added smearing). Tile/truncate the once-shifted grain back to BLOCK
-            # instead — safe because the grain was Hann-windowed before resampling,
-            # so it already tapers to ~0 at both ends and the tile seam is silent.
-            shifted_raw = resample(grain, n_mid).astype(np.float32)
-            shifted = np.resize(shifted_raw, BLOCK)
+            if self._sps is not None:
+                # Proper phase-vocoder pitch shift (github.com/jurihock/stftPitchShift,
+                # MIT). It windows/frames internally, so pass it the RAW history and
+                # apply our own outer Hann window to its output afterwards — that's
+                # only for cross-fading this grain smoothly against its neighbours
+                # below, not a second analysis window on the input.
+                shifted_raw = self._sps.shiftpitch(
+                    self._pv_history, factors=factor, quefrency=0
+                ).astype(np.float32)
+                shifted = shifted_raw * self._pv_window
+            else:
+                # Fallback if the dependency failed to install: cruder single-
+                # resample-and-tile shift (still correct, verified via FFT, just
+                # without the phase vocoder's transient/timbre quality). Resample
+                # ONCE only — a second resample back to BLOCK mathematically
+                # cancels the pitch shift out (verified empirically).
+                from scipy.signal import resample
+                grain = self._pv_history * self._pv_window
+                n_mid = max(1, int(round(BLOCK / factor)))
+                shifted_raw = resample(grain, n_mid).astype(np.float32)
+                shifted = np.resize(shifted_raw, BLOCK)
             self._pv_out_accum += shifted
             ready = self._pv_out_accum[:HOP].copy()
             self._pv_out_accum = np.concatenate(
@@ -6171,6 +6213,13 @@ class App(QWidget):
         device_count = len(routing_devices) + min(len(other_devices), 8)
         self.append_status(f"Found {device_count} output devices ({len(routing_devices)} routing-capable)")
         self._refresh_bottom_meters()
+        # Checkbox stateChanged only fires for devices whose checked state actually
+        # CHANGES during population — if nothing changed (or PortAudio re-enumerated
+        # indices so a previously-saved device never got re-checked), the Voice FX
+        # status label could otherwise be left showing a stale "not selected" warning
+        # from before the list was populated. Refresh unconditionally here instead.
+        if hasattr(self, "_fx_output_status_lbl"):
+            self._refresh_fx_output_status()
 
     def refresh_all_devices(self):
         self.populate_output_devices()
@@ -10787,6 +10836,15 @@ class SetupWizard(QDialog):
         except Exception:
             pass
 
+        # RodeCaster Pro II: a dedicated "...Chat..." channel is almost always
+        # the correct mic for this app's purpose (pre-mixed chat feed) — prefer
+        # it over whatever Windows happens to have as its system default device.
+        for _i, _n in self._dev_input_devices:
+            _nl = _n.lower()
+            if "rode" in _nl and "chat" in _nl:
+                _def_in = _i
+                break
+
         self._dev_level_bars = {}
         self._dev_level_peak = {}
         self._dev_sustained = {}
@@ -10887,6 +10945,14 @@ class SetupWizard(QDialog):
                         break
         except Exception:
             pass
+
+        # Same RodeCaster Pro II "...Chat..." preference as the mic above.
+        for _i, _n in _raw_out:
+            _nl = _n.lower()
+            if "rode" in _nl and "chat" in _nl:
+                _def_out = _i
+                break
+
         self._dev_output_devices = sorted(
             _raw_out, key=lambda x: 0 if x[0] == _def_out else 1
         )
@@ -11163,6 +11229,15 @@ class SetupWizard(QDialog):
         self._dev_auto_selected = False
         self._dev_stream_opened = set()
         self._dev_no_speech_ticks = 0
+        # RodeCaster Pro II "...Chat..." channel: select it immediately instead
+        # of waiting ~6s for sustained audio level detection, and don't let any
+        # other device's transient noise override it afterwards (_dev_select_input
+        # sets _dev_auto_selected=True, which the level-based logic below respects).
+        for _i, _n in self._dev_input_devices:
+            _nl = _n.lower()
+            if "rode" in _nl and "chat" in _nl:
+                self._dev_select_input(_i, auto=True)
+                break
         import queue as _q
         self._dev_level_queue = _q.Queue()
         _CONFIGS = [(1, 16000), (2, 48000), (1, 48000), (2, 44100), (1, 44100)]
