@@ -293,7 +293,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.77"
+APP_VERSION = "1.3.78"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -327,6 +327,7 @@ DEFAULT_SETTINGS = {
     "voice_fx_output_device": None,
     "voice_fx_monitor_device": None,
     "voice_fx_hear_myself": False,
+    "voice_fx_enabled": False,
     "start_with_windows": False,
     "start_minimized": False,
 }
@@ -5431,16 +5432,19 @@ class App(QWidget):
     def _build_voice_fx_card(self) -> QWidget:
         frame, layout = self._make_card("Voice FX — real-time voice morphing via virtual output")
 
-        # FX effects toggle (stream always runs when devices configured)
+        # FX effects toggle — ON starts the mic passthrough stream, OFF stops it fully
         self._fx_toggle = QPushButton("Voice FX: OFF")
         self._fx_toggle.setCheckable(True)
-        self._fx_toggle.setToolTip("Kytkee efektin päälle/pois — äänivirta pysyy aina käynnissä")
+        self._fx_toggle.setChecked(self.settings.get("voice_fx_enabled", False))
+        self._fx_toggle.setToolTip("Kytkee koko äänivirran päälle/pois")
         self._fx_toggle.setStyleSheet(
             "QPushButton { background: #1E1E1E; border: 1px solid #2a2a2a; color: #888888; }"
             "QPushButton:hover { border-color: #3A7BFF; color: #E0E0E0; }"
             "QPushButton:checked { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #003A1A,stop:1 #00270F);"
             " border: 1px solid #00FF6A; color: #00FF6A; }"
         )
+        if self.settings.get("voice_fx_enabled", False):
+            self._fx_toggle.setText("Voice FX: ON")
         self._fx_toggle.clicked.connect(self._toggle_voice_fx)
         layout.addWidget(self._fx_toggle)
 
@@ -5501,7 +5505,7 @@ class App(QWidget):
 
         layout.addStretch()
 
-        hint = QLabel("Aseta FX Output: Voicemeeter Input (VB-Audio Voicemeeter VAIO).\nPelissä mikrofoni: Voicemeeter Out B1 (VB-Audio Voicemeeter VAIO).\nStream käynnistyy automaattisesti — nappi kytkee vain efektin.")
+        hint = QLabel("Aseta FX Output: Voicemeeter Input (VB-Audio Voicemeeter VAIO).\nPelissä mikrofoni: Voicemeeter Out B1 (VB-Audio Voicemeeter VAIO).\n\"Voice FX: ON\" käynnistää koko äänivirran, \"OFF\" pysäyttää sen kokonaan.")
         hint.setStyleSheet("color: #444444; font-size: 11px; border: none; margin-top: 4px;")
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -6845,20 +6849,23 @@ class App(QWidget):
     # ============ Voice FX ============
 
     def _autostart_voice_fx(self):
+        if not self.settings.get("voice_fx_enabled", False):
+            # User has never turned "Voice FX: ON" (or explicitly turned it back
+            # off) — don't silently start a mic passthrough stream in the background.
+            return
         if self.settings.get("voice_fx_output_device") is None:
-            # User has never explicitly picked an FX Output device — don't start
-            # a hidden mic passthrough stream just because the combo box defaults
-            # to its first entry.
             return
         in_dev = self.get_selected_input_device()
         out_dev = self._fx_output_combo.currentData()
         if in_dev is not None and out_dev is not None:
-            self._voice_fx.set_preset("Normal")
             mon_dev = self._fx_monitor_combo.currentData()
             hear_on = self._hear_myself_btn.isChecked()
             self._voice_fx.set_monitor(mon_dev, hear_on)
             self._voice_fx.start(in_dev, out_dev)
-            self.append_status("Voice FX: stream käynnistetty (efekti OFF)")
+            self._voice_fx.set_preset(self._current_fx_preset)
+            self._fx_toggle.setChecked(True)
+            self._fx_toggle.setText("Voice FX: ON")
+            self.append_status("Voice FX: stream jatkettu (oli päällä edellisellä kerralla)")
 
     def _on_fx_device_changed(self):
         out_dev = self._fx_output_combo.currentData()
@@ -6891,9 +6898,13 @@ class App(QWidget):
                 self._voice_fx.start(in_dev, out_dev)
             self._voice_fx.set_preset(self._current_fx_preset)
             self._fx_toggle.setText("Voice FX: ON")
+            self.settings["voice_fx_enabled"] = True
+            save_settings(self.settings)
         else:
-            self._voice_fx.set_preset("Normal")
+            self._voice_fx.stop()
             self._fx_toggle.setText("Voice FX: OFF")
+            self.settings["voice_fx_enabled"] = False
+            save_settings(self.settings)
 
     def _select_fx_preset(self, preset: str):
         self._current_fx_preset = preset
