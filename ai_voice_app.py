@@ -293,7 +293,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.72"
+APP_VERSION = "1.3.73"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -714,6 +714,7 @@ def _install_voicemeeter(status_cb) -> None:
 
         if _is_voicemeeter_installed():
             status_cb("✅ Voicemeeter Banana asennettu! Käynnistä PC uudelleen viimeistelläksesi ajuriasennuksen.")
+            _disable_unused_voicemeeter_endpoints(lambda _msg: None)
         else:
             stderr = result.stderr.decode("utf-8", errors="ignore").strip()
             if "cancel" in stderr.lower() or "declined" in stderr.lower() or result.returncode != 0:
@@ -725,6 +726,42 @@ def _install_voicemeeter(status_cb) -> None:
         status_cb("Asennus kesti liian kauan — tarkista tehtävienhallinnasta onko asennus kesken.")
     except Exception as exc:
         status_cb(f"Virhe: {exc}")
+
+
+def _disable_unused_voicemeeter_endpoints(status_cb) -> None:
+    """Disable all Voicemeeter virtual audio endpoints except Input and Out B1.
+
+    Voice Royale's chat routing only ever uses "Voicemeeter Input" (TTS playback
+    target) and "Voicemeeter Out B1" (virtual mic for Discord/games). Voicemeeter
+    Potato registers 16 endpoints total (In1-5, AUX/VAIO3 Input, Out A1-A5, Out B2-B3
+    are all unused by this app) which clutters Windows' sound device lists. Disabling
+    via Device Manager keeps Voicemeeter itself fully functional and is reversible.
+    Requires admin — triggers a UAC prompt.
+    """
+    if sys.platform != "win32":
+        return
+    ps_cmd = (
+        "Get-PnpDevice -Class AudioEndpoint | Where-Object { "
+        "$_.FriendlyName -like '*Voicemeeter*' -and "
+        "$_.FriendlyName -notlike '*Voicemeeter Input (*' -and "
+        "$_.FriendlyName -notlike '*Voicemeeter Out B1 (*' -and "
+        "$_.Status -eq 'OK' "
+        "} | Disable-PnpDevice -Confirm:$false"
+    )
+    outer_cmd = (
+        f"Start-Process powershell -Verb RunAs -Wait -ArgumentList "
+        f"'-NoProfile -Command \"{ps_cmd}\"'"
+    )
+    try:
+        status_cb("Siivotaan turhat Voicemeeter-virtuaalilaitteet — hyväksy UAC-pyyntö...")
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command", outer_cmd],
+            capture_output=True, timeout=60,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        status_cb("✅ Turhat Voicemeeter-virtuaalilaitteet piilotettu (Voicemeeter Input + Out B1 jäivät käyttöön).")
+    except Exception as exc:
+        status_cb(f"Laitteiden siivous epäonnistui: {exc}")
 
 
 def _check_voicemeeter_routing() -> tuple[str, bool]:
@@ -3910,6 +3947,13 @@ class CompactWidget(QWidget):
         self.speak_btn.clicked.connect(lambda: self._app.on_speak())
         row.addWidget(self.speak_btn)
 
+        self.restore_btn = QPushButton("🗗")
+        self.restore_btn.setFixedSize(28, 32)
+        self.restore_btn.setToolTip("Palaa täyteen ikkunaan")
+        self.restore_btn.setStyleSheet(btn_style)
+        self.restore_btn.clicked.connect(lambda: self._app.toggle_compact_mode())
+        row.addWidget(self.restore_btn)
+
         outer.addLayout(row)
 
         self.status_lbl = QLabel("Ready — dupla-klikkaa palataksesi")
@@ -4148,6 +4192,7 @@ class App(QWidget):
         super().__init__()
         self.setWindowTitle("Voice Royale")
         self.setGeometry(100, 100, 1320, 820)
+        self.setMinimumWidth(1040)
         icon_path = os.path.join(ASSETS_PATH, "iconimage.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
@@ -4801,7 +4846,7 @@ class App(QWidget):
         self._sb_tabs.setTabsClosable(False)
         self._sb_tabs.setStyleSheet(
             "QTabWidget::pane { border: 1px solid #2a2a2a; border-radius: 8px; background: #121212; }"
-            "QTabBar { margin-right: 84px; }"
+            "QTabBar { margin-right: 232px; }"
             "QTabBar::tab { background: #1E1E1E; color: #666666; padding: 7px 14px;"
             " font-size: 11px; font-weight: 700; letter-spacing: 0.5px;"
             " border: 1px solid #2a2a2a; border-bottom: none; border-radius: 4px 4px 0 0; margin-right: 2px; }"
@@ -4832,13 +4877,13 @@ class App(QWidget):
 
         self._sb_edit_btn = QPushButton("Edit")
         self._sb_edit_btn.setCheckable(True)
-        self._sb_edit_btn.setFixedHeight(24)
+        self._sb_edit_btn.setFixedSize(44, 24)
         self._sb_edit_btn.setToolTip("Muokkaustila: vedä kuva/ääni napin päälle tai oikeaklikkaa")
         self._sb_edit_btn.setStyleSheet(
             "QPushButton { background: #1E1E2A; color: #666688; border: 1px solid #333344;"
-            " border-radius: 4px; font-size: 10px; font-weight: 700; }"
+            " border-radius: 4px; font-size: 10px; font-weight: 700; padding: 0; }"
             "QPushButton:hover:!checked { background: #252535; border-color: #9A4DFF; color: #AAAACC; }"
-            "QPushButton:checked { background: #1A0E00; color: #FF9A00; border: 2px solid #FF9A00; }"
+            "QPushButton:checked { background: #1A0E00; color: #FF9A00; border: 2px solid #FF9A00; padding: 0; }"
         )
         self._sb_edit_btn.toggled.connect(self._sb_toggle_edit_mode)
         _corner_lay.addWidget(self._sb_edit_btn)
@@ -8922,6 +8967,7 @@ class SetupWizard(QDialog):
         self._svc_trans = "google"      # "google" | "deepl" | "openai"
         self._svc_tts = "edge"          # "edge" | "elevenlabs"
         self._svc_routing = "simple"    # "simple" | "gaming"
+        self._svc_mixer = False         # bool — fyysinen mikseri (RodeCaster ym.) → Voicemeeter
         self._svc_streamdeck = False    # bool
         self._svc_ha = False            # bool
         # Wizard HA credentials (saved to settings in _finish_setup)
@@ -8971,9 +9017,10 @@ class SetupWizard(QDialog):
                      self._svc_tts == "elevenlabs")
         if needs_api:
             seq.append(3)  # api keys
-        if self._svc_routing == "gaming":
-            seq.append(4)  # vb-cable
-            seq.append(5)  # voicemeeter
+        if self._svc_mixer:
+            seq.append(5)  # voicemeeter (kattaa myös vb-cablen toiminnon)
+        elif self._svc_routing == "gaming":
+            seq.append(4)  # vb-cable (riittää ilman fyysistä mikseriä)
         if self._svc_streamdeck:
             seq.append(6)  # stream deck
         if self._svc_ha:
@@ -9046,7 +9093,6 @@ class SetupWizard(QDialog):
 
     def _page_services(self):
         from PyQt6.QtWidgets import QRadioButton, QButtonGroup, QFrame, QCheckBox
-        _is_frozen = getattr(sys, "frozen", False)
 
         page = QWidget()
         page.setStyleSheet("background: #0d1117;")
@@ -9120,6 +9166,8 @@ class SetupWizard(QDialog):
             "Peruslaite — kaikilla on tämä.", always_on=True)
         _gw, gaming_cb = _device_row("🎮", "Käytän pelejä tai Discordia",
             "Haluan kuulua peleissä tai Discordissa virtuaalisena mikrofonina.")
+        _mw, mixer_cb = _device_row("🎚️", "Minulla on fyysinen mikseri (esim. RodeCaster Pro 2)",
+            "Chat-mikin ääni pitää sekoittaa käännösääneen ennen peliä/Discordia.")
         _sw, sd_cb = _device_row("🎛️", "Elgato Stream Deck",
             "Fyysiset näppäimet Voice Royalen ohjaukseen.")
         _haw, ha_cb = _device_row("🏠", "Home Assistant",
@@ -9127,6 +9175,7 @@ class SetupWizard(QDialog):
 
         bl.addWidget(_hw)
         bl.addWidget(_gw)
+        bl.addWidget(_mw)
         bl.addWidget(_sw)
         bl.addWidget(_haw)
 
@@ -9142,11 +9191,11 @@ class SetupWizard(QDialog):
         )
         bl.addWidget(s2_lbl)
 
-        _selected_pkg = [1]  # 0=Ilmainen, 1=Suositeltu, 2=Premium
+        _selected_pkg = [0]  # 0=Ilmainen, 1=OpenAI, 2=Premium
 
         _PKGS = [
             {
-                "icon": "🆓", "title": "Ilmainen", "badge": None,
+                "icon": "🆓", "title": "Ilmainen", "badge": "SUOSITELTU",
                 "rows": [
                     ("Puheentunnistus", "Tietokone — offline"),
                     ("Käännös", "Google Translate"),
@@ -9158,7 +9207,7 @@ class SetupWizard(QDialog):
                 "trans": "google", "tts": "edge",
             },
             {
-                "icon": "⭐", "title": "Suositeltu", "badge": "SUOSITELTU",
+                "icon": "⭐", "title": "OpenAI", "badge": None,
                 "rows": [
                     ("Puheentunnistus", "OpenAI — paras laatu"),
                     ("Käännös", "Google Translate (ilmainen)"),
@@ -9355,10 +9404,12 @@ class SetupWizard(QDialog):
                 p = _PKGS[_selected_pkg[0]]
                 stt, trans, tts = p["stt"], p["trans"], p["tts"]
             routing = "gaming" if gaming_cb.isChecked() else "simple"
+            mixer = mixer_cb.isChecked()
             self._svc_stt = stt
             self._svc_trans = trans
             self._svc_tts = tts
             self._svc_routing = routing
+            self._svc_mixer = mixer
             self._svc_streamdeck = sd_cb.isChecked()
             self._svc_ha = ha_cb.isChecked()
             needs = []
@@ -9368,8 +9419,10 @@ class SetupWizard(QDialog):
                 needs.append("ElevenLabs API-avain")
             if stt == "local":
                 needs.append("ffmpeg (ilmainen)")
-            if routing == "gaming":
-                needs.append("VB-Cable + Voicemeeter (ilmaisia)")
+            if mixer:
+                needs.append("Voicemeeter Banana (ilmainen)")
+            elif routing == "gaming":
+                needs.append("VB-Cable (ilmainen)")
             if sd_cb.isChecked():
                 needs.append("Stream Deck -lisäosa")
             if ha_cb.isChecked():
@@ -9402,7 +9455,7 @@ class SetupWizard(QDialog):
             for rb in [stt_local_rb, stt_api_rb, trans_g_rb, trans_d_rb,
                        trans_o_rb, tts_edge_rb, tts_el_rb]:
                 rb.blockSignals(True)
-            if p["stt"] == "local" and not _is_frozen:
+            if p["stt"] == "local":
                 stt_local_rb.setChecked(True)
             else:
                 stt_api_rb.setChecked(True)
@@ -9417,12 +9470,13 @@ class SetupWizard(QDialog):
             _update_summary()
 
         gaming_cb.toggled.connect(lambda *_: _update_summary())
+        mixer_cb.toggled.connect(lambda *_: _update_summary())
         sd_cb.toggled.connect(lambda *_: _update_summary())
         ha_cb.toggled.connect(lambda *_: _update_summary())
         stt_grp.buttonToggled.connect(lambda *_: _update_summary())
         trans_grp.buttonToggled.connect(lambda *_: _update_summary())
         tts_grp.buttonToggled.connect(lambda *_: _update_summary())
-        _select_pkg(1)  # default: Suositeltu
+        _select_pkg(0)  # default: Ilmainen (suositeltu)
 
         bl.addStretch()
         scroll.setWidget(body)
@@ -9917,9 +9971,11 @@ class SetupWizard(QDialog):
         bl.addWidget(self._vbc_status_lbl)
 
         desc = QLabel(
-            "VB-Audio Virtual Cable on ilmainen virtuaaliäänilaite.\n"
-            "Voicemeeter Banana (seuraava vaihe) kattaa saman toiminnon — "
-            "VB-Cablea ei välttämättä tarvita erikseen."
+            "VB-Audio Virtual Cable on ilmainen virtuaaliäänilaite — luo vain "
+            "2 laitetta Windowsiin (CABLE Input + CABLE Output). Riittää useimmille.\n\n"
+            "Jos sinulla on fyysinen mikseri (esim. RodeCaster Pro 2), käytä sen sijaan "
+            "Voicemeeter Bananaa (valitse se edellisellä sivulla) — älä asenna molempia, "
+            "se tuplaa virtuaalilaitteiden määrän Windowsin ääniasetuksissa."
         )
         desc.setStyleSheet(
             "color: #8b949e; font-size: 12px; background: transparent; line-height: 150%;"
@@ -10102,6 +10158,50 @@ class SetupWizard(QDialog):
 
         self._wiz_vm_install_btn.clicked.connect(_do_vm_install)
         bl.addWidget(self._wiz_vm_install_btn)
+
+        if vm_ok:
+            self._wiz_vm_cleanup_btn = QPushButton("Siivoa turhat virtuaalilaitteet")
+            self._wiz_vm_cleanup_btn.setFixedHeight(30)
+            self._wiz_vm_cleanup_btn.setToolTip(
+                "Piilottaa Windowsin ääniasetuksista Voicemeeterin ylimääräiset "
+                "In2-5/AUX/VAIO3/Out A1-A5/Out B2-B3 -laitteet. Vain Voicemeeter Input "
+                "ja Out B1 jäävät näkyviin (näitä Voice Royale käyttää). Palautettavissa "
+                "Laitehallinnasta jos tarvitset niitä myöhemmin."
+            )
+
+            def _do_vm_cleanup():
+                self._wiz_vm_cleanup_btn.setEnabled(False)
+                self._wiz_vm_cleanup_btn.setText("Siivotaan…")
+                import queue as _q_vmc
+                _rq_vmc = _q_vmc.Queue()
+
+                def _cb(msg):
+                    _rq_vmc.put(msg)
+
+                def _poll_vmc():
+                    try:
+                        msg = _rq_vmc.get_nowait()
+                    except Exception:
+                        return
+                    _ptmr_vmc.stop()
+                    self._wiz_vm_status_lbl.setText(msg)
+                    ok = "✅" in msg
+                    self._wiz_vm_status_lbl.setStyleSheet(
+                        f"color: {'#3fb950' if ok else '#f85149'};"
+                        " font-size: 12px; background: transparent;"
+                    )
+                    self._wiz_vm_cleanup_btn.setEnabled(True)
+                    self._wiz_vm_cleanup_btn.setText("Siivoa turhat virtuaalilaitteet")
+
+                _ptmr_vmc = QTimer(self)
+                _ptmr_vmc.timeout.connect(_poll_vmc)
+                _ptmr_vmc.start(200)
+                threading.Thread(
+                    target=_disable_unused_voicemeeter_endpoints, args=(_cb,), daemon=True
+                ).start()
+
+            self._wiz_vm_cleanup_btn.clicked.connect(_do_vm_cleanup)
+            bl.addWidget(self._wiz_vm_cleanup_btn)
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)

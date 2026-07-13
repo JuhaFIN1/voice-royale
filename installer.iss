@@ -29,6 +29,10 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"
 
+[InstallDelete]
+; Remove leftover exe from the pre-rename "AI Voice Router" installs
+Type: files; Name: "{app}\AI Voice Router.exe"
+
 [Files]
 Source: "dist\Voice Royale\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "credentials.env.example"; DestDir: "{app}"; Flags: ignoreversion
