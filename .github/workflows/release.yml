@@ -210,11 +210,15 @@ jobs:
           mkdir -p "dmg_stage/Stream Deck Plugin"
           cp "streamdeck-plugin/com.voiceroyale.streamDeckPlugin" "dmg_stage/Stream Deck Plugin/"
           sleep 2
-          hdiutil create \
-            -volname "Voice Royale" \
-            -srcfolder dmg_stage \
-            -ov -format UDZO \
-            "Voice_Royale_${{ steps.ver.outputs.VERSION }}_macOS_arm64.dmg"
+          for i in 1 2 3 4 5; do
+            hdiutil create \
+              -volname "Voice Royale" \
+              -srcfolder dmg_stage \
+              -ov -format UDZO \
+              "Voice_Royale_${{ steps.ver.outputs.VERSION }}_macOS_arm64.dmg" && break
+            echo "hdiutil create failed (attempt $i), retrying..."
+            sleep 5
+          done
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
@@ -321,11 +325,16 @@ jobs:
           mkdir -p dmg_stage
           cp -r "dist/Voice Royale.app" "dmg_stage/"
           ln -s /Applications "dmg_stage/Applications"
-          hdiutil create \
-            -volname "Voice Royale" \
-            -srcfolder dmg_stage \
-            -ov -format UDZO \
-            "Voice_Royale_${{ steps.ver.outputs.VERSION }}_macOS_x86_64.dmg"
+          sleep 2
+          for i in 1 2 3 4 5; do
+            hdiutil create \
+              -volname "Voice Royale" \
+              -srcfolder dmg_stage \
+              -ov -format UDZO \
+              "Voice_Royale_${{ steps.ver.outputs.VERSION }}_macOS_x86_64.dmg" && break
+            echo "hdiutil create failed (attempt $i), retrying..."
+            sleep 5
+          done
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
