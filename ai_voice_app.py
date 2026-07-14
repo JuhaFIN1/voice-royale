@@ -294,7 +294,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.83"
+APP_VERSION = "1.3.84"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -6750,6 +6750,11 @@ class App(QWidget):
         """Open a lightweight always-on InputStream just for level metering when idle."""
         if self._mic_monitor_stream is not None:
             return
+        if getattr(self, "_voice_fx", None) is not None and self._voice_fx.is_active:
+            # Voice FX already has its own stream open on the same mic —
+            # opening a second one here would grab the device twice and
+            # keep it captured continuously even when nobody is speaking.
+            return
         dev = self.get_selected_input_device()
         if dev is None:
             return
@@ -7023,6 +7028,7 @@ class App(QWidget):
         if in_dev is not None and out_dev is not None:
             mon_dev = self._fx_monitor_combo.currentData()
             hear_on = self._hear_myself_btn.isChecked()
+            self._stop_mic_monitor()
             self._voice_fx.set_monitor(mon_dev, hear_on)
             self._voice_fx.start(in_dev, out_dev)
             self._voice_fx.set_preset(self._current_fx_preset)
@@ -7042,6 +7048,7 @@ class App(QWidget):
         in_dev = self.get_selected_input_device()
         if out_dev is None or in_dev is None:
             self._voice_fx.stop()
+            self._start_mic_monitor()
             self._fx_toggle.setChecked(False)
             self._fx_toggle.setText("Voice FX: OFF")
             self.settings["voice_fx_enabled"] = False
@@ -7051,6 +7058,7 @@ class App(QWidget):
         preset = self._current_fx_preset
         mon_dev = self._fx_monitor_combo.currentData()
         hear_on = self._hear_myself_btn.isChecked()
+        self._stop_mic_monitor()
         self._voice_fx.set_monitor(mon_dev, hear_on)
         self._voice_fx.start(in_dev, out_dev)
         self._voice_fx.set_preset(preset)
@@ -7066,6 +7074,7 @@ class App(QWidget):
                     return
                 mon_dev = self._fx_monitor_combo.currentData()
                 hear_on = self._hear_myself_btn.isChecked()
+                self._stop_mic_monitor()
                 self._voice_fx.set_monitor(mon_dev, hear_on)
                 self._voice_fx.start(in_dev, out_dev)
             self._voice_fx.set_preset(self._current_fx_preset)
@@ -7074,6 +7083,7 @@ class App(QWidget):
             save_settings(self.settings)
         else:
             self._voice_fx.stop()
+            self._start_mic_monitor()
             self._fx_toggle.setText("Voice FX: OFF")
             self.settings["voice_fx_enabled"] = False
             save_settings(self.settings)
