@@ -294,7 +294,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.84"
+APP_VERSION = "1.3.85"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -6723,7 +6723,7 @@ class App(QWidget):
             QTimer.singleShot(0, self.reset_recording_ui)
 
     def reset_recording_ui(self):
-        if not self.wake_listener.is_running():
+        if not self.wake_listener.is_running() and self.isVisible():
             self._start_mic_monitor()
         self.record_button.setEnabled(True)
         self.record_button.setText("🎤  Listen")
@@ -7270,6 +7270,8 @@ class App(QWidget):
         self.showNormal()
         self.activateWindow()
         self.raise_()
+        if not self.wake_listener.is_running():
+            self._start_mic_monitor()
 
     def _quit_from_tray(self):
         self._force_quit = True
@@ -7279,6 +7281,7 @@ class App(QWidget):
         if not getattr(self, "_force_quit", False):
             event.ignore()
             self.hide()
+            self._stop_mic_monitor()
             return
         try:
             if self.wake_listener.is_running():
