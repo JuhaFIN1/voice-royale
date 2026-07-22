@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Juha Lempiäinen. All rights reserved.
+# Copyright (c) 2026 BluexDEV Softwares. All rights reserved.
 # Use permitted. Modification and redistribution of source code prohibited.
 # See LICENSE for full terms.
 
@@ -332,7 +332,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.86"
+APP_VERSION = "1.3.87"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -1819,11 +1819,11 @@ class SoundboardButton(QWidget):
         return line1 + "\n" + line2
 
     # Size class vars — updated by set_size_mode()
-    _BTN_W: int = 96
-    _BTN_H: int = 90
-    _ICON_W: int = 62
-    _ICON_H: int = 46
-    _FONT_SIZE: int = 10
+    _BTN_W: int = 74
+    _BTN_H: int = 70
+    _ICON_W: int = 48
+    _ICON_H: int = 36
+    _FONT_SIZE: int = 9
 
     _STYLE_IDLE = T(
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
@@ -1904,9 +1904,9 @@ class SoundboardButton(QWidget):
             cls._ICON_W, cls._ICON_H = 52, 34
             cls._FONT_SIZE = 8
         else:
-            cls._BTN_W, cls._BTN_H = 96, 90
-            cls._ICON_W, cls._ICON_H = 62, 46
-            cls._FONT_SIZE = 10
+            cls._BTN_W, cls._BTN_H = 74, 70
+            cls._ICON_W, cls._ICON_H = 48, 36
+            cls._FONT_SIZE = 9
         fs = cls._FONT_SIZE
         for attr in ("_STYLE_IDLE", "_STYLE_PLAY", "_STYLE_DRAG", "_STYLE_LINK",
                      "_STYLE_FOLDER", "_STYLE_FOLDER_DRAG", "_STYLE_BACK", "_STYLE_HA"):
@@ -3822,8 +3822,8 @@ class SoundboardPageContainer(QWidget):
     """Soundboard page container — paints colored group backgrounds behind buttons."""
 
     _COLS = 19
-    _BTN_W = 96
-    _BTN_H = 90
+    _BTN_W = 74
+    _BTN_H = 70
     _SPACING = 6
     _MARGIN = 6
     _TOP = 6         # top margin (matches grid.setContentsMargins top)
@@ -3839,8 +3839,8 @@ class SoundboardPageContainer(QWidget):
             cls._MAX_ROW = 4  # 5 rows → max=4
         else:
             cls._COLS = 19
-            cls._BTN_W = 96
-            cls._BTN_H = 90
+            cls._BTN_W = 74
+            cls._BTN_H = 70
             cls._SPACING = 6
             cls._MAX_ROW = 2  # 3 rows → max=2
 
@@ -4587,8 +4587,8 @@ class App(QWidget):
             | Qt.WindowType.WindowMinimizeButtonHint
             | Qt.WindowType.WindowMaximizeButtonHint
         )
-        self.setGeometry(100, 100, 1320, 820)
-        self.setMinimumWidth(1040)
+        self.setGeometry(100, 100, 1560, 900)
+        self.setMinimumWidth(1200)
         icon_path = os.path.join(ASSETS_PATH, "iconimage.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
@@ -5875,20 +5875,50 @@ class App(QWidget):
         self._fx_monitor_combo.clear()
         saved = self.settings.get("voice_fx_monitor_device")
         virtual_kw = ("cable", "voicemeeter", "voicemod", "virtual")
+        junk_kw = ("microsoft sound mapper", "primary sound", "bthhfenum")
+        disabled_names = _windows_disabled_audio_names()
         for i, n in list_output_devices():
-            if not n.startswith("{") and not any(k in n.lower() for k in virtual_kw):
+            nl = n.lower()
+            if (not n.startswith("{") and not any(k in nl for k in virtual_kw)
+                    and not any(k in nl for k in junk_kw)
+                    and not _matches_disabled_name(n, disabled_names)):
                 self._fx_monitor_combo.addItem(f"🎧 {n}", i)
-        target = saved
-        if target is None:
+        target_idx = saved
+        target_name = None
+        if target_idx is None:
+            # sd.default.device -indeksi elää eri ajuri-indeksiavaruudessa kuin
+            # list_output_devices() (joka dedupplikoi nimen perusteella ja pitää
+            # parhaan ajurin indeksin) — täsmäytys täytyy siis tehdä NIMELLÄ,
+            # ei indeksillä, tai oletusvalinta ei koskaan osu mihinkään ja jää
+            # ensimmäiseen listan laitteeseen.
             try:
-                target = sd.default.device[1]
+                target_name = sd.query_devices(sd.default.device[1])["name"].lower().strip()
             except Exception:
-                target = None
-        if target is not None:
+                target_name = None
+        if target_idx is not None:
             for idx in range(self._fx_monitor_combo.count()):
-                if self._fx_monitor_combo.itemData(idx) == target:
+                if self._fx_monitor_combo.itemData(idx) == target_idx:
                     self._fx_monitor_combo.setCurrentIndex(idx)
                     break
+        elif target_name is not None:
+            # Tarkka osuma ensin, sitten prefix-vertailu — Windowsin oletuslaitenimi
+            # voi tulla MME-rajapinnan katkaisemana (~31 merkkiin).
+            _fallback_idx = None
+            for idx in range(self._fx_monitor_combo.count()):
+                item_dev_idx = self._fx_monitor_combo.itemData(idx)
+                try:
+                    item_name = sd.query_devices(item_dev_idx)["name"].lower().strip()
+                except Exception:
+                    continue
+                if item_name == target_name:
+                    self._fx_monitor_combo.setCurrentIndex(idx)
+                    break
+                cmp = min(len(item_name), len(target_name))
+                if _fallback_idx is None and cmp >= 16 and item_name[:cmp] == target_name[:cmp]:
+                    _fallback_idx = idx
+            else:
+                if _fallback_idx is not None:
+                    self._fx_monitor_combo.setCurrentIndex(_fallback_idx)
         _fit_combo_dropdown(self._fx_monitor_combo)
 
     def _on_fx_monitor_device_changed(self):
@@ -7031,12 +7061,13 @@ class App(QWidget):
         QMessageBox.information(
             self, "Voice Royale",
             "Voice Royale — AI Voice Translation\n"
-            "© 2026 Juha Lempiäinen. All rights reserved.\n\n"
+            "© 2026 BluexDEV Softwares. All rights reserved.\n\n"
             "Speech-to-text: OpenAI Whisper\n"
             "Translation: GPT-4.1-mini\n"
             "TTS: Edge TTS (free) / ElevenLabs\n"
             "Voice FX: pyrubberband / scipy\n"
-            "Stream Deck: Elgato StreamDeck SDK"
+            "Stream Deck: Elgato StreamDeck SDK\n\n"
+            "Tuki: asiakaspalvelu@selaa.fi"
         )
 
     def update_mic_level(self, peak: float):
@@ -7224,6 +7255,16 @@ class App(QWidget):
     # ============ Voice FX ============
 
     _FX_AUTO_OUTPUT_KEYWORDS = ("voicemeeter", "vb-audio", "vb cable", "cable")
+    # Kanoniset laitenimet joihin wizard OIKEASTI reitittää chat-äänen
+    # (_voicemeeter_configure: Strip[2] "Voicemeeter Input" -> B1; VB-Cable: "CABLE Input").
+    # Jos käyttäjällä on useampi virtuaalikaapeli valittuna Output-laitteissa (esim.
+    # Voicemeeter Potato -asennuksella "VAIO3 Input" + "Voicemeeter Input"), näiden
+    # täsmällinen nimi käy AINA ennen löysää avainsanaosumaa, ettei Voice FX päädy
+    # kanavaan jota mikään reititys ei oikeasti kuuntele.
+    _FX_CANONICAL_OUTPUT_NAMES = (
+        "voicemeeter input (vb-audio voicemeeter vaio)",
+        "cable input (vb-audio virtual cable)",
+    )
 
     def _get_auto_fx_output_device(self):
         """Voice FX always feeds the same chat-facing virtual cable already picked
@@ -7238,6 +7279,12 @@ class App(QWidget):
             names = dict(list_output_devices())
         except Exception:
             return None
+        # 1. Täsmällinen kanoninen nimi ensin — se johon Voicemeeter/VB-Cable-reititys
+        #    on oikeasti kytketty, vaikka listalla olisi muitakin virtuaalikaapeleita.
+        for idx in selected:
+            if names.get(idx, "").lower() in self._FX_CANONICAL_OUTPUT_NAMES:
+                return idx
+        # 2. Fallback: löysä avainsanaosuma (esim. epätavallinen VB-Cable-laitenimi).
         for idx in selected:
             name = names.get(idx, "")
             if any(k in name.lower() for k in self._FX_AUTO_OUTPUT_KEYWORDS):
@@ -7714,7 +7761,7 @@ class App(QWidget):
 # =========================
 def open_settings_dialog(parent_app: "App") -> None:
     """Open the settings dialog and apply changes if the user clicks Save."""
-    global OPENAI_API_KEY, client
+    global OPENAI_API_KEY, client, ELEVEN_API_KEY, VOICE_ID
     from PyQt6.QtWidgets import (
         QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QFileDialog, QScrollArea,
         QComboBox as _QComboBox, QPushButton as _QPushButton, QHBoxLayout as _QHBoxLayout,
@@ -7820,61 +7867,47 @@ def open_settings_dialog(parent_app: "App") -> None:
         return w, edit
 
     # ══════════════════════════════════════════════════════════════════
-    # TAB 1 — Käännös & Ääni
+    # 5 välilehteä: Yleiset / API-avaimet / Puhe & Kielet / Stream Deck & HA / Huolto
     # ══════════════════════════════════════════════════════════════════
-    f1 = _make_form()
-    f1.addRow(_header("Käännösmoottori"))
+    f_general = _make_form()
+    f_apikeys = _make_form()
+    f_speech = _make_form()
+    f_maint = _make_form()
+
+    # ---- Yleiset: Kääntäminen ----
+    f_general.addRow(_header("Kääntäminen"))
 
     trans_backend_combo = _QComboBox()
     for b in ("Google (free)", "DeepL", "OpenAI"):
         trans_backend_combo.addItem(b)
     trans_backend_combo.setCurrentText(settings.get("translation_backend", "Google (free)"))
-    f1.addRow(_lbl("Käännösmoottori:"), trans_backend_combo)
-    f1.addRow("", _desc(
+    f_general.addRow(_lbl("Käännösmoottori:"), trans_backend_combo)
+    f_general.addRow("", _desc(
         "Google (free) — ei tarvitse API-avainta, toimii heti.\n"
-        "DeepL — laadukas käännös, vaatii ilmaisen avaimen (deepl.com).\n"
-        "OpenAI — GPT-4.1-mini, vaatii maksullisen OpenAI-avaimen."
+        "DeepL — laadukas käännös, vaatii ilmaisen avaimen (Asetukset → API-avaimet).\n"
+        "OpenAI — GPT-4.1-mini, vaatii maksullisen OpenAI-avaimen (Asetukset → API-avaimet)."
     ))
 
-    api_key_widget, api_key_edit = _secret_row(OPENAI_API_KEY, "sk-...")
-    f1.addRow(_lbl("OpenAI API-avain:"), api_key_widget)
-    f1.addRow("", _desc(
-        "Tarvitaan puheentunnistukseen (Whisper) ja käännökseen kun moottori = OpenAI.\n"
-        "Hae avain: platform.openai.com/api-keys  •  Tallennetaan credentials.env-tiedostoon."
+    lang_combo = _QComboBox()
+    for lang in LANGS.keys():
+        lang_combo.addItem(lang)
+    lang_combo.setCurrentText(settings.get("default_target_lang", "Auto"))
+    f_general.addRow(_lbl("Oletuskohde­kieli:"), lang_combo)
+    f_general.addRow("", _desc(
+        "Kieli, jolle teksti tai puhe käännetään oletuksena. "
+        "'Auto' tunnistaa puhutun kielen ja kääntää englanniksi. "
+        "Voit vaihtaa kielen myös pääikkunassa lennossa."
     ))
 
-    deepl_key_widget, deepl_key_edit = _secret_row(
-        settings.get("deepl_api_key", ""), "DeepL API-avain — päättyy :fx (ilmainen)"
-    )
-    f1.addRow(_lbl("DeepL API-avain:"), deepl_key_widget)
-    f1.addRow("", _desc(
-        "Ilmainen avain: rekisteröidy osoitteessa deepl.com/pro#developer → Authentication Key.\n"
-        "Ilmainen tili: 500 000 merkkiä/kk. Avain päättyy :fx."
-    ))
-
-    def _update_deepl_visibility():
-        is_deepl = trans_backend_combo.currentText() == "DeepL"
-        deepl_key_widget.setVisible(is_deepl)
-    trans_backend_combo.currentTextChanged.connect(lambda _: _update_deepl_visibility())
-    _update_deepl_visibility()
-
-    pixabay_key_widget, pixabay_key_edit = _secret_row(
-        settings.get("pixabay_api_key", ""), "Pixabay API-avain"
-    )
-    f1.addRow(_lbl("Pixabay API-avain:"), pixabay_key_widget)
-    f1.addRow("", _desc(
-        "Kuvahaku soundboard-napeille. Ilmainen, 500 pyyntöä/tunti.\n"
-        "Rekisteröidy: pixabay.com → API → Get API Key."
-    ))
-
-    f1.addRow(_header("Puheentunnistus (STT)"))
+    # ---- Yleiset: Puheentunnistus (STT) ----
+    f_general.addRow(_header("Puheentunnistus (STT)"))
 
     stt_backend_combo = _QComboBox()
     for b in ("OpenAI Whisper API", "Local Whisper (tiny)", "Local Whisper (base)", "Local Whisper (small)"):
         stt_backend_combo.addItem(b)
     stt_backend_combo.setCurrentText(settings.get("stt_backend", "OpenAI Whisper API"))
-    f1.addRow(_lbl("STT-moottori:"), stt_backend_combo)
-    f1.addRow("", _desc(
+    f_general.addRow(_lbl("STT-moottori:"), stt_backend_combo)
+    f_general.addRow("", _desc(
         "OpenAI Whisper API — pilvipalvelu, hyvä laatu, vaatii maksullisen OpenAI-avaimen.\n"
         "Local Whisper — ilmainen, offline, CPU-pohjainen (faster-whisper). tiny=75MB, base=145MB, small=460MB.\n"
         "Paikallinen malli ladataan automaattisesti ensimmäisellä käyttökerralla."
@@ -7886,103 +7919,141 @@ def open_settings_dialog(parent_app: "App") -> None:
         if _sl != "Auto":
             stt_src_lang_combo.addItem(_sl)
     stt_src_lang_combo.setCurrentText(settings.get("stt_source_language", "Finnish"))
-    f1.addRow(_lbl("Lähde­kieli:"), stt_src_lang_combo)
-    f1.addRow("", _desc(
+    f_general.addRow(_lbl("Lähde­kieli:"), stt_src_lang_combo)
+    f_general.addRow("", _desc(
         "Kieli, jolla puhut mikrofoniin.\n"
         "'Auto (tunnistaa)' — Whisper tunnistaa kielen automaattisesti (suositeltu).\n"
         "Aseta tietty kieli vain jos tunnistus on toistuvasti väärä."
     ))
 
-    stt_latency_label = _lbl("—")
-
-    def _refresh_stt_latency():
-        ms = getattr(parent_app, "_last_stt_latency_ms", None)
-        stt_latency_label.setText(f"{ms:.0f} ms" if ms is not None else "—")
-
-    stt_latency_timer = QTimer(dlg)
-    stt_latency_timer.timeout.connect(_refresh_stt_latency)
-    stt_latency_timer.start(1000)
-    _refresh_stt_latency()
-    f1.addRow(_lbl("Viimeisin vasteaika:"), stt_latency_label)
-
-    f1.addRow(_header("Subtitle Overlay"))
-
-    overlay_font_spin = QDoubleSpinBox()
-    overlay_font_spin.setRange(10, 48)
-    overlay_font_spin.setSingleStep(2)
-    overlay_font_spin.setDecimals(0)
-    overlay_font_spin.setValue(float(settings.get("overlay_font_size", 16)))
-    overlay_font_spin.setMaximumWidth(80)
-    overlay_font_spin.setStyleSheet(
-        "QDoubleSpinBox { background: #0a0f1e; color: #dce6ff; border: 1px solid #333;"
-        " border-radius: 4px; padding: 2px 6px; }"
-    )
-    f1.addRow(_lbl("Tekstikoko (px):"), overlay_font_spin)
-    f1.addRow("", _desc(
-        "Kelluvan tekstityksen fonttikoko. CC-napista päälle/pois.\n"
-        "Raahaa overlay haluamaasi kohtaan näyttöä."
-    ))
-
-    noise_gate_spin = QDoubleSpinBox()
-    noise_gate_spin.setRange(0.0, 0.05)
-    noise_gate_spin.setSingleStep(0.005)
-    noise_gate_spin.setDecimals(3)
-    noise_gate_spin.setValue(float(settings.get("noise_gate_threshold", 0.0)))
-    noise_gate_spin.setMaximumWidth(120)
-    noise_gate_spin.setStyleSheet(
-        "QDoubleSpinBox { background: #0a0f1e; color: #dce6ff; border: 1px solid #333;"
-        " border-radius: 4px; padding: 2px 6px; }"
-    )
-    f1.addRow(_lbl("Noise gate:"), noise_gate_spin)
-    f1.addRow("", _desc(
-        "Äänenvoimakkuuden alaraja — alle jäävät tallennukset ohitetaan eikä Whisperille lähetetä.\n"
-        "0.000 = pois päältä. Kokeile 0.010–0.020 suodattamaan hiljaiset tallennukset."
-    ))
-
-    auto_stop_spin = QDoubleSpinBox()
-    auto_stop_spin.setRange(0.0, 10.0)
-    auto_stop_spin.setSingleStep(0.5)
-    auto_stop_spin.setDecimals(1)
-    auto_stop_spin.setValue(float(settings.get("auto_stop_silence", 2.0)))
-    auto_stop_spin.setMaximumWidth(120)
-    auto_stop_spin.setStyleSheet(
-        "QDoubleSpinBox { background: #0a0f1e; color: #dce6ff; border: 1px solid #333;"
-        " border-radius: 4px; padding: 2px 6px; }"
-    )
-    f1.addRow(_lbl("Auto-stop (s):"), auto_stop_spin)
-    f1.addRow("", _desc(
-        "Sekuntia hiljaisuutta ennen kuin tallennus pysähtyy automaattisesti.\n"
-        "0.0 = pois päältä. Suositeltu: 2.0 s."
-    ))
-
-    f1.addRow(_header("Puhesynteesi (TTS)"))
+    # ---- Yleiset: Puhesynteesi (TTS) ----
+    f_general.addRow(_header("Puhesynteesi (TTS)"))
 
     backend_combo = _QComboBox()
     for b in ("Edge TTS (free)", "ElevenLabs"):
         backend_combo.addItem(b)
     backend_combo.setCurrentText(settings.get("default_tts_backend", DEFAULT_TTS_BACKEND))
-    f1.addRow(_lbl("TTS-moottori:"), backend_combo)
-    f1.addRow("", _desc(
+    f_general.addRow(_lbl("TTS-moottori:"), backend_combo)
+    f_general.addRow("", _desc(
         "Edge TTS (free) — Microsoftin neuraaliäänet, ei tiliä tarvita, hyvä laatu.\n"
-        "ElevenLabs — erittäin realistinen AI-ääni, vaatii maksullisen tilin ja API-avaimen."
+        "ElevenLabs — erittäin realistinen AI-ääni, vaatii maksullisen tilin ja API-avaimen (Asetukset → API-avaimet)."
     ))
 
-    lang_combo = _QComboBox()
-    for lang in LANGS.keys():
-        lang_combo.addItem(lang)
-    lang_combo.setCurrentText(settings.get("default_target_lang", "Auto"))
-    f1.addRow(_lbl("Oletuskohde­kieli:"), lang_combo)
-    f1.addRow("", _desc(
-        "Kieli, jolle teksti tai puhe käännetään oletuksena. "
-        "'Auto' tunnistaa puhutun kielen ja kääntää englanniksi. "
-        "Voit vaihtaa kielen myös pääikkunassa lennossa."
+    # ---- Yleiset: Pikanäppäin ----
+    f_general.addRow(_header("Pikanäppäin"))
+
+    hotkey_edit = QLineEdit(settings.get("hotkey", "ctrl+alt+space"))
+    hotkey_edit.setPlaceholderText("esim. ctrl+alt+space")
+    hotkey_edit.setMaximumWidth(220)
+    f_general.addRow(_lbl("Global hotkey:"), hotkey_edit)
+    f_general.addRow("", _desc(
+        "Pikanäppäin, joka toistaa tekstiruudun sisällön vaikka ikkuna on taustalla. "
+        "Käytä nimiä: ctrl, alt, shift, space, f1–f12. Yhdistä +-merkillä (esim. ctrl+alt+space). "
+        "Vältä OS:n tai pelin omia pikanäppäimiä."
+    ))
+
+    # ---- Yleiset: Käynnistys ----
+    f_general.addRow(_header("Käynnistys"))
+
+    if sys.platform == "win32":
+        _is_frozen = getattr(sys, "frozen", False)
+        _autostart_on, _minimized_on = _get_autostart_state()
+
+        autostart_chk = QCheckBox("Käynnisty Windowsin mukana")
+        autostart_chk.setChecked(_autostart_on)
+        autostart_chk.setEnabled(_is_frozen)
+        autostart_chk.setStyleSheet("color: #dce6ff; background: transparent;")
+
+        minimized_chk = QCheckBox("Käynnisty pienennettynä")
+        minimized_chk.setChecked(_minimized_on)
+        minimized_chk.setEnabled(_is_frozen and _autostart_on)
+        minimized_chk.setStyleSheet("color: #dce6ff; background: transparent;")
+
+        def _on_autostart_chk(_state):
+            enabled = autostart_chk.isChecked()
+            minimized_chk.setEnabled(enabled)
+            _apply_autostart(enabled, minimized_chk.isChecked())
+
+        def _on_minimized_chk(_state):
+            _apply_autostart(autostart_chk.isChecked(), minimized_chk.isChecked())
+
+        autostart_chk.stateChanged.connect(_on_autostart_chk)
+        minimized_chk.stateChanged.connect(_on_minimized_chk)
+
+        f_general.addRow(_lbl("Autostart:"), autostart_chk)
+        f_general.addRow("", minimized_chk)
+        if not _is_frozen:
+            f_general.addRow("", _desc("Autostart ei toimi kehitysmoodissa — rakenna ensin exe-tiedosto."))
+        else:
+            f_general.addRow("", _desc("Muutos astuu voimaan heti — tallentaminen ei tarvita."))
+
+    # ══════════════════════════════════════════════════════════════════
+    # API-avaimet
+    # ══════════════════════════════════════════════════════════════════
+    f_apikeys.addRow(_header("OpenAI"))
+
+    api_key_widget, api_key_edit = _secret_row(OPENAI_API_KEY, "sk-...")
+    f_apikeys.addRow(_lbl("API-avain:"), api_key_widget)
+    f_apikeys.addRow("", _desc(
+        "Tarvitaan puheentunnistukseen (Whisper) ja käännökseen kun moottori = OpenAI.\n"
+        "Hae avain: platform.openai.com/api-keys  •  Tallennetaan credentials.env-tiedostoon."
+    ))
+
+    f_apikeys.addRow(_header("ElevenLabs"))
+
+    eleven_key_widget, eleven_key_edit = _secret_row(ELEVEN_API_KEY, "ElevenLabs API-avain")
+    f_apikeys.addRow(_lbl("API-avain:"), eleven_key_widget)
+    voice_id_edit = QLineEdit(VOICE_ID)
+    voice_id_edit.setPlaceholderText("Voice ID (elevenlabs.io → Voices → kopioi ID)")
+    f_apikeys.addRow(_lbl("Voice ID:"), voice_id_edit)
+    f_apikeys.addRow("", _desc(
+        "Tarvitaan vain jos TTS-moottori = ElevenLabs (Asetukset → Yleiset).\n"
+        "Hae avain ja Voice ID osoitteesta elevenlabs.io  •  Tallennetaan credentials.env-tiedostoon."
+    ))
+
+    f_apikeys.addRow(_header("DeepL"))
+
+    deepl_key_widget, deepl_key_edit = _secret_row(
+        settings.get("deepl_api_key", ""), "DeepL API-avain — päättyy :fx (ilmainen)"
+    )
+    f_apikeys.addRow(_lbl("API-avain:"), deepl_key_widget)
+    f_apikeys.addRow("", _desc(
+        "Ilmainen avain: rekisteröidy osoitteessa deepl.com/pro#developer → Authentication Key.\n"
+        "Ilmainen tili: 500 000 merkkiä/kk. Avain päättyy :fx."
+    ))
+
+    def _update_deepl_visibility():
+        is_deepl = trans_backend_combo.currentText() == "DeepL"
+        deepl_key_widget.setVisible(is_deepl)
+    trans_backend_combo.currentTextChanged.connect(lambda _: _update_deepl_visibility())
+    _update_deepl_visibility()
+
+    f_apikeys.addRow(_header("Pixabay"))
+
+    pixabay_key_widget, pixabay_key_edit = _secret_row(
+        settings.get("pixabay_api_key", ""), "Pixabay API-avain"
+    )
+    f_apikeys.addRow(_lbl("API-avain:"), pixabay_key_widget)
+    f_apikeys.addRow("", _desc(
+        "Kuvahaku soundboard-napeille. Ilmainen, 500 pyyntöä/tunti.\n"
+        "Rekisteröidy: pixabay.com → API → Get API Key."
+    ))
+
+    f_apikeys.addRow(_header("Picovoice (valinnainen — ilmainen)"))
+
+    access_key_edit = QLineEdit(settings.get("picovoice_access_key", ""))
+    access_key_edit.setPlaceholderText("Liitä ilmainen avain osoitteesta console.picovoice.ai")
+    f_apikeys.addRow(_lbl("AccessKey:"), access_key_edit)
+    f_apikeys.addRow("", _desc(
+        "Ilmainen henkilökohtainen avain — console.picovoice.ai (ei luottokorttia tarvita).\n"
+        "Mahdollistaa Porcupine offline -aktivointisanatunnistuksen: välitön vaste, ei nettiä tarvita.\n"
+        "Jätä tyhjäksi käyttääksesi Whisper-pohjaista tunnistusta. Wake-sana: Puhe & Kielet -välilehti."
     ))
 
     # ══════════════════════════════════════════════════════════════════
-    # TAB 2 — Wake Word
+    # Puhe & Kielet
     # ══════════════════════════════════════════════════════════════════
-    f2 = _make_form()
-    f2.addRow(_header("Aktivointisana"))
+    f_speech.addRow(_header("Aktivointisana (Wake Word)"))
 
     _BUILTIN_KEYWORDS = [
         "jarvis", "alexa", "computer", "hey google", "hey siri",
@@ -8007,33 +8078,22 @@ def open_settings_dialog(parent_app: "App") -> None:
     def _get_keyword():
         return keyword_combo.currentText().strip().lower() or "jarvis"
 
-    f2.addRow(_lbl("Wake-sana:"), keyword_combo)
-    f2.addRow("", _desc(
+    f_speech.addRow(_lbl("Wake-sana:"), keyword_combo)
+    f_speech.addRow("", _desc(
         "Sana, jonka sanominen käynnistää hands-free-äänityksen.\n"
         "Valitse listasta tai kirjoita oma — suomen kielen sanat toimivat myös (esim. 'hei tietokone').\n"
         "Ilman Picovoice-avainta käytetään Whisperia tunnistukseen (pieni viive, toimii offline).\n"
-        "Picovoice-avaimella (ilmainen) Porcupine tunnistaa sanan välittömästi ilman CPU-kuormaa."
+        "Picovoice-avaimella (Asetukset → API-avaimet) Porcupine tunnistaa sanan välittömästi ilman CPU-kuormaa."
     ))
 
     seconds_edit = QLineEdit(str(settings.get("wake_command_seconds", 6.0)))
     seconds_edit.setPlaceholderText("esim. 6.0")
     seconds_edit.setMaximumWidth(120)
-    f2.addRow(_lbl("Tallennusaika (s):"), seconds_edit)
-    f2.addRow("", _desc(
+    f_speech.addRow(_lbl("Tallennusaika (s):"), seconds_edit)
+    f_speech.addRow("", _desc(
         "Kuinka monta sekuntia äänitetään wake-sanan jälkeen. "
         "Kasvata (esim. 10 s) pitkille lauseille tai hitaalle puheelle. "
         "Laske (esim. 3 s) nopeiden yksisanaisten komentojen käyttöön."
-    ))
-
-    f2.addRow(_header("Picovoice (valinnainen — ilmainen)"))
-
-    access_key_edit = QLineEdit(settings.get("picovoice_access_key", ""))
-    access_key_edit.setPlaceholderText("Liitä ilmainen avain osoitteesta console.picovoice.ai")
-    f2.addRow(_lbl("Picovoice AccessKey:"), access_key_edit)
-    f2.addRow("", _desc(
-        "Ilmainen henkilökohtainen avain — console.picovoice.ai (ei luottokorttia tarvita).\n"
-        "Mahdollistaa Porcupine offline -aktivointisanatunnistuksen: välitön vaste, ei nettiä tarvita.\n"
-        "Jätä tyhjäksi käyttääksesi Whisper-pohjaista tunnistusta."
     ))
 
     ppn_row = _QHBoxLayout()
@@ -8051,23 +8111,70 @@ def open_settings_dialog(parent_app: "App") -> None:
     ppn_row.addWidget(browse_btn)
     custom_widget = QWidget()
     custom_widget.setLayout(ppn_row)
-    f2.addRow(_lbl("Oma .ppn-tiedosto:"), custom_widget)
-    f2.addRow("", _desc(
+    f_speech.addRow(_lbl("Oma .ppn-tiedosto:"), custom_widget)
+    f_speech.addRow("", _desc(
         "OMA AKTIVOINTISANA (.ppn):\n"
         "1. Luo ilmainen tili: console.picovoice.ai\n"
         "2. Porcupine → Train a custom model\n"
         "3. Kirjoita haluamasi aktivointifraasi (esim. 'hey router', 'aloita')\n"
         "4. Valitse alusta: Windows → Train → lataa .ppn-tiedosto\n"
-        "5. Liitä Picovoice AccessKey yllä, selaa .ppn-tiedosto tähän\n"
+        "5. Liitä Picovoice AccessKey Asetukset → API-avaimet -välilehdellä, selaa .ppn-tiedosto tähän\n"
         "6. Tallenna asetukset ja paina Start Listening"
     ))
 
-    # ══════════════════════════════════════════════════════════════════
-    # TAB 3 — Kielet
-    # ══════════════════════════════════════════════════════════════════
-    f3 = _make_form()
-    f3.addRow(_header("Mukautetut kielet"))
-    f3.addRow("", _desc(
+    f_speech.addRow(_header("Tekstitys ja herkkyys"))
+
+    overlay_font_spin = QDoubleSpinBox()
+    overlay_font_spin.setRange(10, 48)
+    overlay_font_spin.setSingleStep(2)
+    overlay_font_spin.setDecimals(0)
+    overlay_font_spin.setValue(float(settings.get("overlay_font_size", 16)))
+    overlay_font_spin.setMaximumWidth(80)
+    overlay_font_spin.setStyleSheet(
+        "QDoubleSpinBox { background: #0a0f1e; color: #dce6ff; border: 1px solid #333;"
+        " border-radius: 4px; padding: 2px 6px; }"
+    )
+    f_speech.addRow(_lbl("Tekstikoko (px):"), overlay_font_spin)
+    f_speech.addRow("", _desc(
+        "Kelluvan tekstityksen fonttikoko. CC-napista päälle/pois.\n"
+        "Raahaa overlay haluamaasi kohtaan näyttöä."
+    ))
+
+    noise_gate_spin = QDoubleSpinBox()
+    noise_gate_spin.setRange(0.0, 0.05)
+    noise_gate_spin.setSingleStep(0.005)
+    noise_gate_spin.setDecimals(3)
+    noise_gate_spin.setValue(float(settings.get("noise_gate_threshold", 0.0)))
+    noise_gate_spin.setMaximumWidth(120)
+    noise_gate_spin.setStyleSheet(
+        "QDoubleSpinBox { background: #0a0f1e; color: #dce6ff; border: 1px solid #333;"
+        " border-radius: 4px; padding: 2px 6px; }"
+    )
+    f_speech.addRow(_lbl("Noise gate:"), noise_gate_spin)
+    f_speech.addRow("", _desc(
+        "Äänenvoimakkuuden alaraja — alle jäävät tallennukset ohitetaan eikä Whisperille lähetetä.\n"
+        "0.000 = pois päältä. Kokeile 0.010–0.020 suodattamaan hiljaiset tallennukset."
+    ))
+
+    auto_stop_spin = QDoubleSpinBox()
+    auto_stop_spin.setRange(0.0, 10.0)
+    auto_stop_spin.setSingleStep(0.5)
+    auto_stop_spin.setDecimals(1)
+    auto_stop_spin.setValue(float(settings.get("auto_stop_silence", 2.0)))
+    auto_stop_spin.setMaximumWidth(120)
+    auto_stop_spin.setStyleSheet(
+        "QDoubleSpinBox { background: #0a0f1e; color: #dce6ff; border: 1px solid #333;"
+        " border-radius: 4px; padding: 2px 6px; }"
+    )
+    f_speech.addRow(_lbl("Auto-stop (s):"), auto_stop_spin)
+    f_speech.addRow("", _desc(
+        "Sekuntia hiljaisuutta ennen kuin tallennus pysähtyy automaattisesti.\n"
+        "0.0 = pois päältä. Suositeltu: 2.0 s."
+    ))
+
+
+    f_speech.addRow(_header("Mukautetut kielet"))
+    f_speech.addRow("", _desc(
         "Lisää kieliä, jotka eivät ole vakiolistassa. Nimi näkyy Kohde-valikossa. "
         "Koodi = 2-kirjaiminen maakoodi lipulle (esim. pt, br, ar). "
         "Edge TTS -ääni: tarkka ääni-ID osoitteesta learn.microsoft.com  "
@@ -8080,7 +8187,7 @@ def open_settings_dialog(parent_app: "App") -> None:
     for entry in custom_langs:
         n, c, v = entry.get("name", ""), entry.get("country_code", ""), entry.get("edge_voice", "")
         custom_list.addItem(f"{n}  |  {c}  |  {v}" if v else f"{n}  |  {c}")
-    f3.addRow("", custom_list)
+    f_speech.addRow("", custom_list)
 
     add_row = _QHBoxLayout()
     add_row.setSpacing(6)
@@ -8124,25 +8231,9 @@ def open_settings_dialog(parent_app: "App") -> None:
     add_row.addWidget(remove_btn)
     add_widget = QWidget()
     add_widget.setLayout(add_row)
-    f3.addRow("", add_widget)
+    f_speech.addRow("", add_widget)
 
-    # ══════════════════════════════════════════════════════════════════
-    # TAB 4 — Pikavalinnat & Data
-    # ══════════════════════════════════════════════════════════════════
-    f4 = _make_form()
-    f4.addRow(_header("Pikanäppäin"))
-
-    hotkey_edit = QLineEdit(settings.get("hotkey", "ctrl+alt+space"))
-    hotkey_edit.setPlaceholderText("esim. ctrl+alt+space")
-    hotkey_edit.setMaximumWidth(220)
-    f4.addRow(_lbl("Global hotkey:"), hotkey_edit)
-    f4.addRow("", _desc(
-        "Pikanäppäin, joka toistaa tekstiruudun sisällön vaikka ikkuna on taustalla. "
-        "Käytä nimiä: ctrl, alt, shift, space, f1–f12. Yhdistä +-merkillä (esim. ctrl+alt+space). "
-        "Vältä OS:n tai pelin omia pikanäppäimiä."
-    ))
-
-    f4.addRow(_header("Varmuuskopio"))
+    f_maint.addRow(_header("Varmuuskopio"))
 
     _DATA_FILES = ["app_settings.json", "speech_history.json", "credentials.env"]
     _DATA_DIRS  = ["soundboard", "favorites_audio"]
@@ -8290,14 +8381,14 @@ def open_settings_dialog(parent_app: "App") -> None:
     _io_row.addStretch()
     _io_widget = QWidget()
     _io_widget.setLayout(_io_row)
-    f4.addRow("", _io_widget)
-    f4.addRow("", _desc(
+    f_maint.addRow("", _io_widget)
+    f_maint.addRow("", _desc(
         "Vie data — valitse: Kaikki / Asetukset & historia / Soundboard.\n"
         "Tuo data — valitse mitä tuodaan. Soundboard-tuonti ei korvaa muita asetuksia."
     ))
 
     # ══════════════════════════════════════════════════════════════════
-    # TAB 5 — Stream Deck
+    # TAB — Stream Deck (yhdistetään Home Assistantin kanssa myöhemmin)
     # ══════════════════════════════════════════════════════════════════
     # ── Stream Deck plugin info panel ──
     sd_port = StreamDeckHttpServer.PORT
@@ -8445,10 +8536,8 @@ def open_settings_dialog(parent_app: "App") -> None:
         except Exception:
             return False, ""
 
-    f6 = _make_form()
-
-    # ---- Käynnistys ----
-    f6.addRow(_header("Käynnistys"))
+    # ---- Asennusvelho ----
+    f_maint.addRow(_header("Asennusvelho"))
 
     wizard_btn = _QPushButton("Aja alkuasennus uudelleen (Setup Wizard)")
 
@@ -8475,183 +8564,107 @@ def open_settings_dialog(parent_app: "App") -> None:
         parent_app._start_mic_monitor()
 
     wizard_btn.clicked.connect(_run_wizard_again)
-    f6.addRow(_lbl("Setup Wizard:"), wizard_btn)
-    f6.addRow("", _desc("Avaa alkuasennus uudelleen — voit vaihtaa API-avaimia ja laiteasetuksia."))
+    f_maint.addRow(_lbl("Setup Wizard:"), wizard_btn)
+    f_maint.addRow("", _desc(
+        "Avaa alkuasennus uudelleen — voit vaihtaa API-avaimia, laiteasetuksia ja chat-reititystä."
+    ))
 
-    if sys.platform == "win32":
-        _is_frozen = getattr(sys, "frozen", False)
-        _autostart_on, _minimized_on = _get_autostart_state()
+    # ---- Python-paketit — vain kehitystilassa, exe:ssä kaikki on jo bundlattu ----
+    if not getattr(sys, "frozen", False):
+        f_maint.addRow(_header("Python-paketit (kehitystila)"))
 
-        autostart_chk = QCheckBox("Käynnisty Windowsin mukana")
-        autostart_chk.setChecked(_autostart_on)
-        autostart_chk.setEnabled(_is_frozen)
-        autostart_chk.setStyleSheet("color: #dce6ff; background: transparent;")
+        def _pip_install_pkg(pip_name: str, icon_lbl, name_lbl, install_btn):
+            import queue as _q_pip
+            _rq_pip = _q_pip.Queue()
 
-        minimized_chk = QCheckBox("Käynnisty pienennettynä")
-        minimized_chk.setChecked(_minimized_on)
-        minimized_chk.setEnabled(_is_frozen and _autostart_on)
-        minimized_chk.setStyleSheet("color: #dce6ff; background: transparent;")
-
-        def _on_autostart_chk(_state):
-            enabled = autostart_chk.isChecked()
-            minimized_chk.setEnabled(enabled)
-            _apply_autostart(enabled, minimized_chk.isChecked())
-
-        def _on_minimized_chk(_state):
-            _apply_autostart(autostart_chk.isChecked(), minimized_chk.isChecked())
-
-        autostart_chk.stateChanged.connect(_on_autostart_chk)
-        minimized_chk.stateChanged.connect(_on_minimized_chk)
-
-        f6.addRow(_lbl("Autostart:"), autostart_chk)
-        f6.addRow("", minimized_chk)
-        if not _is_frozen:
-            f6.addRow("", _desc("Autostart ei toimi kehitysmoodissa — rakenna ensin exe-tiedosto."))
-        else:
-            f6.addRow("", _desc("Muutos astuu voimaan heti — tallentaminen ei tarvita."))
-
-    f6.addRow(_header("Python-paketit"))
-
-    def _pip_install_pkg(pip_name: str, icon_lbl, name_lbl, install_btn):
-        if getattr(sys, "frozen", False):
-            install_btn.setText(f"pip install {pip_name}")
-            install_btn.setToolTip(
-                f"EXE-tilassa automaattinen asennus ei ole mahdollista.\n"
-                f"Avaa terminaali ja aja: pip install {pip_name}"
-            )
-            import subprocess as _sp_frozen
-            def _open_terminal_cmd(pn=pip_name):
-                _sp_frozen.Popen(
-                    ["cmd", "/k", f"pip install {pn}"],
-                    creationflags=getattr(_sp_frozen, "CREATE_NEW_CONSOLE", 0)
+            def _run():
+                import subprocess as _sp
+                ret = _sp.run(
+                    [sys.executable, "-m", "pip", "install", pip_name],
+                    capture_output=True, text=True
                 )
-            install_btn.clicked.disconnect()
-            install_btn.clicked.connect(_open_terminal_cmd)
-            return
+                _rq_pip.put((ret.returncode == 0, ret.stderr[-300:] if ret.returncode != 0 else ""))
 
-        import queue as _q_pip
-        _rq_pip = _q_pip.Queue()
+            def _poll_pip():
+                try:
+                    ok, stderr = _rq_pip.get_nowait()
+                except Exception:
+                    return
+                _ptmr_pip.stop()
+                if ok:
+                    icon_lbl.setText("✅")
+                    icon_lbl.setStyleSheet("font-size: 14px; background: transparent; color: #7fc97f;")
+                    name_lbl.setStyleSheet("color: #dce6ff; background: transparent;")
+                    install_btn.setText("Asennettu ✓")
+                else:
+                    install_btn.setText("Epäonnistui")
+                    install_btn.setEnabled(True)
+                    parent_app.append_status(f"pip install {pip_name} epäonnistui:\n{stderr}")
 
-        def _run():
-            import subprocess as _sp
-            ret = _sp.run(
-                [sys.executable, "-m", "pip", "install", pip_name],
-                capture_output=True, text=True
+            install_btn.setText("Asennetaan…")
+            install_btn.setEnabled(False)
+            _ptmr_pip = QTimer(parent_app)
+            _ptmr_pip.timeout.connect(_poll_pip)
+            _ptmr_pip.start(200)
+            threading.Thread(target=_run, daemon=True).start()
+
+        for import_name, pip_name, required, desc in _PKG_LIST:
+            ok, ver = _pkg_status(import_name, pip_name)
+            row_w = QWidget()
+            row_h = QHBoxLayout(row_w)
+            row_h.setContentsMargins(0, 0, 0, 0)
+            row_h.setSpacing(8)
+
+            icon_lbl = QLabel("✅" if ok else ("❌" if required else "○"))
+            icon_lbl.setFixedWidth(22)
+            icon_lbl.setStyleSheet("font-size: 14px; background: transparent;")
+
+            name_lbl = QLabel(f"<b>{pip_name}</b>")
+            name_lbl.setStyleSheet(
+                "color: #dce6ff; background: transparent;" if ok
+                else ("color: #ff8888; background: transparent;" if required
+                      else "color: #8a9bc4; background: transparent;")
             )
-            _rq_pip.put((ret.returncode == 0, ret.stderr[-300:] if ret.returncode != 0 else ""))
+            name_lbl.setFixedWidth(160)
 
-        def _poll_pip():
-            try:
-                ok, stderr = _rq_pip.get_nowait()
-            except Exception:
-                return
-            _ptmr_pip.stop()
-            if ok:
-                icon_lbl.setText("✅")
-                icon_lbl.setStyleSheet("font-size: 14px; background: transparent; color: #7fc97f;")
-                name_lbl.setStyleSheet("color: #dce6ff; background: transparent;")
-                install_btn.setText("Asennettu ✓")
-            else:
-                install_btn.setText("Epäonnistui")
-                install_btn.setEnabled(True)
-                parent_app.append_status(f"pip install {pip_name} epäonnistui:\n{stderr}")
+            desc_lbl = QLabel(f"{desc}   <span style='color:#8a9bc4'>v{ver}</span>" if ok
+                              else f"<span style='color:#8a9bc4'>{desc}</span>")
+            desc_lbl.setStyleSheet("background: transparent; font-size: 11px;")
 
-        install_btn.setText("Asennetaan…")
-        install_btn.setEnabled(False)
-        _ptmr_pip = QTimer(parent_app)
-        _ptmr_pip.timeout.connect(_poll_pip)
-        _ptmr_pip.start(200)
-        threading.Thread(target=_run, daemon=True).start()
+            row_h.addWidget(icon_lbl)
+            row_h.addWidget(name_lbl)
+            row_h.addWidget(desc_lbl, 1)
 
-    for import_name, pip_name, required, desc in _PKG_LIST:
-        ok, ver = _pkg_status(import_name, pip_name)
-        row_w = QWidget()
-        row_h = QHBoxLayout(row_w)
-        row_h.setContentsMargins(0, 0, 0, 0)
-        row_h.setSpacing(8)
+            if not ok and not required:
+                _install_btn = _QPushButton("Asenna")
+                _install_btn.setFixedWidth(72)
+                _install_btn.setStyleSheet(
+                    "QPushButton { background: #14281e; border: 1px solid #1a5a30; border-radius: 5px;"
+                    " color: #00cc6a; padding: 3px 6px; font-size: 11px; font-weight: 700; }"
+                    "QPushButton:hover { border-color: #00ff88; color: #5AFFAA; }"
+                    "QPushButton:disabled { background: #111; color: #444; border-color: #222; }"
+                )
+                _install_btn.clicked.connect(
+                    lambda _checked, pn=pip_name, il=icon_lbl, nl=name_lbl, ib=_install_btn:
+                        _pip_install_pkg(pn, il, nl, ib)
+                )
+                row_h.addWidget(_install_btn)
 
-        icon_lbl = QLabel("✅" if ok else ("❌" if required else "○"))
-        icon_lbl.setFixedWidth(22)
-        icon_lbl.setStyleSheet("font-size: 14px; background: transparent;")
+            label_txt = "Pakollinen" if required else "Valinnainen"
+            f_maint.addRow(_lbl(label_txt + ":"), row_w)
 
-        name_lbl = QLabel(f"<b>{pip_name}</b>")
-        name_lbl.setStyleSheet(
-            "color: #dce6ff; background: transparent;" if ok
-            else ("color: #ff8888; background: transparent;" if required
-                  else "color: #8a9bc4; background: transparent;")
-        )
-        name_lbl.setFixedWidth(160)
-
-        desc_lbl = QLabel(f"{desc}   <span style='color:#8a9bc4'>v{ver}</span>" if ok
-                          else f"<span style='color:#8a9bc4'>{desc}</span>")
-        desc_lbl.setStyleSheet("background: transparent; font-size: 11px;")
-
-        row_h.addWidget(icon_lbl)
-        row_h.addWidget(name_lbl)
-        row_h.addWidget(desc_lbl, 1)
-
-        if not ok and not required:
-            _install_btn = _QPushButton("Asenna")
-            _install_btn.setFixedWidth(72)
-            _install_btn.setStyleSheet(
-                "QPushButton { background: #14281e; border: 1px solid #1a5a30; border-radius: 5px;"
-                " color: #00cc6a; padding: 3px 6px; font-size: 11px; font-weight: 700; }"
-                "QPushButton:hover { border-color: #00ff88; color: #5AFFAA; }"
-                "QPushButton:disabled { background: #111; color: #444; border-color: #222; }"
-            )
-            _install_btn.clicked.connect(
-                lambda _checked, pn=pip_name, il=icon_lbl, nl=name_lbl, ib=_install_btn:
-                    _pip_install_pkg(pn, il, nl, ib)
-            )
-            row_h.addWidget(_install_btn)
-
-        label_txt = "Pakollinen" if required else "Valinnainen"
-        f6.addRow(_lbl(label_txt + ":"), row_w)
-
-    # ---- VB-Cable (siirretty tänne) ----
-    f6.addRow(_header("Virtuaalimikrofoni"))
+    # ---- Virtuaaliäänilaitteet & chat-reititys — tila + linkki Setup Wizardiin.
+    # Asennus/määritys/testaus tehdään wizardissa (samat _install_vbcable/
+    # _install_voicemeeter/_voicemeeter_configure-funktiot), joten tässä ei
+    # toisteta samaa UI:ta kahteen kertaan — vain tila ja yksi linkki. ----
+    f_maint.addRow(_header("Virtuaaliäänilaitteet & chat-reititys"))
 
     _vbc_installed = _is_vbcable_installed()
     vbc_status_lbl = QLabel("VB-Cable: ✅ Asennettu" if _vbc_installed else "VB-Cable: ❌ Ei asennettu")
     vbc_status_lbl.setStyleSheet("color: #7fc97f; font-size: 13px;" if _vbc_installed else "color: #ff8888; font-size: 13px;")
-    f6.addRow(_lbl("Tila:"), vbc_status_lbl)
-    f6.addRow("", _desc(
-        "VB-Audio Virtual Cable — ilmainen virtuaaliäänilaite, jolla tämän sovelluksen "
-        "käännetty puhe näkyy mikrofonina peleissä ja Discord/TeamSpeak-sovelluksissa.\n"
-        "Asennuksen jälkeen: aseta lähtölaite → 'CABLE Input' tässä appissa, "
-        "ja mikrofoni → 'CABLE Output' pelissä tai Discordissa."
-    ))
+    f_maint.addRow(_lbl("VB-Cable:"), vbc_status_lbl)
 
-    vbc_install_btn = _QPushButton(
-        "VB-Cable on jo asennettu" if _vbc_installed else "Asenna VB-Cable (Virtuaalimikrofoni)"
-    )
-    vbc_install_btn.setEnabled(not _vbc_installed)
-
-    def _do_vbc_install():
-        vbc_install_btn.setEnabled(False)
-        vbc_install_btn.setText("Asennetaan...")
-
-        def _vbc_status(msg):
-            def _apply():
-                vbc_status_lbl.setText(msg)
-                vbc_status_lbl.setStyleSheet("color: #7fc97f; font-size: 13px;" if "✅" in msg else "color: #ff8888; font-size: 13px;")
-                if "✅" in msg:
-                    vbc_install_btn.setText("VB-Cable on jo asennettu")
-                    QTimer.singleShot(800, parent_app.populate_output_devices)
-                else:
-                    vbc_install_btn.setEnabled(True)
-                    vbc_install_btn.setText("Yritä uudelleen")
-            QTimer.singleShot(0, _apply)
-
-        threading.Thread(target=_install_vbcable, args=(_vbc_status,), daemon=True).start()
-
-    vbc_install_btn.clicked.connect(_do_vbc_install)
-    f6.addRow("", vbc_install_btn)
-
-    # ---- Voicemeeter Banana (chat routing) ----
     if sys.platform == "win32":
-        f6.addRow(_header("Chat-reititys (Voicemeeter Banana)"))
-
         _vm_installed = _is_voicemeeter_installed()
         vm_status_lbl = QLabel(
             "Voicemeeter Banana: ✅ Asennettu" if _vm_installed else "Voicemeeter Banana: ❌ Ei asennettu"
@@ -8659,119 +8672,22 @@ def open_settings_dialog(parent_app: "App") -> None:
         vm_status_lbl.setStyleSheet(
             "color: #7fc97f; font-size: 13px;" if _vm_installed else "color: #ff8888; font-size: 13px;"
         )
-        f6.addRow(_lbl("Tila:"), vm_status_lbl)
-        f6.addRow("", _desc(
-            "Voicemeeter Banana reitittää sekä RodeCaster-mikrofonisi (Chat/Mix Minus) että "
-            "Voice Royalen TTS-äänen yhden virtuaalimikrofonin kautta peliin.\n"
-            "Asennuksen jälkeen:\n"
-            "  1. Aseta Voice Royalessa lähtölaite → 'Voicemeeter Input (VB-Audio Voicemeeter VAIO)'\n"
-            "  2. Pelissä/Discordissa: mikrofoni → 'Voicemeeter Out B1 (VB-Audio Voicemeeter VAIO)'\n"
-            "  3. Klikkaa 'Konfiguroi reititys' ja valitse RodeCaster Chat -laite."
-        ))
+        f_maint.addRow(_lbl("Voicemeeter:"), vm_status_lbl)
 
-        vm_install_btn = _QPushButton(
-            "Voicemeeter on jo asennettu" if _vm_installed else "Asenna Voicemeeter Banana (ilmainen)"
-        )
-        vm_install_btn.setEnabled(not _vm_installed)
+    f_maint.addRow("", _desc(
+        "Asennus ja määritys (mikrofonivalinta, reititys, testaus) tehdään Setup Wizardissa — "
+        "paina yllä 'Aja alkuasennus uudelleen', sama velho tunnistaa laitteesi ja hoitaa loput."
+    ))
 
-        vm_cfg_status_lbl = QLabel("")
-        vm_cfg_status_lbl.setWordWrap(True)
-        vm_cfg_status_lbl.setStyleSheet("color: #8a9bc4; font-size: 11px; background: transparent;")
-
-        def _do_vm_install():
-            vm_install_btn.setEnabled(False)
-            vm_install_btn.setText("Asennetaan...")
-
-            def _vm_status(msg):
-                def _apply():
-                    vm_status_lbl.setText(msg)
-                    vm_status_lbl.setStyleSheet(
-                        "color: #7fc97f; font-size: 13px;" if "✅" in msg else "color: #ff8888; font-size: 13px;"
-                    )
-                    if "✅" in msg:
-                        vm_install_btn.setText("Voicemeeter on jo asennettu")
-                    else:
-                        vm_install_btn.setEnabled(True)
-                        vm_install_btn.setText("Yritä uudelleen")
-                QTimer.singleShot(0, _apply)
-
-            threading.Thread(target=_install_voicemeeter, args=(_vm_status,), daemon=True).start()
-
-        vm_install_btn.clicked.connect(_do_vm_install)
-        f6.addRow("", vm_install_btn)
-
-        # Device selector for HW Input 1 (RodeCaster Chat / Mix Minus mic)
-        vm_dev_label = _lbl("Mikrofonilaite:")
-        vm_dev_combo = _QComboBox()
-        vm_dev_combo.setToolTip(
-            "Valitse RodeCaster Chat (tai muu Mix Minus -mikrofoni) Hardware Input 1:lle."
-        )
-        try:
-            rec_devs = list_input_devices()
-            for idx, name in rec_devs:
-                vm_dev_combo.addItem(name, idx)
-            # Pre-select RodeCaster Chat if found
-            for i in range(vm_dev_combo.count()):
-                n = vm_dev_combo.itemText(i).lower()
-                if "chat" in n or "rodecaster" in n or "rode" in n:
-                    vm_dev_combo.setCurrentIndex(i)
-                    break
-            _fit_combo_dropdown(vm_dev_combo)
-        except Exception:
-            pass
-        f6.addRow(vm_dev_label, vm_dev_combo)
-
-        vm_cfg_btn = _QPushButton("Konfiguroi reititys Voicemeeterin kautta")
-
-        def _do_vm_configure():
-            import queue as _q
-            mic_name = vm_dev_combo.currentText()
-            vm_cfg_btn.setEnabled(False)
-            vm_cfg_btn.setText("Konfiguroidaan...")
-
-            _vm_q = _q.Queue()
-
-            def _vm_cfg_status(msg):
-                _vm_q.put(msg)
-
-            def _vm_poll():
-                try:
-                    msg = _vm_q.get_nowait()
-                except _q.Empty:
-                    return
-                _vm_poll_timer.stop()
-                vm_cfg_status_lbl.setText(msg)
-                vm_cfg_status_lbl.setStyleSheet(
-                    "color: #7fc97f; font-size: 12px; background: transparent;"
-                    if "✅" in msg else
-                    "color: #ff8888; font-size: 12px; background: transparent;"
-                )
-                vm_cfg_btn.setEnabled(True)
-                vm_cfg_btn.setText("Konfiguroi reititys Voicemeeterin kautta")
-
-            _vm_poll_timer = QTimer()
-            _vm_poll_timer.timeout.connect(_vm_poll)
-            _vm_poll_timer.start(100)
-
-            threading.Thread(
-                target=_voicemeeter_configure, args=(mic_name, _vm_cfg_status), daemon=True
-            ).start()
-
-        vm_cfg_btn.clicked.connect(_do_vm_configure)
-        f6.addRow("", vm_cfg_btn)
-        f6.addRow("", vm_cfg_status_lbl)
-
-    # ── TAB 7 — Päivitys ─────────────────────────────────────────────
-    f7 = _make_form()
-    f7.addRow(_header("Sovelluspäivitykset"))
+    f_maint.addRow(_header("Sovelluspäivitykset"))
 
     _cur_lbl = QLabel(f"v{APP_VERSION}")
     _cur_lbl.setStyleSheet("color: #dce6ff; font-size: 13px; font-weight: 700; background: transparent;")
-    f7.addRow(_lbl("Nykyinen versio:"), _cur_lbl)
+    f_maint.addRow(_lbl("Nykyinen versio:"), _cur_lbl)
 
     _latest_lbl = QLabel("—")
     _latest_lbl.setStyleSheet("color: #8a9bc4; font-size: 12px; background: transparent;")
-    f7.addRow(_lbl("Uusin versio:"), _latest_lbl)
+    f_maint.addRow(_lbl("Uusin versio:"), _latest_lbl)
 
     _upd_status = QLabel("")
     _upd_status.setStyleSheet("color: #8a9bc4; font-size: 11px; background: transparent;")
@@ -8908,20 +8824,22 @@ def open_settings_dialog(parent_app: "App") -> None:
     _check_btn.clicked.connect(_check_updates)
     _dl_btn.clicked.connect(_download_and_open)
 
-    f7.addRow("", _check_btn)
-    f7.addRow("", _upd_status)
-    f7.addRow("", _dl_btn)
-    f7.addRow("", _desc(
+    f_maint.addRow("", _check_btn)
+    f_maint.addRow("", _upd_status)
+    f_maint.addRow("", _dl_btn)
+    f_maint.addRow("", _desc(
         "Windows: Inno Setup -asentaja käynnistyy — vanha versio suljetaan automaattisesti.\n"
         "macOS: DMG-tiedosto aukeaa — vedä Voice Royale.app Applications-kansioon."
     ))
 
-    # ── Siivoa tiedostot -välilehti ───────────────────────────────────────
+    # ── Siivoa soundboard-tiedostot → Huolto ─────────────────────────────
     from PyQt6.QtWidgets import QListWidget as _LW, QListWidgetItem as _LWI, QAbstractItemView as _AIV
 
-    f_clean = QWidget()
-    lay_clean = QVBoxLayout(f_clean)
-    lay_clean.setContentsMargins(12, 12, 12, 12)
+    f_maint.addRow(_header("Siivoa soundboard-tiedostot"))
+
+    _clean_container = QWidget()
+    lay_clean = QVBoxLayout(_clean_container)
+    lay_clean.setContentsMargins(0, 0, 0, 4)
     lay_clean.setSpacing(8)
 
     lbl_clean_info = QLabel(
@@ -8946,6 +8864,7 @@ def open_settings_dialog(parent_app: "App") -> None:
 
     file_list = _LW()
     file_list.setSelectionMode(_AIV.SelectionMode.MultiSelection)
+    file_list.setMinimumHeight(160)
     file_list.setStyleSheet(
         "QListWidget { background: #0E0E18; border: 1px solid #1c2c52; border-radius: 6px;"
         " color: #C0C0E0; font-size: 11px; }"
@@ -8953,7 +8872,7 @@ def open_settings_dialog(parent_app: "App") -> None:
         "QListWidget::item:selected { background: #1A2A50; color: #fff; }"
         "QListWidget::item:hover { background: #141428; }"
     )
-    lay_clean.addWidget(file_list, 1)
+    lay_clean.addWidget(file_list)
 
     sel_row = _QHBoxLayout()
     sel_all_btn = _QPushButton("Valitse kaikki")
@@ -9067,6 +8986,7 @@ def open_settings_dialog(parent_app: "App") -> None:
     file_list.itemSelectionChanged.connect(
         lambda: del_btn.setEnabled(bool(file_list.selectedItems()))
     )
+    f_maint.addRow("", _clean_container)
 
     # ── Home Assistant tab ───────────────────────────────────────────────
     from PyQt6.QtWidgets import QScrollArea as _QSA2, QListWidget as _LW2, QListWidgetItem as _LWI2
@@ -9278,19 +9198,28 @@ def open_settings_dialog(parent_app: "App") -> None:
 
     ha_connect_btn.clicked.connect(_ha_connect)
 
-    ha_scroll = _QSA2()
-    ha_scroll.setWidgetResizable(True)
-    ha_scroll.setWidget(ha_widget)
+    # Stream Deck + Home Assistant yhdistetty yhdeksi välilehdeksi (erotettu viivalla)
+    _sd_ha_combined = QWidget()
+    _sd_ha_lay = QVBoxLayout(_sd_ha_combined)
+    _sd_ha_lay.setContentsMargins(0, 0, 0, 0)
+    _sd_ha_lay.setSpacing(0)
+    _sd_ha_lay.addWidget(sd_inner)
+    _sd_ha_sep = QFrame()
+    _sd_ha_sep.setFrameShape(QFrame.Shape.HLine)
+    _sd_ha_sep.setStyleSheet("color: #1c2c52; margin: 10px 20px;")
+    _sd_ha_lay.addWidget(_sd_ha_sep)
+    _sd_ha_lay.addWidget(ha_widget)
 
-    tabs.addTab(_scroll_tab(f1), "Käännös & TTS")
-    tabs.addTab(_scroll_tab(f2), "Wake Word")
-    tabs.addTab(_scroll_tab(f3), "Kielet")
-    tabs.addTab(_scroll_tab(f4), "Pika & Data")
-    tabs.addTab(sd_scroll, "Stream Deck")
-    tabs.addTab(ha_scroll, "Home Assistant")
-    tabs.addTab(_scroll_tab(f6), "Asennus")
-    tabs.addTab(f_clean, "Siivoa")
-    tabs.addTab(_scroll_tab(f7), "Päivitys")
+    _sd_ha_scroll = QScrollArea()
+    _sd_ha_scroll.setWidget(_sd_ha_combined)
+    _sd_ha_scroll.setWidgetResizable(True)
+    _sd_ha_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+
+    tabs.addTab(_scroll_tab(f_general), "Yleiset")
+    tabs.addTab(_scroll_tab(f_apikeys), "API-avaimet")
+    tabs.addTab(_scroll_tab(f_speech), "Puhe & Kielet")
+    tabs.addTab(_sd_ha_scroll, "Stream Deck & HA")
+    tabs.addTab(_scroll_tab(f_maint), "Huolto")
 
     # ── Buttons ───────────────────────────────────────────────────────
     btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
@@ -9359,6 +9288,29 @@ def open_settings_dialog(parent_app: "App") -> None:
                 parent_app.append_status("OpenAI API key updated.")
             except Exception as e:
                 parent_app.append_status(f"Warning: could not save key to file: {e}")
+
+        # Save ElevenLabs key + Voice ID to credentials.env and update globals
+        new_eleven_key = eleven_key_edit.text().strip()
+        new_voice_id = voice_id_edit.text().strip()
+        if new_eleven_key != ELEVEN_API_KEY or new_voice_id != VOICE_ID:
+            env_file = os.path.join(BASE_PATH, "credentials.env")
+            try:
+                lines = []
+                if os.path.exists(env_file):
+                    with open(env_file, "r", encoding="utf-8") as f:
+                        lines = [ln.rstrip() for ln in f
+                                 if not ln.startswith("ELEVEN_API_KEY") and not ln.startswith("VOICE_ID")]
+                if new_voice_id:
+                    lines.insert(0, f"VOICE_ID={new_voice_id}")
+                if new_eleven_key:
+                    lines.insert(0, f"ELEVEN_API_KEY={new_eleven_key}")
+                with open(env_file, "w", encoding="utf-8") as f:
+                    f.write("\n".join(lines) + "\n")
+                ELEVEN_API_KEY = new_eleven_key
+                VOICE_ID = new_voice_id
+                parent_app.append_status("ElevenLabs API key/Voice ID updated.")
+            except Exception as e:
+                parent_app.append_status(f"Warning: could not save ElevenLabs key: {e}")
 
         parent_app.settings.update(new_settings)
         save_settings(parent_app.settings)

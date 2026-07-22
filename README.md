@@ -1,6 +1,6 @@
 # Voice Royale
 
-Copyright (c) 2026 Juha Lempiäinen. All rights reserved.
+Copyright (c) 2026 BluexDEV Softwares. All rights reserved.
 Use permitted. Modification and redistribution of source code prohibited — see [LICENSE](LICENSE).
 
 Windows + macOS desktop app (PyQt6) that listens for a wake-word, transcribes your speech, translates it with GPT-4.1-mini, and speaks the result via TTS — routed to any audio output device, including virtual audio cables for game voice chat. Now with live voice morphing, soundboard, Stream Deck XL support, and full Voicemeeter Banana integration for zero-config game chat routing.
