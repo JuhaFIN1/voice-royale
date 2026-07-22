@@ -114,6 +114,7 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSizeGrip,
     QSizePolicy,
     QSplashScreen,
     QStackedWidget,
@@ -127,46 +128,83 @@ from PyQt6.QtWidgets import (
 )
 
 # =========================
-# UI STYLE CONSTANTS
+# THEME — Neon Sci-Fi palette (kaikki värit yhdessä paikassa)
 # =========================
-METER_LABEL_STYLE = "color: #3A7BFF; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;"
-METER_STYLE_MIC = (
-    "QProgressBar { background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 4px; }"
-    "QProgressBar::chunk { background: qlineargradient(x1:0, x2:1,"
-    " stop:0 #00FF6A, stop:0.6 #FFD700, stop:1 #FF3A3A); border-radius: 3px; }"
+THEME = {
+    "BG_DEEP":       "#05070f",   # ikkunan tausta (lähes musta navy)
+    "BG_PANEL":      "#0a0f1e",   # korttigradientti alku
+    "BG_PANEL2":     "#0d1630",   # korttigradientti loppu
+    "BG_RAISED":     "#101a36",   # napit idle
+    "BG_INPUT":      "#070b16",   # tekstikentät, mittarien tausta
+    "BORDER":        "#1c2c52",   # oletuspaneelireuna (himmeä navy)
+    "BORDER_GLOW":   "#2e7fff",   # neon-sininen pääaksentti
+    "BLUE":          "#2e7fff",
+    "BLUE_BRIGHT":   "#6aa8ff",
+    "BLUE_DIM":      "#173a75",
+    "PURPLE":        "#7b2fff",
+    "PURPLE_BRIGHT": "#a678ff",
+    "PURPLE_DIM":    "#41208a",
+    "GOLD":          "#ffb830",   # suosikit / kansiot
+    "GOLD_BRIGHT":   "#ffd060",
+    "GOLD_DIM":      "#7a5510",
+    "GREEN":         "#00ff88",   # Live Listen / play
+    "GREEN_DIM":     "#0a3d24",
+    "RED":           "#ff2e4d",   # STOP / record
+    "RED_DIM":       "#8a1020",
+    "CYAN":          "#00e5ff",   # HA-napit
+    "TEXT":          "#dce6ff",
+    "TEXT_DIM":      "#8a9bc4",
+    "TEXT_FAINT":    "#546a94",
+    "GRAD_ACCENT":   "qlineargradient(x1:0,y1:1,x2:1,y2:0, stop:0 #2e7fff, stop:1 #7b2fff)",
+    "GRAD_PANEL":    "qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #0a0f1e, stop:1 #0d1630)",
+    "GRAD_BTN":      "qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #14204a, stop:1 #0c1226)",
+    "GRAD_METER":    "qlineargradient(x1:0, x2:1, stop:0 #00ff88, stop:0.6 #ffb830, stop:1 #ff2e4d)",
+}
+
+
+def T(qss: str) -> str:
+    """Korvaa @TOKEN-nimet QSS-merkkijonossa THEME-arvoilla (pisin avain ensin)."""
+    for k in sorted(THEME, key=len, reverse=True):
+        qss = qss.replace("@" + k, THEME[k])
+    return qss
+
+
+METER_LABEL_STYLE = T("color: @BORDER_GLOW; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;")
+METER_STYLE_MIC = T(
+    "QProgressBar { background: @BG_INPUT; border: 1px solid @BORDER; border-radius: 4px; }"
+    "QProgressBar::chunk { background: @GRAD_METER; border-radius: 3px; }"
 )
-METER_STYLE_OUT = (
-    "QProgressBar { background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 4px; }"
-    "QProgressBar::chunk { background: qlineargradient(x1:0, x2:1,"
-    " stop:0 #00FF6A, stop:0.6 #FFD700, stop:1 #FF3A3A); border-radius: 3px; }"
+METER_STYLE_OUT = T(
+    "QProgressBar { background: @BG_INPUT; border: 1px solid @BORDER; border-radius: 4px; }"
+    "QProgressBar::chunk { background: @GRAD_METER; border-radius: 3px; }"
 )
-LIST_STYLE = """
+LIST_STYLE = T("""
     QListWidget {
-        background: #1A1A1A;
-        border: 1px solid #2a2a2a;
+        background: @BG_INPUT;
+        border: 1px solid @BORDER;
         border-radius: 8px;
         font-family: "Inter", "Segoe UI", sans-serif;
         font-size: 12px;
     }
     QListWidget::item {
-        background: #1E1E1E;
-        border: 1px solid #2a2a2a;
+        background: @BG_RAISED;
+        border: 1px solid @BORDER;
         border-radius: 6px;
         margin: 2px 4px;
         padding: 4px 7px;
-        color: #C8C8C8;
+        color: @TEXT_DIM;
     }
     QListWidget::item:hover {
-        background: #252525;
-        border-color: #9A4DFF;
+        background: @BLUE_DIM;
+        border-color: @PURPLE;
         color: #ffffff;
     }
     QListWidget::item:selected {
-        background: qlineargradient(x1:0, x2:1, stop:0 #3A7BFF, stop:1 #9A4DFF);
-        border-color: #3A7BFF;
+        background: @GRAD_ACCENT;
+        border-color: @BLUE;
         color: #ffffff;
     }
-"""
+""")
 
 # =========================
 # CONFIG
@@ -294,7 +332,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.85"
+APP_VERSION = "1.3.86"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -422,6 +460,72 @@ def _apply_custom_languages_to_globals(custom_langs: list) -> None:
 # =========================
 # VIRTUAL AUDIO (VB-Cable)
 # =========================
+
+def _windows_disabled_audio_names() -> set:
+    """Palauttaa Windowsissa disabloitujen / irti olevien äänilaitteiden nimet
+    (pienillä kirjaimilla). PortAudio voi silti enumeroida ne WDM-KS-reittiä
+    pitkin ohi Windowsin Disable-asetuksen — tällä listalla ne suodatetaan
+    pois käyttäjälle näytettävistä laitelistoista.
+
+    Rekisteri: HKLM\\...\\MMDevices\\Audio\\{Capture,Render}\\{guid}\\DeviceState
+    (1=aktiivinen, 2=disabloitu, 4=ei läsnä, 8=irti). Properties-avaimesta
+    luetaan laitteen näyttönimet vertailua varten."""
+    names = set()
+    if sys.platform != "win32":
+        return names
+    try:
+        import winreg
+    except Exception:
+        return names
+    _NAME_PROPS = (
+        "{a45c254e-df1c-4efd-8020-67d146a850e0},14",  # PKEY_Device_DeviceDesc
+        "{b3f8fa53-0004-438e-9003-51a46e139bfc},6",   # PKEY_DeviceInterface_FriendlyName
+        "{026e516e-b814-414b-83cd-856d6fef4822},2",   # endpoint FriendlyName
+    )
+    for flow in ("Capture", "Render"):
+        base = r"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio" + "\\" + flow
+        try:
+            hk = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base)
+        except OSError:
+            continue
+        i = 0
+        while True:
+            try:
+                guid = winreg.EnumKey(hk, i)
+                i += 1
+            except OSError:
+                break
+            try:
+                dk = winreg.OpenKey(hk, guid)
+                state, _ = winreg.QueryValueEx(dk, "DeviceState")
+                if state == 1:  # DEVICE_STATE_ACTIVE — ei suodateta
+                    continue
+                pk = winreg.OpenKey(dk, "Properties")
+                for prop in _NAME_PROPS:
+                    try:
+                        val, _ = winreg.QueryValueEx(pk, prop)
+                        if isinstance(val, str) and val.strip():
+                            names.add(val.strip().lower())
+                    except OSError:
+                        pass
+            except OSError:
+                pass
+    return names
+
+
+def _matches_disabled_name(device_name: str, disabled_names: set) -> bool:
+    """Törmäyttää PortAudio-laitenimen Windowsin disabloitujen nimiin.
+    MME katkaisee nimet ~31 merkkiin, joten pelkkä == ei riitä — hyväksytään
+    myös substring- ja pitkä prefix-osuma kumpaan suuntaan tahansa."""
+    n = device_name.lower().strip()
+    for d in disabled_names:
+        if d in n or n in d:
+            return True
+        cmp = min(len(n), len(d))
+        if cmp >= 16 and n[:cmp] == d[:cmp]:
+            return True
+    return False
+
 
 def _is_vbcable_installed() -> bool:
     try:
@@ -1721,75 +1825,75 @@ class SoundboardButton(QWidget):
     _ICON_H: int = 46
     _FONT_SIZE: int = 10
 
-    _STYLE_IDLE = (
+    _STYLE_IDLE = T(
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-        " stop:0 #222228, stop:1 #14141A);"
-        " border: 2px solid #333344; border-radius: 10px;"
-        " color: #7A7A9A; font-size: 10px; font-weight: 700;"
+        " stop:0 #131c3a, stop:1 #0a0f22);"
+        " border: 2px solid @BORDER; border-radius: 10px;"
+        " color: @TEXT_DIM; font-size: 10px; font-weight: 700;"
         " padding-bottom: 2px; }"
         "QToolButton:hover { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-        " stop:0 #2A2A38, stop:1 #1C1C26);"
-        " border: 2px solid #9A4DFF; color: #E0E0FF; }"
-        "QToolButton:pressed { background: #0e0e18; border: 2px solid #3A7BFF; }"
-        "QToolButton:focus { border: 2px solid #333344; outline: none; }"
+        " stop:0 #1b2850, stop:1 #101830);"
+        " border: 2px solid @PURPLE; color: #e0e8ff; }"
+        "QToolButton:pressed { background: @BG_INPUT; border: 2px solid @BLUE; }"
+        "QToolButton:focus { border: 2px solid @BORDER; outline: none; }"
     )
-    _STYLE_PLAY = (
+    _STYLE_PLAY = T(
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-        " stop:0 #0a2818, stop:1 #06160C);"
-        " border: 2px solid #00FF6A; border-radius: 10px;"
-        " color: #00FF6A; font-size: 10px; font-weight: 700; padding-bottom: 2px; }"
+        " stop:0 #0a2818, stop:1 #06160c);"
+        " border: 2px solid @GREEN; border-radius: 10px;"
+        " color: @GREEN; font-size: 10px; font-weight: 700; padding-bottom: 2px; }"
         "QToolButton:focus { outline: none; }"
     )
-    _STYLE_DRAG = (
-        "QToolButton { background: #080C1A; border: 2px dashed #3A7BFF; border-radius: 10px;"
-        " color: #3A7BFF; font-size: 10px; font-weight: 700; padding-bottom: 2px; }"
+    _STYLE_DRAG = T(
+        "QToolButton { background: @BG_INPUT; border: 2px dashed @BLUE; border-radius: 10px;"
+        " color: @BLUE; font-size: 10px; font-weight: 700; padding-bottom: 2px; }"
         "QToolButton:focus { outline: none; }"
     )
-    _STYLE_LINK = (
+    _STYLE_LINK = T(
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-        " stop:0 #0A1428, stop:1 #060C18);"
-        " border: 2px solid #1A3A70; border-radius: 10px;"
-        " color: #3A7BFF; font-size: 10px; font-weight: 700;"
+        " stop:0 #0a1428, stop:1 #060c18);"
+        " border: 2px solid @BLUE_DIM; border-radius: 10px;"
+        " color: @BLUE; font-size: 10px; font-weight: 700;"
         " padding-bottom: 2px; }"
         "QToolButton:hover { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-        " stop:0 #142040, stop:1 #0A1828);"
-        " border: 2px solid #3A7BFF; color: #6AA0FF; }"
-        "QToolButton:pressed { background: #060C18; border: 2px solid #9A4DFF; }"
+        " stop:0 #142040, stop:1 #0a1828);"
+        " border: 2px solid @BLUE; color: @BLUE_BRIGHT; }"
+        "QToolButton:pressed { background: #060c18; border: 2px solid @PURPLE; }"
         "QToolButton:focus { outline: none; }"
     )
-    _STYLE_FOLDER = (
+    _STYLE_FOLDER = T(
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-        " stop:0 #1A1400, stop:1 #0E0A00);"
-        " border: 2px solid #7A5A00; border-radius: 10px;"
-        " color: #FFB800; font-size: 10px; font-weight: 700;"
+        " stop:0 #1a1400, stop:1 #0e0a00);"
+        " border: 2px solid @GOLD_DIM; border-radius: 10px;"
+        " color: @GOLD; font-size: 10px; font-weight: 700;"
         " padding-bottom: 2px; }"
-        "QToolButton:hover { border: 2px solid #FFB800; color: #FFD060; }"
-        "QToolButton:pressed { background: #0E0A00; border: 2px solid #FF9A00; }"
+        "QToolButton:hover { border: 2px solid @GOLD; color: @GOLD_BRIGHT; }"
+        "QToolButton:pressed { background: #0e0a00; border: 2px solid @GOLD; }"
         "QToolButton:focus { outline: none; }"
     )
-    _STYLE_FOLDER_DRAG = (
-        "QToolButton { background: #1A1400; border: 2px dashed #FFB800; border-radius: 10px;"
-        " color: #FFD060; font-size: 10px; font-weight: 700; padding-bottom: 2px; }"
+    _STYLE_FOLDER_DRAG = T(
+        "QToolButton { background: #1a1400; border: 2px dashed @GOLD; border-radius: 10px;"
+        " color: @GOLD_BRIGHT; font-size: 10px; font-weight: 700; padding-bottom: 2px; }"
         "QToolButton:focus { outline: none; }"
     )
-    _STYLE_BACK = (
+    _STYLE_BACK = T(
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-        " stop:0 #141428, stop:1 #0A0A1A);"
-        " border: 2px solid #444466; border-radius: 10px;"
-        " color: #8888BB; font-size: 10px; font-weight: 700;"
+        " stop:0 #171232, stop:1 #0c0a1e);"
+        " border: 2px solid @PURPLE_DIM; border-radius: 10px;"
+        " color: @PURPLE_BRIGHT; font-size: 10px; font-weight: 700;"
         " padding-bottom: 2px; }"
-        "QToolButton:hover { border: 2px solid #9A4DFF; color: #C0C0FF; }"
-        "QToolButton:pressed { background: #0A0A1A; border: 2px solid #3A7BFF; }"
+        "QToolButton:hover { border: 2px solid @PURPLE; color: #d0c0ff; }"
+        "QToolButton:pressed { background: #0c0a1e; border: 2px solid @BLUE; }"
         "QToolButton:focus { outline: none; }"
     )
-    _STYLE_HA = (
+    _STYLE_HA = T(
         "QToolButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-        " stop:0 #001A1A, stop:1 #000E0E);"
-        " border: 2px solid #00B3B3; border-radius: 10px;"
-        " color: #00E5E5; font-size: 10px; font-weight: 700;"
+        " stop:0 #001a1a, stop:1 #000e0e);"
+        " border: 2px solid #00b3b3; border-radius: 10px;"
+        " color: @CYAN; font-size: 10px; font-weight: 700;"
         " padding-bottom: 2px; }"
-        "QToolButton:hover { border: 2px solid #00FFFF; color: #80FFFF; }"
-        "QToolButton:pressed { background: #000E0E; border: 2px solid #009999; }"
+        "QToolButton:hover { border: 2px solid #00ffff; color: #80ffff; }"
+        "QToolButton:pressed { background: #000e0e; border: 2px solid #009999; }"
         "QToolButton:focus { outline: none; }"
     )
 
@@ -2057,7 +2161,7 @@ class SoundboardButton(QWidget):
             p.setClipPath(clip)
             p.drawPixmap(2, 2, cropped)
             p.setClipping(False)
-            pen = QPen(QColor("#7040C8"))
+            pen = QPen(QColor(THEME["PURPLE"]))
             pen.setWidthF(1.5)
             p.setPen(pen)
             p.drawRoundedRect(inner, r, r)
@@ -2065,12 +2169,12 @@ class SoundboardButton(QWidget):
             clip = QPainterPath()
             clip.addRoundedRect(inner, r, r)
             p.setClipPath(clip)
-            p.fillRect(inner.toRect(), QColor("#14141E"))
+            p.fillRect(inner.toRect(), QColor("#0a0f22"))
             p.setClipping(False)
-            p.setPen(QColor("#3A7BFF"))
+            p.setPen(QColor(THEME["BLUE"]))
             p.setFont(QFont("Segoe UI", size // 3))
             p.drawText(QRectF(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, "♪")
-            pen = QPen(QColor("#2A3060"))
+            pen = QPen(QColor(THEME["BORDER"]))
             pen.setWidthF(1.5)
             p.setPen(pen)
             p.drawRoundedRect(inner, r, r)
@@ -2088,10 +2192,10 @@ class SoundboardButton(QWidget):
         p.setClipPath(clip)
         p.fillRect(inner.toRect(), QColor("#0E0A00"))
         p.setClipping(False)
-        p.setPen(QColor("#FFB800"))
+        p.setPen(QColor(THEME["GOLD"]))
         p.setFont(QFont("Segoe UI", size // 3))
         p.drawText(QRectF(0, 0, size, size - 4), Qt.AlignmentFlag.AlignCenter, "📁")
-        pen = QPen(QColor("#7A5A00"))
+        pen = QPen(QColor(THEME["GOLD_DIM"]))
         pen.setWidthF(1.5)
         p.setPen(pen)
         p.drawRoundedRect(inner, 8, 8)
@@ -2109,10 +2213,10 @@ class SoundboardButton(QWidget):
         p.setClipPath(clip)
         p.fillRect(inner.toRect(), QColor("#060C18"))
         p.setClipping(False)
-        p.setPen(QColor("#3A7BFF"))
+        p.setPen(QColor(THEME["BLUE"]))
         p.setFont(QFont("Segoe UI", size // 3))
         p.drawText(QRectF(0, 0, size, size - 4), Qt.AlignmentFlag.AlignCenter, "▶")
-        pen = QPen(QColor("#1A3A70"))
+        pen = QPen(QColor(THEME["BLUE_DIM"]))
         pen.setWidthF(1.5)
         p.setPen(pen)
         p.drawRoundedRect(inner, 8, 8)
@@ -2210,18 +2314,18 @@ class SoundboardButton(QWidget):
         dlg.setWindowTitle(f"HA Media Players — {self._data.get('name', 'Slot')}")
         dlg.resize(380, 300)
         dlg.setStyleSheet(
-            "QDialog { background: #0d1117; color: #c9d1d9; }"
-            "QCheckBox { color: #c9d1d9; font-size: 13px; padding: 4px; }"
-            "QPushButton { background: #21262d; border: 1px solid #30363d; border-radius: 5px;"
-            " color: #c9d1d9; padding: 6px 16px; font-size: 12px; }"
-            "QPushButton:hover { background: #388bfd; border-color: #388bfd; }"
-            "QLabel { color: #8b949e; font-size: 11px; }"
+            "QDialog { background: #05070f; color: #b9c5e6; }"
+            "QCheckBox { color: #b9c5e6; font-size: 13px; padding: 4px; }"
+            "QPushButton { background: #101a36; border: 1px solid #1c2c52; border-radius: 5px;"
+            " color: #b9c5e6; padding: 6px 16px; font-size: 12px; }"
+            "QPushButton:hover { background: #6aa8ff; border-color: #6aa8ff; }"
+            "QLabel { color: #8a9bc4; font-size: 11px; }"
         )
         vbox = QVBoxLayout(dlg)
         vbox.setContentsMargins(16, 12, 16, 12)
         vbox.setSpacing(6)
         lbl = QLabel("Valitse HA media_player -laitteet joille ääni lähetetään:")
-        lbl.setStyleSheet("color: #c9d1d9; font-size: 12px; font-weight: 600; padding-bottom: 4px;")
+        lbl.setStyleSheet("color: #b9c5e6; font-size: 12px; font-weight: 600; padding-bottom: 4px;")
         vbox.addWidget(lbl)
 
         current_players = set(self._data.get("ha_players", []))
@@ -2268,18 +2372,18 @@ class SoundboardButton(QWidget):
         dlg.setWindowTitle(f"Generoi TTS-ääni — {self._data.get('name', 'Slot')}")
         dlg.resize(460, 300)
         dlg.setStyleSheet(
-            "QDialog { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', sans-serif; }"
-            "QLabel { color: #c9d1d9; font-size: 12px; }"
-            "QTextEdit { background: #161b22; border: 1px solid #30363d; border-radius: 5px;"
-            " color: #e6edf3; font-size: 13px; padding: 4px; }"
-            "QComboBox { background: #21262d; border: 1px solid #30363d; border-radius: 5px;"
-            " color: #e6edf3; padding: 4px 8px; min-height: 22px; }"
+            "QDialog { background: #05070f; color: #b9c5e6; font-family: 'Segoe UI', sans-serif; }"
+            "QLabel { color: #b9c5e6; font-size: 12px; }"
+            "QTextEdit { background: #0a0f1e; border: 1px solid #1c2c52; border-radius: 5px;"
+            " color: #dce6ff; font-size: 13px; padding: 4px; }"
+            "QComboBox { background: #101a36; border: 1px solid #1c2c52; border-radius: 5px;"
+            " color: #dce6ff; padding: 4px 8px; min-height: 22px; }"
             "QComboBox::drop-down { border: none; }"
-            "QComboBox QAbstractItemView { background: #161b22; color: #e6edf3; }"
-            "QPushButton { background: #21262d; border: 1px solid #30363d; border-radius: 5px;"
-            " color: #c9d1d9; padding: 6px 18px; font-size: 12px; }"
-            "QPushButton:hover { background: #1f6feb; border-color: #1f6feb; color: #fff; }"
-            "QPushButton:disabled { background: #161b22; color: #484f58; border-color: #21262d; }"
+            "QComboBox QAbstractItemView { background: #0a0f1e; color: #dce6ff; }"
+            "QPushButton { background: #101a36; border: 1px solid #1c2c52; border-radius: 5px;"
+            " color: #b9c5e6; padding: 6px 18px; font-size: 12px; }"
+            "QPushButton:hover { background: #2e7fff; border-color: #2e7fff; color: #fff; }"
+            "QPushButton:disabled { background: #0a0f1e; color: #546a94; border-color: #101a36; }"
         )
 
         vbox = QVBoxLayout(dlg)
@@ -2313,7 +2417,7 @@ class SoundboardButton(QWidget):
         vbox.addLayout(opt_row)
 
         status_lbl = QLabel("")
-        status_lbl.setStyleSheet("color: #8b949e; font-size: 11px;")
+        status_lbl.setStyleSheet("color: #8a9bc4; font-size: 11px;")
         vbox.addWidget(status_lbl)
 
         btn_row = QHBoxLayout()
@@ -2588,9 +2692,9 @@ class SoundboardButton(QWidget):
         dlg.setWindowTitle("Etsi kuva netistä")
         dlg.resize(740, 580)
         dlg.setStyleSheet(
-            "QDialog { background: #0e0e0e; }"
-            "QScrollArea { background: #0e0e0e; border: 1px solid #222; border-radius: 6px; }"
-            "QWidget#grid_bg { background: #0e0e0e; }"
+            "QDialog { background: #070b16; }"
+            "QScrollArea { background: #070b16; border: 1px solid #222; border-radius: 6px; }"
+            "QWidget#grid_bg { background: #070b16; }"
         )
 
         outer = QVBoxLayout(dlg)
@@ -2603,14 +2707,14 @@ class SoundboardButton(QWidget):
         query_edit = QLineEdit(query_init)
         query_edit.setPlaceholderText("Hakusana…")
         query_edit.setStyleSheet(
-            "QLineEdit { background: #1E1E1E; color: #E0E0E0; border: 1px solid #333;"
+            "QLineEdit { background: #101a36; color: #dce6ff; border: 1px solid #333;"
             " border-radius: 5px; padding: 6px 10px; font-size: 13px; }"
-            "QLineEdit:focus { border-color: #3A7BFF; }"
+            "QLineEdit:focus { border-color: #2e7fff; }"
         )
         search_btn = QPushButton("Hae")
         search_btn.setFixedWidth(70)
         search_btn.setStyleSheet(
-            "QPushButton { background: #3A7BFF; color: #fff; border: none; border-radius: 5px;"
+            "QPushButton { background: #2e7fff; color: #fff; border: none; border-radius: 5px;"
             " padding: 6px 12px; font-weight: 700; }"
             "QPushButton:hover { background: #5090FF; }"
             "QPushButton:disabled { background: #333; color: #666; }"
@@ -2640,14 +2744,14 @@ class SoundboardButton(QWidget):
         use_btn = QPushButton("Käytä valittua kuvaa")
         use_btn.setEnabled(False)
         use_btn.setStyleSheet(
-            "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);"
+            "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #2e7fff,stop:1 #7b2fff);"
             " color: #fff; border: none; border-radius: 5px; padding: 8px 20px; font-weight: 700; }"
-            "QPushButton:hover { background: #9A4DFF; }"
+            "QPushButton:hover { background: #7b2fff; }"
             "QPushButton:disabled { background: #222; color: #555; }"
         )
         cancel_btn = QPushButton("Peruuta")
         cancel_btn.setStyleSheet(
-            "QPushButton { background: #1E1E1E; color: #999; border: 1px solid #333;"
+            "QPushButton { background: #101a36; color: #999; border: 1px solid #333;"
             " border-radius: 5px; padding: 8px 16px; }"
             "QPushButton:hover { border-color: #666; color: #CCC; }"
         )
@@ -2659,8 +2763,8 @@ class SoundboardButton(QWidget):
 
         # ── State ────────────────────────────────────────────────────────
         THUMB_W, THUMB_H, COLS = 130, 100, 5
-        SEL_STYLE  = "border: 3px solid #3A7BFF; border-radius: 6px; background: #0a1428;"
-        IDLE_STYLE = "border: 2px solid #2A2A2A; border-radius: 6px; background: #111;"
+        SEL_STYLE  = "border: 3px solid #2e7fff; border-radius: 6px; background: #0a1428;"
+        IDLE_STYLE = "border: 2px solid #1c2c52; border-radius: 6px; background: #111;"
 
         thumb_labels: list[QLabel] = []
         full_urls: list[str] = []
@@ -3447,15 +3551,15 @@ class _OctagonStopButton(QPushButton):
         ]]
         poly = QPolygon(pts)
         if self.isDown():
-            fill = QColor("#FF2222")
+            fill = QColor("#ff3355")
         elif self.underMouse():
-            fill = QColor("#BB0000")
+            fill = QColor("#cc1030")
         else:
-            fill = QColor("#880000")
+            fill = QColor("#7a0f1f")
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(fill)
         p.drawPolygon(poly)
-        pen = QPen(QColor("#FFFFFF"), 2)
+        pen = QPen(QColor("#ff6070"), 2)
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawPolygon(poly)
@@ -3741,8 +3845,8 @@ class SoundboardPageContainer(QWidget):
             cls._MAX_ROW = 2  # 3 rows → max=2
 
     _PRESET_COLORS = [
-        ("#3A7BFF", "Sininen"),
-        ("#9A4DFF", "Violetti"),
+        ("#2e7fff", "Sininen"),
+        ("#7b2fff", "Violetti"),
         ("#FF4D4D", "Punainen"),
         ("#00CC6A", "Vihreä"),
         ("#FFB800", "Keltainen"),
@@ -3803,7 +3907,7 @@ class SoundboardPageContainer(QWidget):
                 continue
             slot_s, slot_e = self._get_slot_range(grp)
             r_s, r_e, c_s, c_e = self._slot_to_rect(slot_s, slot_e)
-            color_str = grp.get("color", "#3A7BFF")
+            color_str = grp.get("color", THEME["BLUE"])
             rect = self._row_rect(r_s, r_e, c_s, c_e)
             c = _QC(color_str)
             lbl = _QL(name, self)
@@ -3840,7 +3944,7 @@ class SoundboardPageContainer(QWidget):
         for grp in self._groups:
             slot_s, slot_e = self._get_slot_range(grp)
             r_s, r_e, c_s, c_e = self._slot_to_rect(slot_s, slot_e)
-            color_str = grp.get("color", "#3A7BFF")
+            color_str = grp.get("color", THEME["BLUE"])
             rect = self._row_rect(r_s, r_e, c_s, c_e)
             color = QColor(color_str)
             bg = QColor(color.red(), color.green(), color.blue(), 38)
@@ -3868,7 +3972,7 @@ class SoundboardPageContainer(QWidget):
         list_w.setStyleSheet(
             "QListWidget { background: #111; color: #ccc; border: 1px solid #333;"
             " border-radius: 4px; padding: 2px; }"
-            "QListWidget::item:selected { background: #1e1e2a; }"
+            "QListWidget::item:selected { background: #101a36; }"
         )
         lay.addWidget(QLabel("Ryhmät (värikoodit soundboardin taustalle):"))
         lay.addWidget(list_w)
@@ -3894,7 +3998,7 @@ class SoundboardPageContainer(QWidget):
             for grp in self._groups:
                 s_s, s_e = self._get_slot_range(grp)
                 item = QListWidgetItem(f"Slotit {s_s+1}–{s_e+1}: {grp['name']}")
-                item.setForeground(QColor(grp.get("color", "#3A7BFF")))
+                item.setForeground(QColor(grp.get("color", THEME["BLUE"])))
                 list_w.addItem(item)
 
         _refresh_list()
@@ -3934,7 +4038,7 @@ class SoundboardPageContainer(QWidget):
             color_combo = QComboBox()
             for hex_c, lbl in self._PRESET_COLORS:
                 color_combo.addItem(lbl, hex_c)
-            cur_color = existing.get("color", "#3A7BFF") if existing else "#3A7BFF"
+            cur_color = existing.get("color", THEME["BLUE"]) if existing else THEME["BLUE"]
             idx = next((i for i, (h, _) in enumerate(self._PRESET_COLORS) if h == cur_color), 0)
             color_combo.setCurrentIndex(idx)
             color_combo.setStyleSheet(_input_ss)
@@ -4058,11 +4162,11 @@ class SubtitleOverlay(QWidget):
 
     def set_font_size(self, size: int):
         self._orig_lbl.setStyleSheet(
-            f"color: #e6edf3; font-size: {size}px; font-weight: 600;"
+            f"color: #dce6ff; font-size: {size}px; font-weight: 600;"
             " background: transparent; padding: 0;"
         )
         self._trans_lbl.setStyleSheet(
-            f"color: #58a6ff; font-size: {size}px; font-weight: 600;"
+            f"color: #6aa8ff; font-size: {size}px; font-weight: 600;"
             " background: transparent; padding: 0;"
         )
 
@@ -4090,10 +4194,10 @@ class CompactWidget(QWidget):
         row = QHBoxLayout()
         row.setSpacing(6)
 
-        btn_style = (
-            "QPushButton { background: #18182a; border: 1px solid #2e2e48; border-radius: 6px;"
-            " color: #e0e0f0; font-size: 14px; }"
-            "QPushButton:hover { border-color: #7a4dff; }"
+        btn_style = T(
+            "QPushButton { background: @BG_RAISED; border: 1px solid @BORDER; border-radius: 6px;"
+            " color: @TEXT; font-size: 14px; }"
+            "QPushButton:hover { border-color: @PURPLE; }"
         )
 
         self.rec_btn = QPushButton("🎤")
@@ -4107,10 +4211,10 @@ class CompactWidget(QWidget):
         for lang in LANGS.keys():
             self.lang_combo.addItem(lang)
         self.lang_combo.setFixedWidth(120)
-        self.lang_combo.setStyleSheet(
-            "QComboBox { background: #18182a; border: 1px solid #2e2e48; border-radius: 6px;"
-            " color: #e0e0f0; font-size: 11px; padding: 2px 6px; }"
-        )
+        self.lang_combo.setStyleSheet(T(
+            "QComboBox { background: @BG_RAISED; border: 1px solid @BORDER; border-radius: 6px;"
+            " color: @TEXT; font-size: 11px; padding: 2px 6px; }"
+        ))
         self.lang_combo.currentTextChanged.connect(self._on_lang_changed)
         row.addWidget(self.lang_combo)
 
@@ -4133,7 +4237,7 @@ class CompactWidget(QWidget):
         self.status_lbl = QLabel("Ready — dupla-klikkaa palataksesi")
         self.status_lbl.setWordWrap(True)
         self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_lbl.setStyleSheet("color: #9aa0b0; font-size: 10px; background: transparent;")
+        self.status_lbl.setStyleSheet(T("color: @TEXT_DIM; font-size: 10px; background: transparent;"))
         self.status_lbl.installEventFilter(self)
         outer.addWidget(self.status_lbl)
 
@@ -4163,8 +4267,13 @@ class CompactWidget(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()), 14, 14)
-        p.fillPath(path, QColor(10, 14, 20, 235))
+        path.addRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 14, 14)
+        p.fillPath(path, QColor(5, 7, 15, 240))
+        pen = QPen(QColor(46, 127, 255, 160))
+        pen.setWidthF(1.5)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPath(path)
         p.end()
 
     def mousePressEvent(self, event):
@@ -4181,6 +4290,112 @@ class CompactWidget(QWidget):
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._app.toggle_compact_mode()
+
+
+# CUSTOM TITLEBAR (frameless main window)
+# =========================
+class TitleBar(QWidget):
+    HEIGHT = 42
+
+    def __init__(self, app_window: QWidget, file_menu):
+        super().__init__(app_window)
+        self._win = app_window
+        self.setFixedHeight(self.HEIGHT)
+        self.setStyleSheet(T(
+            "TitleBar { background: @GRAD_PANEL; border: none;"
+            " border-bottom: 1px solid @BORDER_GLOW; }"
+        ))
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(10, 0, 6, 0)
+        lay.setSpacing(6)
+
+        # Vasen: appi-ikoni + File-menu
+        icon_lbl = QLabel()
+        icon_path = os.path.join(ASSETS_PATH, "iconimage.ico")
+        if os.path.exists(icon_path):
+            icon_lbl.setPixmap(QIcon(icon_path).pixmap(20, 20))
+        lay.addWidget(icon_lbl)
+
+        menu_btn = QToolButton()
+        menu_btn.setText("☰  File")
+        menu_btn.setMenu(file_menu)
+        menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu_btn.setStyleSheet(T(
+            "QToolButton { background: transparent; border: 1px solid transparent;"
+            " border-radius: 6px; color: @TEXT_DIM; font-size: 12px; font-weight: 600;"
+            " padding: 4px 10px; }"
+            "QToolButton:hover { background: @BLUE_DIM; border-color: @BLUE; color: #ffffff; }"
+            "QToolButton::menu-indicator { image: none; }"
+        ))
+        lay.addWidget(menu_btn)
+
+        lay.addStretch(1)
+
+        # Keski: neon-logo
+        logo = QLabel(
+            '<span style="color:{b};">VOICE</span>'
+            '&nbsp;<span style="color:{p};">ROYALE</span>'.format(
+                b=THEME["BLUE_BRIGHT"], p=THEME["PURPLE_BRIGHT"])
+        )
+        logo.setStyleSheet(T(
+            "background: rgba(46,127,255,0.10); border: 1px solid @BLUE_DIM;"
+            " border-radius: 10px; padding: 3px 22px;"
+            " font-size: 17px; font-weight: 900; letter-spacing: 4px;"
+        ))
+        lay.addWidget(logo)
+
+        lay.addStretch(1)
+
+        # Oikea: ikkunanapit
+        btn_ss = T(
+            "QToolButton { background: transparent; border: none; border-radius: 6px;"
+            " color: @TEXT_DIM; font-size: 13px; font-weight: 400; padding: 0; }"
+            "QToolButton:hover { background: @BLUE_DIM; color: #ffffff; }"
+        )
+        close_ss = T(
+            "QToolButton { background: transparent; border: none; border-radius: 6px;"
+            " color: @TEXT_DIM; font-size: 13px; font-weight: 400; padding: 0; }"
+            "QToolButton:hover { background: @RED; color: #ffffff; }"
+        )
+        self._btn_min = QToolButton()
+        self._btn_min.setText("—")
+        self._btn_min.setFixedSize(38, 28)
+        self._btn_min.setStyleSheet(btn_ss)
+        self._btn_min.clicked.connect(lambda: self._win.showMinimized())
+        self._btn_max = QToolButton()
+        self._btn_max.setText("▢")
+        self._btn_max.setFixedSize(38, 28)
+        self._btn_max.setStyleSheet(btn_ss)
+        self._btn_max.clicked.connect(self._toggle_max)
+        self._btn_close = QToolButton()
+        self._btn_close.setText("✕")
+        self._btn_close.setFixedSize(38, 28)
+        self._btn_close.setStyleSheet(close_ss)
+        self._btn_close.clicked.connect(lambda: self._win.close())
+        for b in (self._btn_min, self._btn_max, self._btn_close):
+            lay.addWidget(b)
+
+    def _toggle_max(self):
+        if self._win.isMaximized():
+            self._win.showNormal()
+            self._btn_max.setText("▢")
+        else:
+            self._win.showMaximized()
+            self._btn_max.setText("❐")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            wh = self._win.windowHandle()
+            if wh is not None:
+                wh.startSystemMove()
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._toggle_max()
 
 
 # APPLICATION
@@ -4365,175 +4580,182 @@ class App(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Voice Royale")
+        self.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowSystemMenuHint
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
+        )
         self.setGeometry(100, 100, 1320, 820)
         self.setMinimumWidth(1040)
         icon_path = os.path.join(ASSETS_PATH, "iconimage.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
-        self.setStyleSheet("""
+        self.setStyleSheet(T("""
             QWidget {
-                background: #121212;
-                color: #E0E0E0;
+                background: @BG_DEEP;
+                color: @TEXT;
                 font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
                 font-size: 13px;
             }
             QFrame {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #121212,stop:1 #1A1A1A);
-                border: 1px solid #2a2a2a;
-                border-radius: 8px;
+                background: @GRAD_PANEL;
+                border: 1px solid @BORDER;
+                border-radius: 10px;
             }
-            QLabel { background: transparent; border: none; color: #E0E0E0; }
+            QLabel { background: transparent; border: none; color: @TEXT; }
 
             QPushButton {
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #1E1E1E,stop:1 #181818);
-                border: 1px solid #333333;
+                background: @GRAD_BTN;
+                border: 1px solid @BLUE_DIM;
                 border-radius: 8px;
-                color: #E0E0E0;
+                color: @TEXT;
                 padding: 8px 16px;
                 font-size: 13px;
                 font-weight: 600;
                 min-height: 30px;
             }
             QPushButton:hover {
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #252525,stop:1 #1E1E1E);
-                border-color: #9A4DFF;
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #1b2c5e,stop:1 #121a36);
+                border-color: @BLUE;
                 color: #ffffff;
             }
-            QPushButton:pressed { background: #0e0e0e; border-color: #3A7BFF; }
+            QPushButton:pressed { background: @BG_INPUT; border-color: @PURPLE; }
             QPushButton:checked {
-                background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
-                border-color: #3A7BFF;
+                background: @GRAD_ACCENT;
+                border-color: @BLUE_BRIGHT;
                 color: #ffffff;
             }
-            QPushButton:disabled { background: #1A1A1A; color: #444444; border-color: #222222; }
+            QPushButton:disabled { background: @BG_PANEL; color: @TEXT_FAINT; border-color: @BORDER; }
 
             QToolButton {
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #1E1E1E,stop:1 #161616);
-                border: 1px solid #2a2a2a;
+                background: @GRAD_BTN;
+                border: 1px solid @BORDER;
                 border-radius: 8px;
-                color: #B0B0B0;
+                color: @TEXT_DIM;
                 font-size: 11px;
                 font-weight: 700;
             }
-            QToolButton:hover { background: #252525; border-color: #3A7BFF; color: #ffffff; }
-            QToolButton:pressed { background: #0e0e0e; border-color: #9A4DFF; }
+            QToolButton:hover { background: @BLUE_DIM; border-color: @BLUE; color: #ffffff; }
+            QToolButton:pressed { background: @BG_INPUT; border-color: @PURPLE; }
 
             QComboBox {
-                background: #1E1E1E;
-                border: 1px solid #2a2a2a;
+                background: @BG_RAISED;
+                border: 1px solid @BORDER;
                 border-radius: 8px;
-                color: #E0E0E0;
+                color: @TEXT;
                 padding: 5px 10px;
                 min-height: 30px;
             }
-            QComboBox:hover { border-color: #3A7BFF; }
+            QComboBox:hover { border-color: @BLUE; }
             QComboBox::drop-down { border: none; width: 22px; }
             QComboBox QAbstractItemView {
-                background: #1A1A1A;
-                border: 1px solid #2a2a2a;
-                selection-background-color: #3A7BFF;
-                color: #E0E0E0;
+                background: @BG_PANEL;
+                border: 1px solid @BORDER_GLOW;
+                selection-background-color: @BLUE;
+                color: @TEXT;
             }
 
             QTextEdit {
-                background: #181818;
-                border: 1px solid #2a2a2a;
+                background: @BG_INPUT;
+                border: 1px solid @BORDER;
                 border-radius: 8px;
-                color: #E0E0E0;
+                color: @TEXT;
                 padding: 6px;
-                selection-background-color: #3A7BFF;
+                selection-background-color: @BLUE;
             }
-            QTextEdit:focus { border-color: #3A7BFF; }
+            QTextEdit:focus { border-color: @BORDER_GLOW; }
             QLineEdit {
-                background: #1E1E1E;
-                border: 1px solid #2a2a2a;
+                background: @BG_INPUT;
+                border: 1px solid @BORDER;
                 border-radius: 8px;
-                color: #E0E0E0;
+                color: @TEXT;
                 padding: 5px 10px;
                 min-height: 30px;
             }
-            QLineEdit:focus { border-color: #3A7BFF; }
+            QLineEdit:focus { border-color: @BORDER_GLOW; }
 
-            QCheckBox { color: #E0E0E0; background: transparent; spacing: 8px; }
+            QCheckBox { color: @TEXT; background: transparent; spacing: 8px; }
             QCheckBox::indicator {
                 width: 17px; height: 17px; border-radius: 5px;
-                border: 1px solid #333333; background: #1E1E1E;
+                border: 1px solid @BLUE_DIM; background: @BG_INPUT;
             }
-            QCheckBox::indicator:hover { border-color: #3A7BFF; }
+            QCheckBox::indicator:hover { border-color: @BLUE; }
             QCheckBox::indicator:checked {
-                background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
-                border-color: #3A7BFF;
+                background: @GRAD_ACCENT;
+                border-color: @BLUE_BRIGHT;
             }
 
-            QScrollBar:vertical { background: #121212; width: 8px; border-radius: 4px; margin: 0; }
+            QScrollBar:vertical { background: @BG_DEEP; width: 8px; border-radius: 4px; margin: 0; }
             QScrollBar::handle:vertical {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
+                background: @GRAD_ACCENT;
                 border-radius: 4px; min-height: 24px;
             }
-            QScrollBar::handle:vertical:hover { background: #9A4DFF; }
+            QScrollBar::handle:vertical:hover { background: @PURPLE_BRIGHT; }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-            QScrollBar:horizontal { background: #121212; height: 8px; border-radius: 4px; margin: 0; }
+            QScrollBar:horizontal { background: @BG_DEEP; height: 8px; border-radius: 4px; margin: 0; }
             QScrollBar::handle:horizontal {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
+                background: @GRAD_ACCENT;
                 border-radius: 4px; min-width: 24px;
             }
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 
             QTabWidget::pane {
-                border: 1px solid #2a2a2a;
-                border-radius: 8px;
-                background: #1A1A1A;
+                border: 1px solid @BORDER_GLOW;
+                border-radius: 10px;
+                background: @GRAD_PANEL;
             }
             QTabBar::tab {
-                background: #1E1E1E;
-                color: #888888;
+                background: @BG_RAISED;
+                color: @TEXT_FAINT;
                 padding: 9px 20px;
                 font-weight: 700;
                 font-size: 12px;
                 letter-spacing: 0.5px;
                 text-transform: uppercase;
-                border: 1px solid #2a2a2a;
+                border: 1px solid @BORDER;
                 border-bottom: none;
                 border-radius: 8px 8px 0 0;
                 margin-right: 3px;
             }
             QTabBar::tab:selected {
-                background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
+                background: @GRAD_ACCENT;
                 color: #ffffff;
-                border-color: #3A7BFF;
+                border-color: @BLUE_BRIGHT;
             }
-            QTabBar::tab:hover:!selected { background: #252525; color: #E0E0E0; border-color: #9A4DFF; }
+            QTabBar::tab:hover:!selected { background: @BLUE_DIM; color: @TEXT; border-color: @BLUE; }
 
-            QListWidget { background: #1A1A1A; border: 1px solid #2a2a2a; border-radius: 8px; }
+            QListWidget { background: @BG_INPUT; border: 1px solid @BORDER; border-radius: 8px; }
             QListWidget::item {
-                background: #1E1E1E; border: 1px solid #2a2a2a;
-                border-radius: 6px; margin: 2px 4px; padding: 5px 8px; color: #E0E0E0;
+                background: @BG_RAISED; border: 1px solid @BORDER;
+                border-radius: 6px; margin: 2px 4px; padding: 5px 8px; color: @TEXT;
             }
-            QListWidget::item:hover { background: #252525; border-color: #9A4DFF; }
+            QListWidget::item:hover { background: @BLUE_DIM; border-color: @PURPLE; }
             QListWidget::item:selected {
-                background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
-                border-color: #3A7BFF; color: #fff;
+                background: @GRAD_ACCENT;
+                border-color: @BLUE_BRIGHT; color: #fff;
             }
 
-            QScrollArea { background: #1A1A1A; border: 1px solid #2a2a2a; border-radius: 8px; }
-            QProgressBar { background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 4px; }
+            QScrollArea { background: transparent; border: 1px solid @BORDER; border-radius: 8px; }
+            QProgressBar { background: @BG_INPUT; border: 1px solid @BORDER; border-radius: 4px; }
             QProgressBar::chunk {
-                background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
+                background: @GRAD_ACCENT;
                 border-radius: 3px;
             }
 
             QMenu {
-                background: #1A1A1A;
-                border: 1px solid #2a2a2a;
+                background: @BG_PANEL;
+                border: 1px solid @BORDER_GLOW;
                 border-radius: 8px;
-                color: #E0E0E0;
+                color: @TEXT;
             }
             QMenu::item { padding: 6px 20px; }
             QMenu::item:selected {
-                background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);
+                background: @GRAD_ACCENT;
                 color: #ffffff;
             }
-        """)
+        """))
 
         # Last Whisper STT call round-trip time, shown in Settings dialog
         self._last_stt_latency_ms = None
@@ -4594,25 +4816,20 @@ class App(QWidget):
         # Stream Deck HTTP server (for official Elgato plugin)
         self._stream_deck = StreamDeckHttpServer(self.append_status)
 
-        # ============ Menu bar ============
-        menu_bar = QMenuBar()
-        menu_bar.setStyleSheet(
-            "QMenuBar { background: #0e0e0e; color: #C0C0C0; border-bottom: 1px solid #2a2a2a;"
-            " font-size: 12px; padding: 2px 4px; }"
-            "QMenuBar::item { padding: 4px 12px; border-radius: 4px; }"
-            "QMenuBar::item:selected { background: #1E1E1E; color: #E0E0E0; }"
-            "QMenuBar::item:pressed { background: #3A7BFF; color: #fff; }"
-            "QMenu { background: #1A1A1A; border: 1px solid #2a2a2a; color: #E0E0E0; }"
+        # ============ File menu (custom-titlebarin ☰-napille) ============
+        file_menu = QMenu(self)
+        file_menu.setStyleSheet(T(
+            "QMenu { background: @BG_PANEL; border: 1px solid @BORDER_GLOW; color: @TEXT; }"
             "QMenu::item { padding: 7px 20px; }"
-            "QMenu::item:selected { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF); color: #fff; }"
-            "QMenu::separator { height: 1px; background: #2a2a2a; margin: 4px 0; }"
-        )
-        file_menu = menu_bar.addMenu("File")
+            "QMenu::item:selected { background: @GRAD_ACCENT; color: #fff; }"
+            "QMenu::separator { height: 1px; background: @BORDER; margin: 4px 0; }"
+        ))
         file_menu.addAction("⚙  Settings", lambda: open_settings_dialog(self))
         file_menu.addSeparator()
         file_menu.addAction("ℹ  About Voice Royale", self._show_app_info)
         file_menu.addSeparator()
         file_menu.addAction("✕  Exit", QApplication.instance().quit)
+        self._titlebar = TitleBar(self, file_menu)
 
         # ============ Top row: Speech card (left) + History card (right) ============
         top_row = QHBoxLayout()
@@ -4629,13 +4846,18 @@ class App(QWidget):
         self._hidden_outputs_card = self._build_outputs_card()
 
         # ============ Root layout ============
+        content = QVBoxLayout()
+        content.setContentsMargins(8, 4, 8, 8)
+        content.setSpacing(6)
+        content.addLayout(top_row, 1)
+        content.addWidget(self._bottom_tabs, 1)
+        content.addWidget(self._build_meters_bar())
+
         root = QVBoxLayout()
-        root.setContentsMargins(8, 4, 8, 8)
-        root.setSpacing(6)
-        root.setMenuBar(menu_bar)
-        root.addLayout(top_row, 1)
-        root.addWidget(self._bottom_tabs, 1)
-        root.addWidget(self._build_meters_bar())
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        root.addWidget(self._titlebar)
+        root.addLayout(content, 1)
         self.setLayout(root)
 
         # Wire signals — safe cross-thread UI updates
@@ -4714,47 +4936,47 @@ class App(QWidget):
     def _make_card(self, title: str) -> tuple[QFrame, QVBoxLayout]:
         frame = QFrame()
         frame.setFrameShape(QFrame.Shape.StyledPanel)
-        frame.setStyleSheet(
-            "QFrame { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #141414,stop:1 #1A1A1A);"
-            " border: 1px solid #2a2a2a; border-radius: 8px; }"
-        )
+        frame.setStyleSheet(T(
+            "QFrame { background: @GRAD_PANEL;"
+            " border: 1px solid @BORDER_GLOW; border-radius: 10px; }"
+        ))
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(12, 10, 12, 12)
         layout.setSpacing(8)
         if title:
             title_lbl = QLabel(title.upper())
-            title_lbl.setStyleSheet(
-                "font-weight: 700; font-size: 12px; color: #3A7BFF; border: none;"
-                " letter-spacing: 0.5px; padding-bottom: 2px;"
-            )
+            title_lbl.setStyleSheet(T(
+                "font-weight: 700; font-size: 12px; color: @BLUE_BRIGHT; border: none;"
+                " letter-spacing: 1px; padding-bottom: 2px;"
+            ))
             layout.addWidget(title_lbl)
         return frame, layout
 
     def _build_speech_card(self) -> QWidget:
         frame = QFrame()
         frame.setFrameShape(QFrame.Shape.StyledPanel)
-        frame.setStyleSheet(
-            "QFrame { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #141414,stop:1 #1A1A1A);"
-            " border: 1px solid #2a2a2a; border-radius: 8px; }"
-        )
+        frame.setStyleSheet(T(
+            "QFrame { background: @GRAD_PANEL;"
+            " border: 1px solid @BORDER_GLOW; border-radius: 10px; }"
+        ))
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(12, 8, 12, 10)
         layout.setSpacing(6)
 
         # Card title
         title_lbl = QLabel("SPEECH")
-        title_lbl.setStyleSheet(
-            "font-weight: 700; font-size: 12px; color: #3A7BFF; border: none; letter-spacing: 0.5px;"
-        )
+        title_lbl.setStyleSheet(T(
+            "font-weight: 700; font-size: 12px; color: @BLUE_BRIGHT; border: none; letter-spacing: 1px;"
+        ))
         layout.addWidget(title_lbl)
 
         # Voicemeeter Banana warning banner (hidden when Banana is running)
         self._vm_warning_label = QLabel("VAROITUS: Voicemeeter Banana ei ole käynnissä — mikrofoni ei kuulu!")
         self._vm_warning_label.setWordWrap(True)
-        self._vm_warning_label.setStyleSheet(
-            "color: #ff3333; background: #2a0000; border: 1px solid #ff3333;"
+        self._vm_warning_label.setStyleSheet(T(
+            "color: @RED; background: #1a0510; border: 1px solid @RED;"
             " border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: 600;"
-        )
+        ))
         self._vm_warning_label.setVisible(False)
         layout.addWidget(self._vm_warning_label)
 
@@ -4764,20 +4986,20 @@ class App(QWidget):
         self.status_text.setPlainText("Ready. Type or record. Hotkey: Ctrl+Alt+Space")
         self.status_text.setMinimumHeight(90)
         self.status_text.setMaximumHeight(115)
-        self.status_text.setStyleSheet(
-            "QTextEdit { background: #0e0e0e; border: 1px solid #2a2a2a; border-radius: 8px;"
-            " color: #888888; font-size: 11px; padding: 5px; }"
-        )
+        self.status_text.setStyleSheet(T(
+            "QTextEdit { background: @BG_INPUT; border: 1px solid @BORDER; border-radius: 8px;"
+            " color: @TEXT_FAINT; font-size: 11px; padding: 5px; }"
+        ))
         layout.addWidget(self.status_text)
 
         # Translated text label
         self.translated_label = QLabel("Translated text will appear here.")
         self.translated_label.setWordWrap(True)
         self.translated_label.setMinimumHeight(32)
-        self.translated_label.setStyleSheet(
-            "color: #3A7BFF; padding: 5px 10px; background: #0e0e0e;"
-            "border: 1px solid #3A7BFF; border-radius: 8px; font-size: 12px;"
-        )
+        self.translated_label.setStyleSheet(T(
+            "color: @BLUE_BRIGHT; padding: 5px 10px; background: @BG_INPUT;"
+            "border: 1px solid @BORDER_GLOW; border-radius: 8px; font-size: 12px;"
+        ))
         layout.addWidget(self.translated_label)
 
         # Source + Target selectors (left narrow columns) + textbox (right)
@@ -4789,9 +5011,9 @@ class App(QWidget):
         src_lang_col.setSpacing(2)
         src_lang_col.setContentsMargins(0, 0, 0, 0)
         lbl_source = QLabel("SOURCE")
-        lbl_source.setStyleSheet(
-            "color: #555555; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;"
-        )
+        lbl_source.setStyleSheet(T(
+            "color: @TEXT_FAINT; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;"
+        ))
         src_lang_col.addWidget(lbl_source)
         self.source_langbox = QComboBox()
         self.source_langbox.addItem("Auto (tunnistaa)")
@@ -4816,9 +5038,9 @@ class App(QWidget):
         lang_col.setSpacing(2)
         lang_col.setContentsMargins(0, 0, 0, 0)
         lbl_target = QLabel("TARGET")
-        lbl_target.setStyleSheet(
-            "color: #555555; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;"
-        )
+        lbl_target.setStyleSheet(T(
+            "color: @TEXT_FAINT; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;"
+        ))
         lang_col.addWidget(lbl_target)
         self.langbox = QComboBox()
         for lang in LANGS.keys():
@@ -4846,13 +5068,13 @@ class App(QWidget):
         self.speak_button.setFixedSize(92, 32)
         self.speak_button.setToolTip("Speak this text (Ctrl+Enter)")
         self.speak_button.clicked.connect(self.on_speak)
-        self.speak_button.setStyleSheet(
-            "QPushButton { background: rgba(20,28,60,215); border: 1px solid #3A7BFF;"
-            " border-radius: 8px; color: #88AAFF; font-size: 12px; font-weight: 700; padding: 0; }"
-            "QPushButton:hover { background: rgba(58,123,255,180); color: #fff; border-color: #9A4DFF; }"
-            "QPushButton:pressed { background: #1a1a1a; }"
-            "QPushButton:disabled { background: rgba(20,20,20,180); color: #444; border-color: #222; }"
-        )
+        self.speak_button.setStyleSheet(T(
+            "QPushButton { background: rgba(16,26,54,220); border: 1px solid @BORDER_GLOW;"
+            " border-radius: 8px; color: @BLUE_BRIGHT; font-size: 12px; font-weight: 700; padding: 0; }"
+            "QPushButton:hover { background: rgba(46,127,255,180); color: #fff; border-color: @PURPLE; }"
+            "QPushButton:pressed { background: @BG_INPUT; }"
+            "QPushButton:disabled { background: rgba(10,15,30,180); color: @TEXT_FAINT; border-color: @BORDER; }"
+        ))
         self.speak_button.move(self.textbox.width() - 98, self.textbox.height() - 38)
 
         # Favorite button — floating overlay inside textbox, bottom-left
@@ -4860,11 +5082,11 @@ class App(QWidget):
         self.favorite_button.setFixedSize(98, 32)
         self.favorite_button.setToolTip("Save as favorite")
         self.favorite_button.clicked.connect(self.toggle_favorite)
-        self.favorite_button.setStyleSheet(
-            "QPushButton { background: rgba(26,18,0,215); border: 1px solid #5a4200;"
-            " border-radius: 8px; color: #AA8800; font-size: 12px; font-weight: 700; padding: 0; }"
-            "QPushButton:hover { border-color: #FFD700; color: #FFE84D; background: rgba(60,40,0,200); }"
-        )
+        self.favorite_button.setStyleSheet(T(
+            "QPushButton { background: rgba(26,18,0,215); border: 1px solid @GOLD_DIM;"
+            " border-radius: 8px; color: @GOLD; font-size: 12px; font-weight: 700; padding: 0; }"
+            "QPushButton:hover { border-color: @GOLD; color: @GOLD_BRIGHT; background: rgba(60,40,0,200); }"
+        ))
         self.favorite_button.move(6, self.textbox.height() - 38)
 
         # Install resize filter for both textbox overlay buttons
@@ -4889,30 +5111,29 @@ class App(QWidget):
         self.record_button = QPushButton("🎤  Listen")
         self.record_button.setToolTip("Record from mic — Whisper transcribes and translates")
         self.record_button.clicked.connect(self.on_record_toggle)
-        self.record_button.setStyleSheet(
-            "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
-            " stop:0 #3A7BFF, stop:1 #9A4DFF);"
-            " border: 1px solid #3A7BFF; border-radius: 8px; color: #fff;"
+        self.record_button.setStyleSheet(T(
+            "QPushButton { background: @GRAD_ACCENT;"
+            " border: 2px solid @BLUE_BRIGHT; border-radius: 8px; color: #fff;"
             " font-size: 13px; font-weight: 700; padding: 8px 18px; letter-spacing: 0.5px; }"
             "QPushButton:hover { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
-            " stop:0 #5590FF, stop:1 #B060FF); border-color: #9A4DFF; }"
-            "QPushButton:pressed { background: #1a1a1a; border-color: #3A7BFF; }"
-            "QPushButton:disabled { background: #1A1A1A; color: #444444; border-color: #222222; }"
-        )
+            " stop:0 #5590ff, stop:1 #a052ff); border-color: @PURPLE_BRIGHT; }"
+            "QPushButton:pressed { background: @BG_INPUT; border-color: @BLUE; }"
+            "QPushButton:disabled { background: @BG_PANEL; color: @TEXT_FAINT; border-color: @BORDER; }"
+        ))
         button_row.addWidget(self.record_button, 2)
 
         self.listen_button = QPushButton("👂  Live Listen")
         self.listen_button.setCheckable(True)
         self.listen_button.clicked.connect(self.toggle_wake_listener)
-        self.listen_button.setStyleSheet(
+        self.listen_button.setStyleSheet(T(
             "QPushButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-            " stop:0 #141a14, stop:1 #0e130e);"
-            " border: 1px solid #1f3d1f; border-radius: 8px; color: #00FF6A; font-weight: 600; }"
-            "QPushButton:hover { border-color: #00FF6A; color: #5AFFAA; background: #192319; }"
+            " stop:0 #0a1a12, stop:1 #06110b);"
+            " border: 1px solid @GREEN_DIM; border-radius: 8px; color: @GREEN; font-weight: 600; }"
+            "QPushButton:hover { border-color: @GREEN; color: #5affaa; background: #0c2417; }"
             "QPushButton:checked { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-            " stop:0 #0a2e14, stop:1 #071e0d);"
-            " border: 2px solid #00FF6A; color: #00FF6A; }"
-        )
+            " stop:0 #0a2e18, stop:1 #071e0f);"
+            " border: 2px solid @GREEN; color: @GREEN; }"
+        ))
         button_row.addWidget(self.listen_button, 1)
 
         self._overlay_btn = QPushButton("CC")
@@ -4920,12 +5141,12 @@ class App(QWidget):
         self._overlay_btn.setFixedWidth(40)
         self._overlay_btn.setToolTip("Subtitle Overlay — kelluva tekstitys (raahaa kohdalle)")
         self._overlay_btn.clicked.connect(self.toggle_overlay)
-        self._overlay_btn.setStyleSheet(
-            "QPushButton { background: #111118; border: 1px solid #333; border-radius: 8px;"
-            " color: #555; font-size: 11px; font-weight: 700; padding: 0; }"
-            "QPushButton:hover { border-color: #58a6ff; color: #58a6ff; }"
-            "QPushButton:checked { background: #0a1428; border: 2px solid #58a6ff; color: #58a6ff; }"
-        )
+        self._overlay_btn.setStyleSheet(T(
+            "QPushButton { background: @BG_RAISED; border: 1px solid @BORDER; border-radius: 8px;"
+            " color: @TEXT_FAINT; font-size: 11px; font-weight: 700; padding: 0; }"
+            "QPushButton:hover { border-color: @BLUE; color: @BLUE_BRIGHT; }"
+            "QPushButton:checked { background: @BLUE_DIM; border: 2px solid @BLUE; color: @BLUE_BRIGHT; }"
+        ))
         button_row.addWidget(self._overlay_btn)
 
         self._compact_btn = QPushButton("▭")
@@ -4933,12 +5154,12 @@ class App(QWidget):
         self._compact_btn.setFixedWidth(40)
         self._compact_btn.setToolTip("Compact-tila — pieni kelluva widget pelaamisen ajaksi")
         self._compact_btn.clicked.connect(self.toggle_compact_mode)
-        self._compact_btn.setStyleSheet(
-            "QPushButton { background: #111118; border: 1px solid #333; border-radius: 8px;"
-            " color: #555; font-size: 11px; font-weight: 700; padding: 0; }"
-            "QPushButton:hover { border-color: #58a6ff; color: #58a6ff; }"
-            "QPushButton:checked { background: #0a1428; border: 2px solid #58a6ff; color: #58a6ff; }"
-        )
+        self._compact_btn.setStyleSheet(T(
+            "QPushButton { background: @BG_RAISED; border: 1px solid @BORDER; border-radius: 8px;"
+            " color: @TEXT_FAINT; font-size: 11px; font-weight: 700; padding: 0; }"
+            "QPushButton:hover { border-color: @BLUE; color: @BLUE_BRIGHT; }"
+            "QPushButton:checked { background: @BLUE_DIM; border: 2px solid @BLUE; color: @BLUE_BRIGHT; }"
+        ))
         button_row.addWidget(self._compact_btn)
         layout.addLayout(button_row)
 
@@ -4946,21 +5167,21 @@ class App(QWidget):
         info_row = QHBoxLayout()
         info_row.setContentsMargins(0, 0, 0, 0)
         self.wake_status_label = QLabel("Wake-word: off")
-        self.wake_status_label.setStyleSheet("color: #444444; font-size: 10px; border: none;")
+        self.wake_status_label.setStyleSheet(T("color: @TEXT_FAINT; font-size: 10px; border: none;"))
         info_row.addWidget(self.wake_status_label, 1)
         self.hotkey_label = QLabel(f"Hotkey: {self.settings.get('hotkey', 'ctrl+alt+space')}")
         self.hotkey_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.hotkey_label.setStyleSheet("color: #444444; font-size: 10px; border: none;")
+        self.hotkey_label.setStyleSheet(T("color: @TEXT_FAINT; font-size: 10px; border: none;"))
         info_row.addWidget(self.hotkey_label)
         layout.addLayout(info_row)
 
         # Wake-word usage instructions — shown only when listening is active
         self.wake_instructions_label = QLabel()
         self.wake_instructions_label.setWordWrap(True)
-        self.wake_instructions_label.setStyleSheet(
-            "QLabel { background: #0d1f12; border: 1px solid #1f6b35; border-radius: 6px;"
-            " color: #7ee89a; font-size: 11px; padding: 8px 10px; }"
-        )
+        self.wake_instructions_label.setStyleSheet(T(
+            "QLabel { background: #06180f; border: 1px solid @GREEN_DIM; border-radius: 6px;"
+            " color: @GREEN; font-size: 11px; padding: 8px 10px; }"
+        ))
         self.wake_instructions_label.setVisible(False)
         layout.addWidget(self.wake_instructions_label)
 
@@ -4976,7 +5197,7 @@ class App(QWidget):
         layout.addWidget(self.history_list, 1)
 
         fav_title = QLabel("FAVORITES")
-        fav_title.setStyleSheet("font-weight: 700; font-size: 11px; color: #9A4DFF; border: none; margin-top: 6px; letter-spacing: 0.5px;")
+        fav_title.setStyleSheet(T("font-weight: 700; font-size: 11px; color: @GOLD; border: none; margin-top: 6px; letter-spacing: 1px;"))
         layout.addWidget(fav_title)
 
         self.favorites_list = QListWidget()
@@ -5018,16 +5239,16 @@ class App(QWidget):
 
         self._sb_tabs = QTabWidget()
         self._sb_tabs.setTabsClosable(False)
-        self._sb_tabs.setStyleSheet(
-            "QTabWidget::pane { border: 1px solid #2a2a2a; border-radius: 8px; background: #121212; }"
+        self._sb_tabs.setStyleSheet(T(
+            "QTabWidget::pane { border: 1px solid @BORDER; border-radius: 8px; background: @BG_DEEP; }"
             "QTabBar { margin-right: 232px; }"
-            "QTabBar::tab { background: #1E1E1E; color: #666666; padding: 7px 14px;"
+            "QTabBar::tab { background: @BG_RAISED; color: @TEXT_FAINT; padding: 7px 14px;"
             " font-size: 11px; font-weight: 700; letter-spacing: 0.5px;"
-            " border: 1px solid #2a2a2a; border-bottom: none; border-radius: 4px 4px 0 0; margin-right: 2px; }"
-            "QTabBar::tab:selected { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);"
-            " color: #fff; border-color: #3A7BFF; }"
-            "QTabBar::tab:hover:!selected { background: #252525; color: #E0E0E0; border-color: #9A4DFF; }"
-        )
+            " border: 1px solid @BORDER; border-bottom: none; border-radius: 4px 4px 0 0; margin-right: 2px; }"
+            "QTabBar::tab:selected { background: @GRAD_ACCENT;"
+            " color: #fff; border-color: @BLUE_BRIGHT; }"
+            "QTabBar::tab:hover:!selected { background: @BLUE_DIM; color: @TEXT; border-color: @BLUE; }"
+        ))
 
         # Right-click context menu on tab bar
         self._sb_tabs.tabBar().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -5053,12 +5274,12 @@ class App(QWidget):
         self._sb_edit_btn.setCheckable(True)
         self._sb_edit_btn.setFixedSize(44, 24)
         self._sb_edit_btn.setToolTip("Muokkaustila: vedä kuva/ääni napin päälle tai oikeaklikkaa")
-        self._sb_edit_btn.setStyleSheet(
-            "QPushButton { background: #1E1E2A; color: #666688; border: 1px solid #333344;"
+        self._sb_edit_btn.setStyleSheet(T(
+            "QPushButton { background: @BG_RAISED; color: @TEXT_FAINT; border: 1px solid @BORDER;"
             " border-radius: 4px; font-size: 10px; font-weight: 700; padding: 0; }"
-            "QPushButton:hover:!checked { background: #252535; border-color: #9A4DFF; color: #AAAACC; }"
-            "QPushButton:checked { background: #1A0E00; color: #FF9A00; border: 2px solid #FF9A00; padding: 0; }"
-        )
+            "QPushButton:hover:!checked { background: @BLUE_DIM; border-color: @PURPLE; color: @TEXT_DIM; }"
+            "QPushButton:checked { background: #1a0e00; color: @GOLD; border: 2px solid @GOLD; padding: 0; }"
+        ))
         self._sb_edit_btn.toggled.connect(self._sb_toggle_edit_mode)
         _corner_lay.addWidget(self._sb_edit_btn)
 
@@ -5068,16 +5289,16 @@ class App(QWidget):
         self._sb_vol_slider.setValue(int(self.settings.get("soundboard_volume", 1.0) * 100))
         self._sb_vol_slider.setFixedWidth(72)
         self._sb_vol_slider.setToolTip("Soundboard volyymi (kaikki slotet)")
-        self._sb_vol_slider.setStyleSheet(
-            "QSlider::groove:horizontal { height:4px; background:#333344; border-radius:2px; }"
+        self._sb_vol_slider.setStyleSheet(T(
+            "QSlider::groove:horizontal { height:4px; background:@BORDER; border-radius:2px; }"
             "QSlider::handle:horizontal { width:12px; height:12px; margin:-4px 0;"
-            " background:#9A4DFF; border-radius:6px; }"
-            "QSlider::sub-page:horizontal { background:#9A4DFF; border-radius:2px; }"
-        )
+            " background:@PURPLE_BRIGHT; border-radius:6px; }"
+            "QSlider::sub-page:horizontal { background:@GRAD_ACCENT; border-radius:2px; }"
+        ))
         self._sb_vol_label = QLabel(f"{self._sb_vol_slider.value()}%")
         self._sb_vol_label.setFixedWidth(34)
         self._sb_vol_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self._sb_vol_label.setStyleSheet("color:#AAAACC; font-size:10px; background:transparent;")
+        self._sb_vol_label.setStyleSheet(T("color:@TEXT_DIM; font-size:10px; background:transparent;"))
 
         def _on_sb_vol(v):
             self._sb_vol_label.setText(f"{v}%")
@@ -5098,12 +5319,12 @@ class App(QWidget):
             "S = Pienet (11×5 riviä, mahtuu kaikki 55)\n"
             "Klikkaa vaihtaaksesi"
         )
-        _sb_sz_btn.setStyleSheet(
-            "QPushButton { background: #252535; color: #DDDDFF; border: 1px solid #444466;"
+        _sb_sz_btn.setStyleSheet(T(
+            "QPushButton { background: @BG_RAISED; color: @TEXT; border: 1px solid @BORDER;"
             " border-radius: 4px; font-size: 10px; font-weight: 700; padding: 0 6px; }"
-            "QPushButton:hover { background: #303048; border-color: #9A4DFF; color: #FFFFFF; }"
-            "QPushButton:pressed { background: #0e0e1e; }"
-        )
+            "QPushButton:hover { background: @BLUE_DIM; border-color: @PURPLE; color: #ffffff; }"
+            "QPushButton:pressed { background: @BG_INPUT; }"
+        ))
 
         def _toggle_sb_size():
             cur = self.settings.get("sb_icon_size", "large")
@@ -5118,12 +5339,12 @@ class App(QWidget):
         add_page_btn = QPushButton("+")
         add_page_btn.setFixedWidth(26)
         add_page_btn.setToolTip("Lisää sivu (max 10)")
-        add_page_btn.setStyleSheet(
-            "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);"
+        add_page_btn.setStyleSheet(T(
+            "QPushButton { background: @GRAD_ACCENT;"
             " color: #fff; border: none; border-radius: 4px; font-size: 15px; font-weight: bold; padding: 0; }"
-            "QPushButton:hover { background: #9A4DFF; }"
-            "QPushButton:pressed { background: #1a1a1a; border: 1px solid #3A7BFF; }"
-        )
+            "QPushButton:hover { background: @PURPLE; }"
+            "QPushButton:pressed { background: @BG_INPUT; border: 1px solid @BLUE; }"
+        ))
         add_page_btn.clicked.connect(self._sb_add_page)
         _corner_lay.addWidget(add_page_btn)
         self._sb_tabs.setCornerWidget(_corner_wrap, Qt.Corner.TopRightCorner)
@@ -5176,23 +5397,23 @@ class App(QWidget):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(container)
-        scroll.setStyleSheet(
+        scroll.setStyleSheet(T(
             "QScrollArea { border: none; background: transparent; }"
-            "QScrollBar:horizontal { height: 16px; background: #0d0d1a; border-radius: 8px; margin: 0 18px; }"
-            "QScrollBar::handle:horizontal { background: #3a3a5a; border-radius: 7px; min-width: 40px; }"
-            "QScrollBar::handle:horizontal:hover { background: #5a5a8a; }"
-            "QScrollBar::add-line:horizontal { width: 18px; background: #141428;"
-            " border-left: 1px solid #333355; border-radius: 0 8px 8px 0; }"
-            "QScrollBar::sub-line:horizontal { width: 18px; background: #141428;"
-            " border-right: 1px solid #333355; border-radius: 8px 0 0 8px; }"
+            "QScrollBar:horizontal { height: 16px; background: @BG_INPUT; border-radius: 8px; margin: 0 18px; }"
+            "QScrollBar::handle:horizontal { background: @BLUE_DIM; border-radius: 7px; min-width: 40px; }"
+            "QScrollBar::handle:horizontal:hover { background: @BLUE; }"
+            "QScrollBar::add-line:horizontal { width: 18px; background: @BG_RAISED;"
+            " border-left: 1px solid @BORDER; border-radius: 0 8px 8px 0; }"
+            "QScrollBar::sub-line:horizontal { width: 18px; background: @BG_RAISED;"
+            " border-right: 1px solid @BORDER; border-radius: 8px 0 0 8px; }"
             "QScrollBar::add-line:horizontal:hover, QScrollBar::sub-line:horizontal:hover"
-            " { background: #1e1e3a; }"
-        )
+            " { background: @BLUE_DIM; }"
+        ))
 
         # Fixed toolbar below scroll: [Takaisin] [stretch] [Soita random] [STOP]
         _tb = QWidget()
         _tb.setFixedHeight(36)
-        _tb.setStyleSheet("background: #0a0a12; border-top: 1px solid #1a1a2a;")
+        _tb.setStyleSheet(T("background: @BG_INPUT; border-top: 1px solid @BORDER;"))
         _tb_lay = QHBoxLayout(_tb)
         _tb_lay.setContentsMargins(6, 3, 6, 3)
         _tb_lay.setSpacing(6)
@@ -5200,23 +5421,23 @@ class App(QWidget):
         _back_btn = QPushButton("◀ Takaisin")
         _back_btn.setFixedHeight(28)
         _back_btn.setEnabled(False)
-        _back_btn.setStyleSheet(
-            "QPushButton { background: #141428; color: #8888BB; border: 1px solid #333355;"
+        _back_btn.setStyleSheet(T(
+            "QPushButton { background: @BG_RAISED; color: @PURPLE_BRIGHT; border: 1px solid @BORDER;"
             " border-radius: 4px; font-size: 10px; font-weight: 700; padding: 0 10px; }"
-            "QPushButton:hover:enabled { border-color: #9A4DFF; color: #C0C0FF; }"
-            "QPushButton:pressed:enabled { background: #0A0A1A; }"
-            "QPushButton:disabled { color: #333355; border-color: #222233; background: #0d0d1a; }"
-        )
+            "QPushButton:hover:enabled { border-color: @PURPLE; color: #d0c0ff; }"
+            "QPushButton:pressed:enabled { background: @BG_INPUT; }"
+            "QPushButton:disabled { color: @TEXT_FAINT; border-color: @BORDER; background: @BG_INPUT; }"
+        ))
         _back_btn.clicked.connect(lambda: self._sb_go_back(self._sb_tabs.currentIndex()))
 
         _rand_btn = QPushButton("▶ Soita random")
         _rand_btn.setFixedHeight(28)
-        _rand_btn.setStyleSheet(
-            "QPushButton { background: #141428; color: #6688AA; border: 1px solid #2a3a50;"
+        _rand_btn.setStyleSheet(T(
+            "QPushButton { background: @BG_RAISED; color: @TEXT_DIM; border: 1px solid @BLUE_DIM;"
             " border-radius: 4px; font-size: 10px; font-weight: 700; padding: 0 10px; }"
-            "QPushButton:hover { border-color: #3A7BFF; color: #88BBFF; }"
-            "QPushButton:pressed { background: #0A0A1A; }"
-        )
+            "QPushButton:hover { border-color: @BLUE; color: @BLUE_BRIGHT; }"
+            "QPushButton:pressed { background: @BG_INPUT; }"
+        ))
         _rand_btn.clicked.connect(lambda: self._sb_play_random(self._sb_tabs.currentIndex()))
 
         _stop_btn = _OctagonStopButton()
@@ -5553,12 +5774,12 @@ class App(QWidget):
         self._fx_toggle.setCheckable(True)
         self._fx_toggle.setChecked(self.settings.get("voice_fx_enabled", False))
         self._fx_toggle.setToolTip("Kytkee koko äänivirran päälle/pois")
-        self._fx_toggle.setStyleSheet(
-            "QPushButton { background: #1E1E1E; border: 1px solid #2a2a2a; color: #888888; }"
-            "QPushButton:hover { border-color: #3A7BFF; color: #E0E0E0; }"
-            "QPushButton:checked { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #003A1A,stop:1 #00270F);"
-            " border: 1px solid #00FF6A; color: #00FF6A; }"
-        )
+        self._fx_toggle.setStyleSheet(T(
+            "QPushButton { background: @BG_RAISED; border: 1px solid @BORDER; color: @TEXT_FAINT; }"
+            "QPushButton:hover { border-color: @BLUE; color: @TEXT; }"
+            "QPushButton:checked { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #003a1e,stop:1 #002712);"
+            " border: 1px solid @GREEN; color: @GREEN; }"
+        ))
         if self.settings.get("voice_fx_enabled", False):
             self._fx_toggle.setText("Voice FX: ON")
         self._fx_toggle.clicked.connect(self._toggle_voice_fx)
@@ -5567,12 +5788,12 @@ class App(QWidget):
         self._hear_myself_btn = QPushButton("Hear Myself: OFF")
         self._hear_myself_btn.setCheckable(True)
         self._hear_myself_btn.setChecked(self.settings.get("voice_fx_hear_myself", False))
-        self._hear_myself_btn.setStyleSheet(
-            "QPushButton { background: #1E1E1E; border: 1px solid #2a2a2a; color: #888888;"
+        self._hear_myself_btn.setStyleSheet(T(
+            "QPushButton { background: @BG_RAISED; border: 1px solid @BORDER; color: @TEXT_FAINT;"
             " font-size: 11px; font-weight: 700; padding: 5px 10px; }"
-            "QPushButton:hover { border-color: #FF9500; color: #E0E0E0; }"
-            "QPushButton:checked { background: #2A1A00; border: 1px solid #FF9500; color: #FF9500; }"
-        )
+            "QPushButton:hover { border-color: @GOLD; color: @TEXT; }"
+            "QPushButton:checked { background: #2a1a00; border: 1px solid @GOLD; color: @GOLD; }"
+        ))
         if self.settings.get("voice_fx_hear_myself", False):
             self._hear_myself_btn.setText("Hear Myself: ON")
         self._hear_myself_btn.clicked.connect(self._toggle_hear_myself)
@@ -5583,7 +5804,7 @@ class App(QWidget):
         # oletus-toistolaite (ei tarvitse etsiä käsin)
         mon_row = QHBoxLayout()
         mon_lbl = QLabel("KUULEN ITSENI:")
-        mon_lbl.setStyleSheet("border: none; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: #666666;")
+        mon_lbl.setStyleSheet(T("border: none; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: @TEXT_FAINT;"))
         mon_row.addWidget(mon_lbl)
         self._fx_monitor_combo = QComboBox()
         self._populate_fx_monitor_combo()
@@ -5601,7 +5822,7 @@ class App(QWidget):
         # Preset buttons — 5 pientä saraketta niin kaikki 14 (perus pitch +
         # stftPitchShiftin poly-pitch-presetit) mahtuvat näkyviin ilman vierittämistä
         presets_lbl = QLabel("PRESET:")
-        presets_lbl.setStyleSheet("font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: #3A7BFF; border: none; margin-top: 6px;")
+        presets_lbl.setStyleSheet(T("font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: @BLUE_BRIGHT; border: none; margin-top: 6px;"))
         layout.addWidget(presets_lbl)
 
         preset_grid = QGridLayout()
@@ -5613,13 +5834,12 @@ class App(QWidget):
             btn.setCheckable(True)
             btn.setChecked(preset == "Normal")
             btn.setMinimumHeight(26)
-            btn.setStyleSheet(
-                "QPushButton { background: #1E1E1E; border: 1px solid #2a2a2a;"
-                " border-radius: 6px; color: #888888; font-weight: 600; padding: 4px 2px; font-size: 10px; }"
-                "QPushButton:hover { background: #252525; border-color: #9A4DFF; color: #E0E0E0; }"
-                "QPushButton:checked { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
-                " stop:0 #3A7BFF, stop:1 #9A4DFF); border: 2px solid #3A7BFF; color: #fff; }"
-            )
+            btn.setStyleSheet(T(
+                "QPushButton { background: @BG_RAISED; border: 1px solid @BORDER;"
+                " border-radius: 6px; color: @TEXT_DIM; font-weight: 600; padding: 4px 2px; font-size: 10px; }"
+                "QPushButton:hover { background: @BLUE_DIM; border-color: @PURPLE; color: @TEXT; }"
+                "QPushButton:checked { background: @GRAD_ACCENT; border: 2px solid @BLUE_BRIGHT; color: #fff; }"
+            ))
             btn.clicked.connect(lambda checked, p=preset: self._select_fx_preset(p))
             preset_grid.addWidget(btn, i // _FX_PRESET_COLS, i % _FX_PRESET_COLS)
             self._fx_preset_buttons[preset] = btn
@@ -5628,7 +5848,7 @@ class App(QWidget):
         layout.addStretch()
 
         hint = QLabel("FX Output on aina sama chat-virtuaalikaapeli (esim. Voicemeeter Input) jonka olet valinnut Output-laitteissa — ei erillistä valintaa. \"Voice FX: ON\" käynnistää koko äänivirran, \"OFF\" pysäyttää sen kokonaan.")
-        hint.setStyleSheet("color: #444444; font-size: 11px; border: none; margin-top: 4px;")
+        hint.setStyleSheet(T("color: @TEXT_FAINT; font-size: 11px; border: none; margin-top: 4px;"))
         hint.setWordWrap(True)
         layout.addWidget(hint)
         return frame
@@ -5643,13 +5863,13 @@ class App(QWidget):
             except Exception:
                 name = str(out_dev)
             self._fx_output_status_lbl.setText(f"✅ FX Output (automaattinen): {name}")
-            self._fx_output_status_lbl.setStyleSheet("border: none; font-size: 11px; color: #00CC66; margin-top: 2px;")
+            self._fx_output_status_lbl.setStyleSheet(T("border: none; font-size: 11px; color: @GREEN; margin-top: 2px;"))
         else:
             self._fx_output_status_lbl.setText(
                 "⚠️ Ei chat-virtuaalikaapelia valittuna Output-laitteissa — valitse esim. "
                 "\"Voicemeeter Input\" Laitteet-listasta jotta Voice FX voi käynnistyä."
             )
-            self._fx_output_status_lbl.setStyleSheet("border: none; font-size: 11px; color: #FF9500; margin-top: 2px;")
+            self._fx_output_status_lbl.setStyleSheet(T("border: none; font-size: 11px; color: @GOLD; margin-top: 2px;"))
 
     def _populate_fx_monitor_combo(self):
         self._fx_monitor_combo.clear()
@@ -5695,7 +5915,7 @@ class App(QWidget):
         # Header row: title + action buttons
         header = QHBoxLayout()
         title_lbl = QLabel("OUTPUT DEVICES & LEVELS")
-        title_lbl.setStyleSheet("font-weight: 700; font-size: 12px; color: #3A7BFF; letter-spacing: 0.5px; border: none;")
+        title_lbl.setStyleSheet("font-weight: 700; font-size: 12px; color: #2e7fff; letter-spacing: 0.5px; border: none;")
         header.addWidget(title_lbl)
         header.addStretch()
         self.refresh_devices_button = QPushButton("🔄 Refresh")
@@ -5712,10 +5932,10 @@ class App(QWidget):
         scroll.setMinimumHeight(80)
         scroll.setMaximumHeight(160)
         scroll.setStyleSheet(
-            "QScrollArea { border: 1px solid #2a2a2a; border-radius: 8px; background: #111111; }"
+            "QScrollArea { border: 1px solid #1c2c52; border-radius: 8px; background: #0a0f1e; }"
         )
         container = QWidget()
-        container.setStyleSheet("background: #111111;")
+        container.setStyleSheet("background: #0a0f1e;")
         self._device_rows_layout = QVBoxLayout(container)
         self._device_rows_layout.setSpacing(2)
         self._device_rows_layout.setContentsMargins(4, 4, 4, 4)
@@ -5726,7 +5946,7 @@ class App(QWidget):
         # Input device row at the bottom
         input_row = QHBoxLayout()
         input_lbl = QLabel("INPUT MIC:")
-        input_lbl.setStyleSheet("border: none; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: #666666;")
+        input_lbl.setStyleSheet("border: none; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: #546a94;")
         input_row.addWidget(input_lbl)
         self.input_device_combo = QComboBox()
         self.input_device_combo.currentIndexChanged.connect(self.on_input_device_changed)
@@ -5739,16 +5959,16 @@ class App(QWidget):
         """Always-visible compact mic + output meters strip at the bottom of the window."""
         frame = QFrame()
         frame.setFixedHeight(36)
-        frame.setStyleSheet(
-            "QFrame { background: #0e0e0e; border: 1px solid #2a2a2a; border-radius: 8px; }"
-        )
+        frame.setStyleSheet(T(
+            "QFrame { background: @BG_INPUT; border: 1px solid @BORDER; border-radius: 8px; }"
+        ))
         outer = QHBoxLayout(frame)
         outer.setContentsMargins(10, 4, 10, 4)
         outer.setSpacing(0)
 
         # MIC section (always visible)
         mic_lbl = QLabel("MIC")
-        mic_lbl.setStyleSheet("color: #00FF6A; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; border: none; min-width: 26px;")
+        mic_lbl.setStyleSheet(T("color: @GREEN; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; border: none; min-width: 26px;"))
         outer.addWidget(mic_lbl)
         outer.addSpacing(4)
 
@@ -5764,9 +5984,9 @@ class App(QWidget):
         outer.addSpacing(4)
 
         self.mic_db_label = QLabel("-∞")
-        self.mic_db_label.setStyleSheet(
-            "color: #444444; font-size: 9px; font-family: Consolas; border: none;"
-        )
+        self.mic_db_label.setStyleSheet(T(
+            "color: @TEXT_FAINT; font-size: 9px; font-family: Consolas; border: none;"
+        ))
         self.mic_db_label.setFixedWidth(34)
         self.mic_db_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         outer.addWidget(self.mic_db_label)
@@ -5774,19 +5994,19 @@ class App(QWidget):
         sep0 = QFrame()
         sep0.setFrameShape(QFrame.Shape.VLine)
         sep0.setFixedWidth(1)
-        sep0.setStyleSheet("background: #2a2a2a; border: none;")
+        sep0.setStyleSheet(T("background: @BORDER; border: none;"))
         outer.addSpacing(6)
         outer.addWidget(sep0)
         outer.addSpacing(6)
 
         lbl = QLabel("OUT")
-        lbl.setStyleSheet("color: #3A7BFF; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; border: none; min-width: 26px;")
+        lbl.setStyleSheet(T("color: @BLUE_BRIGHT; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; border: none; min-width: 26px;"))
         outer.addWidget(lbl)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
         sep.setFixedWidth(1)
-        sep.setStyleSheet("background: #2a2a2a; border: none;")
+        sep.setStyleSheet(T("background: @BORDER; border: none;"))
         outer.addWidget(sep)
         outer.addSpacing(8)
 
@@ -5797,10 +6017,17 @@ class App(QWidget):
         self._mb_inner_lay.setContentsMargins(0, 0, 0, 0)
         self._mb_inner_lay.setSpacing(14)
         self._mb_placeholder = QLabel("No output devices selected")
-        self._mb_placeholder.setStyleSheet("color: #333333; font-size: 11px; border: none;")
+        self._mb_placeholder.setStyleSheet(T("color: @TEXT_FAINT; font-size: 11px; border: none;"))
         self._mb_inner_lay.addWidget(self._mb_placeholder)
         self._mb_inner_lay.addStretch()
         outer.addWidget(self._mb_inner, 1)
+
+        # Resize-kahva frameless-ikkunalle (oikea alakulma)
+        grip = QSizeGrip(frame)
+        grip.setFixedSize(16, 16)
+        grip.setStyleSheet("background: transparent; border: none;")
+        outer.addSpacing(4)
+        outer.addWidget(grip, 0, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
 
         return frame
 
@@ -5821,7 +6048,7 @@ class App(QWidget):
             short = (name[:15] + "…") if len(name) > 15 else name
 
             name_lbl = QLabel(short)
-            name_lbl.setStyleSheet("color: #555555; font-size: 9px; border: none;")
+            name_lbl.setStyleSheet(T("color: @TEXT_FAINT; font-size: 9px; border: none;"))
 
             bar = QProgressBar()
             bar.setRange(0, 1000)
@@ -5832,9 +6059,9 @@ class App(QWidget):
             bar.setStyleSheet(METER_STYLE_OUT)
 
             db_lbl = QLabel("-∞")
-            db_lbl.setStyleSheet(
-                "color: #444444; font-size: 9px; font-family: Consolas; border: none;"
-            )
+            db_lbl.setStyleSheet(T(
+                "color: @TEXT_FAINT; font-size: 9px; font-family: Consolas; border: none;"
+            ))
             db_lbl.setFixedWidth(34)
             db_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -5865,7 +6092,7 @@ class App(QWidget):
     def _add_device_row(self, device_index: int, display_name: str, full_name: str, was_selected: bool):
         container = QWidget()
         container.setStyleSheet(
-            "QWidget { background: #1A1A1A; border: 1px solid #2a2a2a; border-radius: 8px; }"
+            "QWidget { background: #0a0f1e; border: 1px solid #1c2c52; border-radius: 8px; }"
         )
         row = QHBoxLayout(container)
         row.setContentsMargins(6, 4, 6, 4)
@@ -5876,7 +6103,7 @@ class App(QWidget):
         cb.stateChanged.connect(self.on_output_device_changed)
 
         name_lbl = QLabel(display_name)
-        name_lbl.setStyleSheet("color: #C0C0C0; font-size: 12px; border: none;")
+        name_lbl.setStyleSheet("color: #b9c5e6; font-size: 12px; border: none;")
         name_lbl.setMinimumWidth(180)
         name_lbl.setMaximumWidth(500)
         name_lbl.setToolTip(full_name)
@@ -5889,7 +6116,7 @@ class App(QWidget):
         bar.setStyleSheet(METER_STYLE_OUT)
 
         db_lbl = QLabel("-∞ dB")
-        db_lbl.setStyleSheet("color: #555555; font-family: 'Consolas', monospace; font-size: 11px; border: none;")
+        db_lbl.setStyleSheet("color: #546a94; font-family: 'Consolas', monospace; font-size: 11px; border: none;")
         db_lbl.setMinimumWidth(64)
         db_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -6583,12 +6810,12 @@ class App(QWidget):
         self.recording_thread.start()
 
         self.record_button.setText("🔴  Stop")
-        self.record_button.setStyleSheet(
+        self.record_button.setStyleSheet(T(
             "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
-            " stop:0 #aa2020, stop:1 #cc3030);"
-            " border: 1px solid #cc4444; border-radius: 8px; color: #fff;"
+            " stop:0 #b01530, stop:1 @RED);"
+            " border: 2px solid #ff6070; border-radius: 8px; color: #fff;"
             " font-size: 13px; font-weight: 700; padding: 8px 18px; }"
-        )
+        ))
         self._compact.set_rec_state(True)
         self.append_status(f"🎤 Recording from: {input_device_name}")
 
@@ -6596,10 +6823,10 @@ class App(QWidget):
         self.is_recording = False
         self.record_button.setEnabled(False)
         self.record_button.setText("⏳  Processing…")
-        self.record_button.setStyleSheet(
-            "QPushButton { background: #1e1e1e; border: 1px solid #555555;"
-            " border-radius: 8px; color: #888888; font-size: 13px; font-weight: 700; padding: 8px 18px; }"
-        )
+        self.record_button.setStyleSheet(T(
+            "QPushButton { background: @BG_RAISED; border: 1px solid @BORDER;"
+            " border-radius: 8px; color: @TEXT_FAINT; font-size: 13px; font-weight: 700; padding: 8px 18px; }"
+        ))
         self._compact.set_rec_state(False)
 
     def do_recording(self, input_device_index: int, input_device_name: str):
@@ -6728,16 +6955,15 @@ class App(QWidget):
         self.record_button.setEnabled(True)
         self.record_button.setText("🎤  Listen")
         self._compact.set_rec_state(False)
-        self.record_button.setStyleSheet(
-            "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
-            " stop:0 #3A7BFF, stop:1 #9A4DFF);"
-            " border: 1px solid #3A7BFF; border-radius: 8px; color: #fff;"
+        self.record_button.setStyleSheet(T(
+            "QPushButton { background: @GRAD_ACCENT;"
+            " border: 2px solid @BLUE_BRIGHT; border-radius: 8px; color: #fff;"
             " font-size: 13px; font-weight: 700; padding: 8px 18px; letter-spacing: 0.5px; }"
             "QPushButton:hover { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,"
-            " stop:0 #5590FF, stop:1 #B060FF); border-color: #9A4DFF; }"
-            "QPushButton:pressed { background: #1a1a1a; border-color: #3A7BFF; }"
-            "QPushButton:disabled { background: #1A1A1A; color: #444444; border-color: #222222; }"
-        )
+            " stop:0 #5590ff, stop:1 #a052ff); border-color: @PURPLE_BRIGHT; }"
+            "QPushButton:pressed { background: @BG_INPUT; border-color: @BLUE; }"
+            "QPushButton:disabled { background: @BG_PANEL; color: @TEXT_FAINT; border-color: @BORDER; }"
+        ))
 
     def _tick_mic_meter(self):
         val = int(min(self._mic_peak_ref[0] * 1000, 1000))
@@ -6787,12 +7013,12 @@ class App(QWidget):
 
     def _show_main_menu(self):
         menu = QMenu(self)
-        menu.setStyleSheet(
-            "QMenu { background: #1A1A1A; border: 1px solid #2a2a2a; border-radius: 8px; color: #E0E0E0; }"
+        menu.setStyleSheet(T(
+            "QMenu { background: @BG_PANEL; border: 1px solid @BORDER_GLOW; border-radius: 8px; color: @TEXT; }"
             "QMenu::item { padding: 7px 20px; }"
-            "QMenu::item:selected { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF); color: #fff; }"
-            "QMenu::separator { height: 1px; background: #2a2a2a; margin: 4px 0; }"
-        )
+            "QMenu::item:selected { background: @GRAD_ACCENT; color: #fff; }"
+            "QMenu::separator { height: 1px; background: @BORDER; margin: 4px 0; }"
+        ))
         menu.addAction("⚙  Settings", lambda: open_settings_dialog(self))
         menu.addSeparator()
         menu.addAction("ℹ  About Voice Royale", self._show_app_info)
@@ -7499,44 +7725,43 @@ def open_settings_dialog(parent_app: "App") -> None:
     dlg.setWindowTitle("Voice Royale — Asetukset")
     dlg.resize(900, 660)
     dlg.setMinimumSize(720, 520)
-    dlg.setStyleSheet(parent_app.styleSheet() + """
-        QTabWidget::pane { border: 1px solid #2a2a3a; border-radius: 0 8px 8px 8px;
-            background: #111118; padding: 4px; }
-        QTabBar::tab { background: #1A1A26; color: #666680; padding: 5px 9px;
+    dlg.setStyleSheet(parent_app.styleSheet() + T("""
+        QTabWidget::pane { border: 1px solid @BORDER_GLOW; border-radius: 0 8px 8px 8px;
+            background: @BG_PANEL; padding: 4px; }
+        QTabBar::tab { background: @BG_RAISED; color: @TEXT_FAINT; padding: 5px 9px;
             font-size: 10px; font-weight: 700; letter-spacing: 0;
-            border: 1px solid #2a2a3a; border-bottom: none;
+            border: 1px solid @BORDER; border-bottom: none;
             border-radius: 5px 5px 0 0; margin-right: 2px; }
-        QTabBar::tab:selected { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,
-            stop:0 #3A7BFF, stop:1 #9A4DFF); color: #fff; border-color: #3A7BFF; }
-        QTabBar::tab:hover:!selected { background: #222232; color: #C0C0E0;
-            border-color: #9A4DFF; }
+        QTabBar::tab:selected { background: @GRAD_ACCENT; color: #fff; border-color: @BLUE_BRIGHT; }
+        QTabBar::tab:hover:!selected { background: @BLUE_DIM; color: @TEXT;
+            border-color: @BLUE; }
         QScrollArea { border: none; background: transparent; }
-        QLineEdit { background: #18182A; border: 1px solid #2E2E48;
-            border-radius: 7px; color: #E0E0F0; padding: 7px 12px;
+        QLineEdit { background: @BG_INPUT; border: 1px solid @BORDER;
+            border-radius: 7px; color: @TEXT; padding: 7px 12px;
             font-size: 13px; min-height: 18px; }
-        QLineEdit:focus { border-color: #7A4DFF; background: #1C1C32; }
-        QLineEdit:disabled { color: #444455; background: #141420; }
-        QComboBox { background: #18182A; border: 1px solid #2E2E48; border-radius: 7px;
-            color: #E0E0F0; padding: 7px 12px; font-size: 13px; min-height: 18px; }
-        QComboBox:focus { border-color: #7A4DFF; }
+        QLineEdit:focus { border-color: @PURPLE; background: @BG_RAISED; }
+        QLineEdit:disabled { color: @TEXT_FAINT; background: @BG_PANEL; }
+        QComboBox { background: @BG_INPUT; border: 1px solid @BORDER; border-radius: 7px;
+            color: @TEXT; padding: 7px 12px; font-size: 13px; min-height: 18px; }
+        QComboBox:focus { border-color: @PURPLE; }
         QComboBox::drop-down { border: none; width: 22px; }
-        QComboBox QAbstractItemView { background: #1A1A2A; border: 1px solid #2E2E48;
-            color: #E0E0F0; selection-background-color: #3A7BFF; padding: 4px; }
-        QPushButton { background: #1E1E30; border: 1px solid #2E2E48; border-radius: 7px;
-            color: #A0A0C0; padding: 7px 16px; font-size: 12px; font-weight: 600; }
-        QPushButton:hover { background: #272740; border-color: #9A4DFF; color: #E0E0FF; }
-        QPushButton:pressed { background: #0e0e1e; border-color: #3A7BFF; }
-        QListWidget { background: #18182A; border: 1px solid #2E2E48; border-radius: 7px;
-            color: #E0E0F0; font-size: 12px; padding: 4px; }
-        QListWidget::item:selected { background: #3A7BFF; color: #fff; border-radius: 4px; }
+        QComboBox QAbstractItemView { background: @BG_PANEL; border: 1px solid @BORDER_GLOW;
+            color: @TEXT; selection-background-color: @BLUE; padding: 4px; }
+        QPushButton { background: @GRAD_BTN; border: 1px solid @BORDER; border-radius: 7px;
+            color: @TEXT_DIM; padding: 7px 16px; font-size: 12px; font-weight: 600; }
+        QPushButton:hover { background: @BLUE_DIM; border-color: @BLUE; color: #e0e8ff; }
+        QPushButton:pressed { background: @BG_INPUT; border-color: @PURPLE; }
+        QListWidget { background: @BG_INPUT; border: 1px solid @BORDER; border-radius: 7px;
+            color: @TEXT; font-size: 12px; padding: 4px; }
+        QListWidget::item:selected { background: @BLUE; color: #fff; border-radius: 4px; }
         QDialogButtonBox QPushButton { min-width: 90px; padding: 8px 20px; font-size: 13px; }
-    """)
+    """))
 
     settings = dict(parent_app.settings)
 
     # ── shared helpers ────────────────────────────────────────────────
-    LABEL_STYLE = "color: #9090B8; font-size: 12px; font-weight: 600;"
-    DESC_STYLE  = "color: #5A6A8A; font-size: 11px; padding: 2px 0 10px 0; line-height: 150%;"
+    LABEL_STYLE = T("color: @TEXT_DIM; font-size: 12px; font-weight: 600;")
+    DESC_STYLE  = T("color: @TEXT_FAINT; font-size: 11px; padding: 2px 0 10px 0; line-height: 150%;")
 
     def _desc(text: str) -> QLabel:
         lbl = QLabel(text)
@@ -7546,10 +7771,10 @@ def open_settings_dialog(parent_app: "App") -> None:
 
     def _header(text: str) -> QLabel:
         lbl = QLabel(text)
-        lbl.setStyleSheet(
-            "color: #C0C0E8; font-size: 13px; font-weight: 700; letter-spacing: 0.4px;"
-            " padding: 14px 0 6px 0; border-bottom: 1px solid #2A2A42; margin-bottom: 2px;"
-        )
+        lbl.setStyleSheet(T(
+            "color: @BLUE_BRIGHT; font-size: 13px; font-weight: 700; letter-spacing: 0.4px;"
+            " padding: 14px 0 6px 0; border-bottom: 1px solid @BORDER; margin-bottom: 2px;"
+        ))
         return lbl
 
     def _make_form() -> QFormLayout:
@@ -7689,7 +7914,7 @@ def open_settings_dialog(parent_app: "App") -> None:
     overlay_font_spin.setValue(float(settings.get("overlay_font_size", 16)))
     overlay_font_spin.setMaximumWidth(80)
     overlay_font_spin.setStyleSheet(
-        "QDoubleSpinBox { background: #1a1a1a; color: #e6edf3; border: 1px solid #333;"
+        "QDoubleSpinBox { background: #0a0f1e; color: #dce6ff; border: 1px solid #333;"
         " border-radius: 4px; padding: 2px 6px; }"
     )
     f1.addRow(_lbl("Tekstikoko (px):"), overlay_font_spin)
@@ -7705,7 +7930,7 @@ def open_settings_dialog(parent_app: "App") -> None:
     noise_gate_spin.setValue(float(settings.get("noise_gate_threshold", 0.0)))
     noise_gate_spin.setMaximumWidth(120)
     noise_gate_spin.setStyleSheet(
-        "QDoubleSpinBox { background: #1a1a1a; color: #e6edf3; border: 1px solid #333;"
+        "QDoubleSpinBox { background: #0a0f1e; color: #dce6ff; border: 1px solid #333;"
         " border-radius: 4px; padding: 2px 6px; }"
     )
     f1.addRow(_lbl("Noise gate:"), noise_gate_spin)
@@ -7721,7 +7946,7 @@ def open_settings_dialog(parent_app: "App") -> None:
     auto_stop_spin.setValue(float(settings.get("auto_stop_silence", 2.0)))
     auto_stop_spin.setMaximumWidth(120)
     auto_stop_spin.setStyleSheet(
-        "QDoubleSpinBox { background: #1a1a1a; color: #e6edf3; border: 1px solid #333;"
+        "QDoubleSpinBox { background: #0a0f1e; color: #dce6ff; border: 1px solid #333;"
         " border-radius: 4px; padding: 2px 6px; }"
     )
     f1.addRow(_lbl("Auto-stop (s):"), auto_stop_spin)
@@ -7946,8 +8171,8 @@ def open_settings_dialog(parent_app: "App") -> None:
         md.setWindowTitle(title)
         md.setStyleSheet(
             "QDialog { background: #111; }"
-            "QLabel { color: #C0C0C0; font-size: 12px; background: transparent; }"
-            "QRadioButton { color: #E0E0E0; font-size: 12px; background: transparent; }"
+            "QLabel { color: #b9c5e6; font-size: 12px; background: transparent; }"
+            "QRadioButton { color: #dce6ff; font-size: 12px; background: transparent; }"
         )
         vlay = QVBoxLayout(md)
         vlay.setSpacing(10)
@@ -8113,7 +8338,7 @@ def open_settings_dialog(parent_app: "App") -> None:
     # Plugin install instructions
     sd_install_hdr = QLabel("Plugin-asennus")
     sd_install_hdr.setStyleSheet(
-        "color: #C0C0E8; font-size: 13px; font-weight: 700; border-bottom: 1px solid #2A2A42;"
+        "color: #C0C0E8; font-size: 13px; font-weight: 700; border-bottom: 1px solid #1c2c52;"
         " padding-bottom: 4px; background: transparent;"
     )
     sd_inner_lay.addWidget(sd_install_hdr)
@@ -8133,7 +8358,7 @@ def open_settings_dialog(parent_app: "App") -> None:
     # Available actions list
     sd_actions_hdr = QLabel("Käytettävissä olevat toiminnot")
     sd_actions_hdr.setStyleSheet(
-        "color: #C0C0E8; font-size: 13px; font-weight: 700; border-bottom: 1px solid #2A2A42;"
+        "color: #C0C0E8; font-size: 13px; font-weight: 700; border-bottom: 1px solid #1c2c52;"
         " padding-bottom: 4px; background: transparent;"
     )
     sd_inner_lay.addWidget(sd_actions_hdr)
@@ -8260,12 +8485,12 @@ def open_settings_dialog(parent_app: "App") -> None:
         autostart_chk = QCheckBox("Käynnisty Windowsin mukana")
         autostart_chk.setChecked(_autostart_on)
         autostart_chk.setEnabled(_is_frozen)
-        autostart_chk.setStyleSheet("color: #e6edf3; background: transparent;")
+        autostart_chk.setStyleSheet("color: #dce6ff; background: transparent;")
 
         minimized_chk = QCheckBox("Käynnisty pienennettynä")
         minimized_chk.setChecked(_minimized_on)
         minimized_chk.setEnabled(_is_frozen and _autostart_on)
-        minimized_chk.setStyleSheet("color: #e6edf3; background: transparent;")
+        minimized_chk.setStyleSheet("color: #dce6ff; background: transparent;")
 
         def _on_autostart_chk(_state):
             enabled = autostart_chk.isChecked()
@@ -8324,7 +8549,7 @@ def open_settings_dialog(parent_app: "App") -> None:
             if ok:
                 icon_lbl.setText("✅")
                 icon_lbl.setStyleSheet("font-size: 14px; background: transparent; color: #7fc97f;")
-                name_lbl.setStyleSheet("color: #e6edf3; background: transparent;")
+                name_lbl.setStyleSheet("color: #dce6ff; background: transparent;")
                 install_btn.setText("Asennettu ✓")
             else:
                 install_btn.setText("Epäonnistui")
@@ -8351,14 +8576,14 @@ def open_settings_dialog(parent_app: "App") -> None:
 
         name_lbl = QLabel(f"<b>{pip_name}</b>")
         name_lbl.setStyleSheet(
-            "color: #e6edf3; background: transparent;" if ok
+            "color: #dce6ff; background: transparent;" if ok
             else ("color: #ff8888; background: transparent;" if required
-                  else "color: #8b949e; background: transparent;")
+                  else "color: #8a9bc4; background: transparent;")
         )
         name_lbl.setFixedWidth(160)
 
-        desc_lbl = QLabel(f"{desc}   <span style='color:#8b949e'>v{ver}</span>" if ok
-                          else f"<span style='color:#8b949e'>{desc}</span>")
+        desc_lbl = QLabel(f"{desc}   <span style='color:#8a9bc4'>v{ver}</span>" if ok
+                          else f"<span style='color:#8a9bc4'>{desc}</span>")
         desc_lbl.setStyleSheet("background: transparent; font-size: 11px;")
 
         row_h.addWidget(icon_lbl)
@@ -8371,7 +8596,7 @@ def open_settings_dialog(parent_app: "App") -> None:
             _install_btn.setStyleSheet(
                 "QPushButton { background: #14281e; border: 1px solid #1a5a30; border-radius: 5px;"
                 " color: #00cc6a; padding: 3px 6px; font-size: 11px; font-weight: 700; }"
-                "QPushButton:hover { border-color: #00FF6A; color: #5AFFAA; }"
+                "QPushButton:hover { border-color: #00ff88; color: #5AFFAA; }"
                 "QPushButton:disabled { background: #111; color: #444; border-color: #222; }"
             )
             _install_btn.clicked.connect(
@@ -8451,7 +8676,7 @@ def open_settings_dialog(parent_app: "App") -> None:
 
         vm_cfg_status_lbl = QLabel("")
         vm_cfg_status_lbl.setWordWrap(True)
-        vm_cfg_status_lbl.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        vm_cfg_status_lbl.setStyleSheet("color: #8a9bc4; font-size: 11px; background: transparent;")
 
         def _do_vm_install():
             vm_install_btn.setEnabled(False)
@@ -8541,24 +8766,24 @@ def open_settings_dialog(parent_app: "App") -> None:
     f7.addRow(_header("Sovelluspäivitykset"))
 
     _cur_lbl = QLabel(f"v{APP_VERSION}")
-    _cur_lbl.setStyleSheet("color: #e6edf3; font-size: 13px; font-weight: 700; background: transparent;")
+    _cur_lbl.setStyleSheet("color: #dce6ff; font-size: 13px; font-weight: 700; background: transparent;")
     f7.addRow(_lbl("Nykyinen versio:"), _cur_lbl)
 
     _latest_lbl = QLabel("—")
-    _latest_lbl.setStyleSheet("color: #8b949e; font-size: 12px; background: transparent;")
+    _latest_lbl.setStyleSheet("color: #8a9bc4; font-size: 12px; background: transparent;")
     f7.addRow(_lbl("Uusin versio:"), _latest_lbl)
 
     _upd_status = QLabel("")
-    _upd_status.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+    _upd_status.setStyleSheet("color: #8a9bc4; font-size: 11px; background: transparent;")
     _upd_status.setWordWrap(True)
 
     _dl_btn = _QPushButton("Lataa & Avaa asentaja")
     _dl_btn.setVisible(False)
     _dl_btn.setStyleSheet(
-        "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #3A7BFF,stop:1 #9A4DFF);"
+        "QPushButton { background: qlineargradient(x1:0,y1:1,x2:1,y2:0,stop:0 #2e7fff,stop:1 #7b2fff);"
         " color: #fff; border: none; border-radius: 6px; padding: 8px 20px; font-weight: 700; }"
-        "QPushButton:hover { background: #9A4DFF; }"
-        "QPushButton:disabled { background: #21262d; color: #8b949e; }"
+        "QPushButton:hover { background: #7b2fff; }"
+        "QPushButton:disabled { background: #101a36; color: #8a9bc4; }"
     )
 
     _asset_url = [None]
@@ -8567,7 +8792,7 @@ def open_settings_dialog(parent_app: "App") -> None:
         import queue as _q
         _check_btn.setEnabled(False)
         _upd_status.setText("Tarkistetaan...")
-        _upd_status.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        _upd_status.setStyleSheet("color: #8a9bc4; font-size: 11px; background: transparent;")
         _dl_btn.setVisible(False)
 
         _result_q: _q.Queue = _q.Queue()
@@ -8608,14 +8833,14 @@ def open_settings_dialog(parent_app: "App") -> None:
                     _asset_url[0] = url
                     if url:
                         _upd_status.setText(f"Versio v{tag} saatavilla!")
-                        _upd_status.setStyleSheet("color: #00FF6A; font-size: 11px; background: transparent;")
+                        _upd_status.setStyleSheet("color: #00ff88; font-size: 11px; background: transparent;")
                         _dl_btn.setVisible(True)
                     else:
                         _upd_status.setText(f"v{tag} saatavilla, mutta asentajaa ei löydy releasesta.")
                         _upd_status.setStyleSheet("color: #FF9A00; font-size: 11px; background: transparent;")
                 else:
                     _upd_status.setText("Käytät uusinta versiota.")
-                    _upd_status.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+                    _upd_status.setStyleSheet("color: #8a9bc4; font-size: 11px; background: transparent;")
             else:
                 _upd_status.setText(f"Virhe: {result[1]}")
                 _upd_status.setStyleSheet("color: #ff8888; font-size: 11px; background: transparent;")
@@ -8711,7 +8936,7 @@ def open_settings_dialog(parent_app: "App") -> None:
     scan_btn.setStyleSheet(
         "QPushButton { background: #1E2A3A; color: #6AA0FF; border: 1px solid #2A4A7A;"
         " border-radius: 6px; padding: 7px 18px; font-weight: 700; }"
-        "QPushButton:hover { background: #1A3060; border-color: #3A7BFF; color: #AAC8FF; }"
+        "QPushButton:hover { background: #1A3060; border-color: #2e7fff; color: #AAC8FF; }"
     )
     lay_clean.addWidget(scan_btn)
 
@@ -8722,7 +8947,7 @@ def open_settings_dialog(parent_app: "App") -> None:
     file_list = _LW()
     file_list.setSelectionMode(_AIV.SelectionMode.MultiSelection)
     file_list.setStyleSheet(
-        "QListWidget { background: #0E0E18; border: 1px solid #2a2a3a; border-radius: 6px;"
+        "QListWidget { background: #0E0E18; border: 1px solid #1c2c52; border-radius: 6px;"
         " color: #C0C0E0; font-size: 11px; }"
         "QListWidget::item { padding: 4px 8px; }"
         "QListWidget::item:selected { background: #1A2A50; color: #fff; }"
@@ -8739,7 +8964,7 @@ def open_settings_dialog(parent_app: "App") -> None:
         "QPushButton { background: #2A0808; color: #FF4444; border: 1px solid #6B0000;"
         " border-radius: 6px; padding: 7px 18px; font-weight: 700; }"
         "QPushButton:hover { background: #3A0808; border-color: #FF3333; }"
-        "QPushButton:disabled { background: #1A1A1A; color: #444; border-color: #333; }"
+        "QPushButton:disabled { background: #0a0f1e; color: #444; border-color: #333; }"
     )
     for b in (sel_all_btn, sel_none_btn):
         b.setStyleSheet(
@@ -8883,7 +9108,7 @@ def open_settings_dialog(parent_app: "App") -> None:
     ha_players_list = _LW2()
     ha_players_list.setMinimumHeight(200)
     ha_players_list.setStyleSheet(
-        "QListWidget { background: #0d0d1a; border: 1px solid #2a2a3a; border-radius: 6px; }"
+        "QListWidget { background: #0d0d1a; border: 1px solid #1c2c52; border-radius: 6px; }"
         "QListWidget::item { padding: 2px 4px; }"
         "QListWidget::item:selected { background: transparent; }"
     )
@@ -8900,19 +9125,19 @@ def open_settings_dialog(parent_app: "App") -> None:
         from PyQt6.QtWidgets import QCheckBox as _CB2
         cb = _CB2()
         cb.setChecked(checked)
-        cb.setStyleSheet("QCheckBox { color: #c9d1d9; } QCheckBox::indicator { width: 15px; height: 15px; }")
+        cb.setStyleSheet("QCheckBox { color: #b9c5e6; } QCheckBox::indicator { width: 15px; height: 15px; }")
         cb.setProperty("entity_id", entity_id)
         row_h.addWidget(cb)
         eid_lbl = QLabel(friendly or entity_id)
-        eid_lbl.setStyleSheet("color: #8b949e; font-size: 11px; min-width: 160px;")
+        eid_lbl.setStyleSheet("color: #8a9bc4; font-size: 11px; min-width: 160px;")
         eid_lbl.setToolTip(entity_id)
         row_h.addWidget(eid_lbl)
         name_edit = QLineEdit(saved_name)
         name_edit.setPlaceholderText("Nimi (esim. Olohuone)")
         name_edit.setFixedWidth(140)
         name_edit.setStyleSheet(
-            "QLineEdit { background: #18182a; border: 1px solid #2e2e48; border-radius: 5px;"
-            " color: #e0e0f0; padding: 4px 8px; font-size: 12px; }"
+            "QLineEdit { background: #070b16; border: 1px solid #1c2c52; border-radius: 5px;"
+            " color: #dce6ff; padding: 4px 8px; font-size: 12px; }"
         )
         name_edit.setProperty("entity_id", entity_id)
         row_h.addWidget(name_edit)
@@ -8921,7 +9146,7 @@ def open_settings_dialog(parent_app: "App") -> None:
         test_btn.setStyleSheet(
             "QPushButton { background: #14281e; border: 1px solid #1a5a30; border-radius: 5px;"
             " color: #00cc6a; padding: 4px 8px; font-size: 11px; font-weight: 700; }"
-            "QPushButton:hover { border-color: #00FF6A; color: #5AFFAA; }"
+            "QPushButton:hover { border-color: #00ff88; color: #5AFFAA; }"
         )
 
         import queue as _q_ha_test
@@ -8992,13 +9217,13 @@ def open_settings_dialog(parent_app: "App") -> None:
         _ha_fetched_players = [{"entity_id": p["entity_id"],
                                 "friendly_name": p.get("name", "")} for p in saved_ha_players]
         _ha_populate_list(_ha_fetched_players, saved_ha_players)
-        ha_status_lbl.setStyleSheet("color: #8b949e; font-size:12px;")
+        ha_status_lbl.setStyleSheet("color: #8a9bc4; font-size:12px;")
         ha_status_lbl.setText(f"Tallennettu {len(saved_ha_players)} laitetta — paina 'Testaa' päivittääksesi listan")
 
     def _ha_connect():
         ha_connect_btn.setEnabled(False)
         ha_connect_btn.setText("Yhdistetään…")
-        ha_status_lbl.setStyleSheet("color: #8b949e; font-size:12px;")
+        ha_status_lbl.setStyleSheet("color: #8a9bc4; font-size:12px;")
         ha_status_lbl.setText("Yhdistetään…")
         import queue as _qha
         _rq_ha = _qha.Queue()
@@ -9147,52 +9372,52 @@ def open_settings_dialog(parent_app: "App") -> None:
 class SetupWizard(QDialog):
     """Asennusvelho: paketit → API-avain → VB-Cable → Voicemeeter → Äänilaitteet → Lopputesti."""
 
-    _STYLE = """
-        QDialog { background: #0d1117; color: #e6edf3; font-family: "Segoe UI", sans-serif; }
-        QLabel  { color: #e6edf3; }
+    _STYLE = T("""
+        QDialog { background: @BG_DEEP; color: @TEXT; font-family: "Segoe UI", sans-serif; }
+        QLabel  { color: @TEXT; }
         QPushButton {
-            background: #1f6feb; color: #ffffff; border: none;
+            background: @GRAD_ACCENT; color: #ffffff; border: none;
             border-radius: 6px; padding: 8px 20px;
             font-size: 13px; font-weight: bold;
         }
-        QPushButton:hover    { background: #388bfd; }
-        QPushButton:disabled { background: #21262d; color: #8b949e; }
+        QPushButton:hover    { background: @BLUE; }
+        QPushButton:disabled { background: @BG_RAISED; color: @TEXT_FAINT; }
         QLineEdit {
-            background: #161b22; border: 1px solid #30363d;
-            border-radius: 6px; color: #e6edf3;
+            background: @BG_INPUT; border: 1px solid @BORDER;
+            border-radius: 6px; color: @TEXT;
             padding: 8px; font-size: 13px;
         }
-        QLineEdit:focus { border: 1px solid #1f6feb; }
-        QCheckBox { color: #8b949e; background: transparent; }
-    """
-    _BAR_ACTIVE = (
-        "QProgressBar { background: #21262d; border-radius: 4px; border: 1px solid #3fb950; }"
-        "QProgressBar::chunk { background: #3fb950; border-radius: 4px; }"
+        QLineEdit:focus { border: 1px solid @BORDER_GLOW; }
+        QCheckBox { color: @TEXT_DIM; background: transparent; }
+    """)
+    _BAR_ACTIVE = T(
+        "QProgressBar { background: @BG_RAISED; border-radius: 4px; border: 1px solid @GREEN; }"
+        "QProgressBar::chunk { background: @GREEN; border-radius: 4px; }"
     )
-    _BAR_IDLE = (
-        "QProgressBar { background: #21262d; border-radius: 4px; }"
-        "QProgressBar::chunk { background: #388bfd; border-radius: 4px; }"
+    _BAR_IDLE = T(
+        "QProgressBar { background: @BG_RAISED; border-radius: 4px; }"
+        "QProgressBar::chunk { background: @BLUE; border-radius: 4px; }"
     )
-    _BAR_DIM = (
-        "QProgressBar { background: #21262d; border-radius: 4px; }"
-        "QProgressBar::chunk { background: #30363d; border-radius: 4px; }"
+    _BAR_DIM = T(
+        "QProgressBar { background: @BG_RAISED; border-radius: 4px; }"
+        "QProgressBar::chunk { background: @BORDER; border-radius: 4px; }"
     )
-    _BTN_PRIMARY = (
-        "QPushButton { background: #1f6feb; color: #ffffff; border: none;"
+    _BTN_PRIMARY = T(
+        "QPushButton { background: @GRAD_ACCENT; color: #ffffff; border: none;"
         " border-radius: 6px; padding: 8px 20px; font-size: 13px; font-weight: bold; }"
-        "QPushButton:hover { background: #388bfd; }"
-        "QPushButton:disabled { background: #21262d; color: #8b949e; }"
+        "QPushButton:hover { background: @BLUE; }"
+        "QPushButton:disabled { background: @BG_RAISED; color: @TEXT_FAINT; }"
     )
-    _BTN_SEC = (
-        "QPushButton { background: #21262d; color: #c9d1d9; border: 1px solid #30363d;"
+    _BTN_SEC = T(
+        "QPushButton { background: @BG_RAISED; color: @TEXT_DIM; border: 1px solid @BORDER;"
         " border-radius: 6px; padding: 6px 16px; font-size: 12px; font-weight: normal; }"
-        "QPushButton:hover { background: #30363d; }"
-        "QPushButton:disabled { color: #484f58; }"
+        "QPushButton:hover { background: @BLUE_DIM; }"
+        "QPushButton:disabled { color: @TEXT_FAINT; }"
     )
-    _BTN_SKIP = (
-        "QPushButton { background: #21262d; color: #8b949e; border: 1px solid #30363d;"
+    _BTN_SKIP = T(
+        "QPushButton { background: @BG_RAISED; color: @TEXT_FAINT; border: 1px solid @BORDER;"
         " border-radius: 6px; padding: 5px 14px; font-size: 11px; font-weight: normal; }"
-        "QPushButton:hover { background: #30363d; color: #c9d1d9; }"
+        "QPushButton:hover { background: @BLUE_DIM; color: @TEXT_DIM; }"
     )
 
     def __init__(self):
@@ -9248,14 +9473,14 @@ class SetupWizard(QDialog):
 
     def _header(self, title, subtitle=""):
         w = QWidget()
-        w.setStyleSheet("background: #161b22; border-bottom: 1px solid #30363d;")
+        w.setStyleSheet("background: #0a0f1e; border-bottom: 1px solid #1c2c52;")
         lay = QVBoxLayout(w)
         lay.setContentsMargins(32, 22, 32, 18)
         lbl = QLabel(title)
-        lbl.setStyleSheet("font-size: 20px; font-weight: bold; color: #e6edf3; background: transparent;")
+        lbl.setStyleSheet("font-size: 20px; font-weight: bold; color: #dce6ff; background: transparent;")
         lay.addWidget(lbl)
         sub = QLabel("")
-        sub.setStyleSheet("font-size: 12px; color: #8b949e; background: transparent;")
+        sub.setStyleSheet("font-size: 12px; color: #8a9bc4; background: transparent;")
         sub.setWordWrap(True)
         lay.addWidget(sub)
         self._step_labels[self._header_counter] = (sub, subtitle)
@@ -9287,8 +9512,13 @@ class SetupWizard(QDialog):
         self._stack.setCurrentIndex(page)
         if page == self._PAGE_DEVICES and coming_from != self._PAGE_DEVICES:
             self._start_dev_monitoring()
-        if page == self._PAGE_CHAT_ROUTING:
+        if page == self._PAGE_DEVICES:
+            # Chat-reititys-osio elää laitteet-sivulla — sen selitys/näkyvyys riippuu
+            # sivun 2 valinnoista, jotka ovat voineet muuttua ennen tänne paluuta.
             self._refresh_chat_routing_page()
+            self._update_dev_next_gate()
+        if page == self._PAGE_FINISH:
+            self._refresh_finish_page()
         self._refresh_step_label(page)
 
     def _refresh_step_label(self, page):
@@ -9325,19 +9555,14 @@ class SetupWizard(QDialog):
 
     def _get_page_sequence(self) -> list:
         seq = [self._PAGE_WELCOME, self._PAGE_SERVICES]
-        # Python-pakettitarkistus on hyödyllinen vain kehitystilassa (source-ajossa) — pakattuun
-        # exe:hen kaikki kirjastot on jo bundlattu, joten sivu ei näytä normaalikäyttäjälle
-        # mitään tehtävää. Ei näytetä sitä valmiiksi asennetulle käyttäjälle turhaan.
-        if not getattr(sys, "frozen", False):
-            seq.append(self._PAGE_PACKAGES)
+        # Python-paketit asennetaan automaattisesti services-sivun "Seuraava"-napista
+        # (dev-tila; exe:ssä kaikki on bundlattu) — erillistä pakettisivua ei näytetä.
         needs_api = (self._svc_stt == "openai" or
                      self._svc_trans == "openai" or
                      self._svc_tts == "elevenlabs")
         if needs_api:
             seq.append(self._PAGE_API_KEY)
-        seq.append(self._PAGE_DEVICES)
-        if self._svc_mixer or self._svc_routing == "gaming":
-            seq.append(self._PAGE_CHAT_ROUTING)
+        seq.append(self._PAGE_DEVICES)  # sisältää myös chat-reititys-osion
         seq.append(self._PAGE_FINISH)
         return seq
 
@@ -9364,7 +9589,7 @@ class SetupWizard(QDialog):
 
     def _page_welcome(self):
         page = QWidget()
-        page.setStyleSheet("background: #0d1117;")
+        page.setStyleSheet("background: #05070f;")
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -9373,7 +9598,7 @@ class SetupWizard(QDialog):
             "Asennusvelho — käy läpi kaikki vaiheet tai ohita jo valmiit kohdat."
         ))
         body = QWidget()
-        body.setStyleSheet("background: #0d1117;")
+        body.setStyleSheet("background: #05070f;")
         bl = QVBoxLayout(body)
         bl.setContentsMargins(32, 22, 32, 24)
         bl.setSpacing(16)
@@ -9382,13 +9607,9 @@ class SetupWizard(QDialog):
             "  •  Kuuntelee puhettasi mikrofonista\n"
             "  •  Tunnistaa puheen tekstiksi  (OpenAI Whisper)\n"
             "  •  Kääntää valitsemallesi kielelle  (Google Translate tai GPT-4.1-mini)\n"
-            "  •  Toistaa käännöksen ääneen  (Edge TTS — täysin ilmainen)\n\n"
-            "Vaiheet:\n"
-            "  1. Python-paketit  →  2. OpenAI API-avain  →  3. VB-Cable\n"
-            "  4. Voicemeeter Banana  →  5. Äänilaitteet\n\n"
-            "Jo asennetut vaiheet näyttävät vihreän merkin — voit ohittaa ne."
+            "  •  Toistaa käännöksen ääneen  (Edge TTS — täysin ilmainen)"
         )
-        info.setStyleSheet("color: #c9d1d9; font-size: 13px; background: transparent; line-height: 1.6;")
+        info.setStyleSheet("color: #b9c5e6; font-size: 17px; background: transparent; line-height: 1.6;")
         info.setWordWrap(True)
         bl.addWidget(info)
         bl.addStretch()
@@ -9397,6 +9618,7 @@ class SetupWizard(QDialog):
         btn = QPushButton("Aloita  →")
         btn.setFixedHeight(42)
         btn.setMinimumWidth(140)
+        btn.setStyleSheet(self._BTN_PRIMARY)
         btn.clicked.connect(lambda: self._navigate(1))
         row.addWidget(btn)
         bl.addLayout(row)
@@ -9404,10 +9626,10 @@ class SetupWizard(QDialog):
         return page
 
     def _page_services(self):
-        from PyQt6.QtWidgets import QRadioButton, QButtonGroup, QFrame, QCheckBox
+        from PyQt6.QtWidgets import QFrame, QCheckBox
 
         page = QWidget()
-        page.setStyleSheet("background: #0d1117;")
+        page.setStyleSheet("background: #05070f;")
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -9419,10 +9641,10 @@ class SetupWizard(QDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setStyleSheet("QScrollArea { background: #0d1117; }")
+        scroll.setStyleSheet("QScrollArea { background: #05070f; }")
 
         body = QWidget()
-        body.setStyleSheet("background: #0d1117;")
+        body.setStyleSheet("background: #05070f;")
         bl = QVBoxLayout(body)
         bl.setContentsMargins(32, 16, 32, 16)
         bl.setSpacing(10)
@@ -9430,7 +9652,7 @@ class SetupWizard(QDialog):
         # ── SECTION 1: Devices ────────────────────────────────────────────
         s1_lbl = QLabel("Mitä laitteita sinulla on?")
         s1_lbl.setStyleSheet(
-            "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent; padding-bottom: 2px;"
+            "color: #dce6ff; font-size: 13px; font-weight: bold; background: transparent; padding-bottom: 2px;"
         )
         bl.addWidget(s1_lbl)
 
@@ -9438,7 +9660,7 @@ class SetupWizard(QDialog):
             w = QWidget()
             w.setFixedHeight(52)
             w.setStyleSheet(
-                "QWidget { background: #161b22; border: 1px solid #21262d; border-radius: 8px; }"
+                "QWidget { background: #0a0f1e; border: 1px solid #101a36; border-radius: 8px; }"
             )
             h = QHBoxLayout(w)
             h.setContentsMargins(14, 0, 14, 0)
@@ -9449,9 +9671,9 @@ class SetupWizard(QDialog):
             cb.setStyleSheet(
                 "QCheckBox { background: transparent; border: none; }"
                 "QCheckBox::indicator { width: 18px; height: 18px; border-radius: 4px;"
-                " border: 2px solid #30363d; background: transparent; }"
+                " border: 2px solid #1c2c52; background: transparent; }"
                 "QCheckBox::indicator:checked { background: #238636; border-color: #238636; }"
-                "QCheckBox::indicator:hover { border-color: #388bfd; }"
+                "QCheckBox::indicator:hover { border-color: #6aa8ff; }"
                 "QCheckBox::indicator:disabled { background: #238636; border-color: #238636; }"
             )
             icon_lbl = QLabel(icon)
@@ -9459,11 +9681,11 @@ class SetupWizard(QDialog):
             icon_lbl.setFixedWidth(28)
             title_lbl = QLabel(title)
             title_lbl.setStyleSheet(
-                "color: #e6edf3; font-size: 12px; font-weight: 600; background: transparent; border: none;"
+                "color: #dce6ff; font-size: 12px; font-weight: 600; background: transparent; border: none;"
             )
             desc_lbl = QLabel(desc)
             desc_lbl.setStyleSheet(
-                "color: #6e7681; font-size: 11px; background: transparent; border: none;"
+                "color: #546a94; font-size: 11px; background: transparent; border: none;"
             )
             h.addWidget(cb)
             h.addWidget(icon_lbl)
@@ -9474,55 +9696,55 @@ class SetupWizard(QDialog):
             h.addLayout(col, 1)
             return w, cb
 
-        _hw, headphone_cb = _device_row("🎧", "Kuulokkeet tai kaiuttimet",
-            "Peruslaite — kaikilla on tämä.", always_on=True)
-        _gw, gaming_cb = _device_row("🎮", "Käytän pelejä tai Discordia",
-            "Haluan kuulua peleissä tai Discordissa virtuaalisena mikrofonina.")
-        _mw, mixer_cb = _device_row("🎚️", "Minulla on fyysinen mikseri (esim. RodeCaster Pro 2)",
-            "Chat-mikin ääni pitää sekoittaa käännösääneen ennen peliä/Discordia.")
-
-        def _detect_has_mixer() -> bool:
+        def _detect_mixer_reason() -> str:
             """Wizard voi avautua uudelleen (esim. versiopäivityksen jälkeen) ilman että
             käyttäjä muistaa rastia mikseri-ruudun uudelleen — tunnista se sen sijaan
             olemassa olevasta asennuksesta/laitteistosta niin ettei se koskaan nollaudu
-            väärin ja tarjoa VB-Cablea Voicemeeterin sijaan."""
-            try:
-                if _is_voicemeeter_installed():
-                    return True
-            except Exception:
-                pass
+            väärin ja tarjoa VB-Cablea Voicemeeterin sijaan. Palauttaa tunnistetun
+            laitteen/ohjelman nimen tai tyhjän jos ei löytynyt."""
             try:
                 names = [n for _, n in list_input_devices()] + [n for _, n in list_output_devices()]
-                if any("rode" in n.lower() for n in names):
-                    return True
+                rode = next((n for n in names if "rode" in n.lower()), None)
+                if rode:
+                    return "RodeCaster"
             except Exception:
                 pass
-            return False
+            try:
+                if _is_voicemeeter_installed():
+                    return "Voicemeeter"
+            except Exception:
+                pass
+            return ""
 
-        if _detect_has_mixer():
+        _mixer_found = _detect_mixer_reason()
+        _mixer_desc = (f"✅ Tunnistettu automaattisesti tältä koneelta: {_mixer_found}"
+                       if _mixer_found
+                       else "Chat-mikin ääni pitää sekoittaa käännösääneen ennen peliä/Discordia.")
+        _gw, gaming_cb = _device_row("🎮", "Haluan että käännetty ääneni kuuluu pelissä tai Discordissa",
+            "Muut pelaajat kuulevat käännetyn puheesi, kun valitset pelin/Discordin mikrofoniksi virtuaalimikin.")
+        _mw, mixer_cb = _device_row("🎚️", "Minulla on fyysinen mikseri (esim. RodeCaster Pro 2)",
+            _mixer_desc)
+        if _mixer_found:
             mixer_cb.setChecked(True)
+        _sw, sd_cb = _device_row("🎛️", "Minulla on Elgato Stream Deck",
+            "Voice Royalen napit Stream Deckiin — asetetaan viimeisellä sivulla.")
+        _haw, ha_cb = _device_row("🏠", "Käytän Home Assistantia",
+            "Kytke kotiautomaatio soundboard-nappeihin — asetetaan viimeisellä sivulla.")
 
-        bl.addWidget(_hw)
         bl.addWidget(_gw)
         bl.addWidget(_mw)
-
-        hint = QLabel(
-            "Stream Deck ja Home Assistant asetetaan tarvittaessa myöhemmin "
-            "Asetukset-ikkunasta — ei kuulu ensiasennukseen."
-        )
-        hint.setStyleSheet("color: #484f58; font-size: 10px; background: transparent;")
-        hint.setWordWrap(True)
-        bl.addWidget(hint)
+        bl.addWidget(_sw)
+        bl.addWidget(_haw)
 
         sep1 = QFrame()
         sep1.setFrameShape(QFrame.Shape.HLine)
-        sep1.setStyleSheet("color: #21262d;")
+        sep1.setStyleSheet("color: #101a36;")
         bl.addWidget(sep1)
 
         # ── SECTION 2: Package cards ──────────────────────────────────────
         s2_lbl = QLabel("Valitse paketti")
         s2_lbl.setStyleSheet(
-            "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent; padding-bottom: 2px;"
+            "color: #dce6ff; font-size: 13px; font-weight: bold; background: transparent; padding-bottom: 2px;"
         )
         bl.addWidget(s2_lbl)
 
@@ -9582,7 +9804,7 @@ class SetupWizard(QDialog):
             icon_l.setStyleSheet("font-size: 22px; background: transparent; border: none;")
             title_l = QLabel(pkg["title"])
             title_l.setStyleSheet(
-                "color: #e6edf3; font-size: 13px; font-weight: 700; background: transparent; border: none;"
+                "color: #dce6ff; font-size: 13px; font-weight: 700; background: transparent; border: none;"
             )
             hdr.addWidget(icon_l)
             hdr.addWidget(title_l)
@@ -9590,26 +9812,26 @@ class SetupWizard(QDialog):
             if pkg["badge"]:
                 bdg = QLabel(pkg["badge"])
                 bdg.setStyleSheet(
-                    "background: #1f6feb; color: #fff; font-size: 9px; font-weight: 700;"
+                    "background: #2e7fff; color: #fff; font-size: 9px; font-weight: 700;"
                     " border-radius: 3px; padding: 1px 5px; border: none;"
                 )
                 hdr.addWidget(bdg)
             cl.addLayout(hdr)
             sph = QFrame()
             sph.setFrameShape(QFrame.Shape.HLine)
-            sph.setStyleSheet("color: #21262d;")
+            sph.setStyleSheet("color: #101a36;")
             cl.addWidget(sph)
             for rt, rv in pkg["rows"]:
                 rw = QHBoxLayout()
                 rw.setSpacing(4)
                 rt_l = QLabel(f"• {rt}:")
                 rt_l.setStyleSheet(
-                    "color: #8b949e; font-size: 10px; background: transparent; border: none;"
+                    "color: #8a9bc4; font-size: 10px; background: transparent; border: none;"
                 )
                 rt_l.setFixedWidth(92)
                 rv_l = QLabel(rv)
                 rv_l.setStyleSheet(
-                    "color: #c9d1d9; font-size: 10px; background: transparent; border: none;"
+                    "color: #b9c5e6; font-size: 10px; background: transparent; border: none;"
                 )
                 rv_l.setWordWrap(True)
                 rw.addWidget(rt_l)
@@ -9618,7 +9840,7 @@ class SetupWizard(QDialog):
             cl.addStretch()
             req_l = QLabel(pkg["req"])
             req_l.setStyleSheet(
-                f"color: {'#3fb950' if pkg['req_ok'] else '#e3b341'};"
+                f"color: {'#00ff88' if pkg['req_ok'] else '#ffb830'};"
                 " font-size: 10px; background: transparent; border: none;"
             )
             req_l.setWordWrap(True)
@@ -9636,92 +9858,6 @@ class SetupWizard(QDialog):
         cards_container.setLayout(cards_row)
         bl.addWidget(cards_container)
 
-        # ── Advanced (power user) ─────────────────────────────────────────
-        toggle_btn = QPushButton("▸  Muokkaa yksittäisiä asetuksia")
-        toggle_btn.setFlat(True)
-        toggle_btn.setStyleSheet(
-            "QPushButton { background: transparent; border: none; color: #388bfd;"
-            " font-size: 11px; text-align: left; padding: 2px 0; }"
-            "QPushButton:hover { color: #58a6ff; }"
-        )
-        bl.addWidget(toggle_btn)
-
-        advanced_w = QWidget()
-        advanced_w.setVisible(False)
-        advanced_w.setStyleSheet(
-            "QWidget { background: #161b22; border: 1px solid #21262d; border-radius: 8px; }"
-        )
-        adv_bl = QVBoxLayout(advanced_w)
-        adv_bl.setContentsMargins(16, 10, 16, 12)
-        adv_bl.setSpacing(3)
-
-        def _adv_sec(txt):
-            l = QLabel(txt)
-            l.setStyleSheet(
-                "color: #8b949e; font-size: 10px; font-weight: bold; background: transparent;"
-                " border: none; padding-top: 6px;"
-            )
-            return l
-
-        def _adv_rb(txt, disabled=False):
-            rb = QRadioButton(txt)
-            rb.setEnabled(not disabled)
-            rb.setStyleSheet(
-                "QRadioButton { color: #e6edf3; font-size: 11px; background: transparent;"
-                " border: none; padding: 2px 8px; }"
-                "QRadioButton:checked { color: #58a6ff; font-weight: 600; }"
-                "QRadioButton:disabled { color: #484f58; }"
-            )
-            return rb
-
-        stt_grp = QButtonGroup(page)
-        adv_bl.addWidget(_adv_sec("PUHEENTUNNISTUS"))
-        stt_local_rb = _adv_rb(
-            "Tietokone-tunnistus (ilmainen, offline — faster-whisper)"
-        )
-        stt_api_rb = _adv_rb("OpenAI Whisper (maksettu, pilvi — nopea ja tarkka)")
-        stt_grp.addButton(stt_local_rb, 0)
-        stt_grp.addButton(stt_api_rb, 1)
-        stt_api_rb.setChecked(True)
-        adv_bl.addWidget(stt_local_rb)
-        adv_bl.addWidget(stt_api_rb)
-
-        trans_grp = QButtonGroup(page)
-        adv_bl.addWidget(_adv_sec("KÄÄNNÖS"))
-        trans_g_rb = _adv_rb("Google Translate (ilmainen, ei tiliä)")
-        trans_d_rb = _adv_rb("DeepL (ilmainen 500k merkkiä/kk, vaatii ilmaisen tilin)")
-        trans_o_rb = _adv_rb("OpenAI GPT-käännös (maksettu, paras laatu)")
-        trans_grp.addButton(trans_g_rb, 0)
-        trans_grp.addButton(trans_d_rb, 1)
-        trans_grp.addButton(trans_o_rb, 2)
-        trans_g_rb.setChecked(True)
-        adv_bl.addWidget(trans_g_rb)
-        adv_bl.addWidget(trans_d_rb)
-        adv_bl.addWidget(trans_o_rb)
-
-        tts_grp = QButtonGroup(page)
-        adv_bl.addWidget(_adv_sec("ÄÄNISYNTEESI"))
-        tts_edge_rb = _adv_rb("Microsoft Neural Voice (ilmainen, suositeltu)")
-        tts_el_rb = _adv_rb("ElevenLabs (maksettu, erittäin realistinen)")
-        tts_grp.addButton(tts_edge_rb, 0)
-        tts_grp.addButton(tts_el_rb, 1)
-        tts_edge_rb.setChecked(True)
-        adv_bl.addWidget(tts_edge_rb)
-        adv_bl.addWidget(tts_el_rb)
-        bl.addWidget(advanced_w)
-
-        _adv_open = [False]
-
-        def _toggle_adv():
-            _adv_open[0] = not _adv_open[0]
-            advanced_w.setVisible(_adv_open[0])
-            toggle_btn.setText(
-                "▾  Piilota yksityiskohtaiset asetukset" if _adv_open[0]
-                else "▸  Muokkaa yksittäisiä asetuksia"
-            )
-
-        toggle_btn.clicked.connect(_toggle_adv)
-
         # ── Summary label ─────────────────────────────────────────────────
         summary_lbl = QLabel()
         summary_lbl.setWordWrap(True)
@@ -9730,14 +9866,8 @@ class SetupWizard(QDialog):
         # ── Logic (defined after all widgets exist) ────────────────────────
 
         def _update_summary():
-            if _adv_open[0]:
-                stt = "local" if stt_local_rb.isChecked() else "openai"
-                trans = ("google" if trans_g_rb.isChecked() else
-                         ("deepl" if trans_d_rb.isChecked() else "openai"))
-                tts = "edge" if tts_edge_rb.isChecked() else "elevenlabs"
-            else:
-                p = _PKGS[_selected_pkg[0]]
-                stt, trans, tts = p["stt"], p["trans"], p["tts"]
+            p = _PKGS[_selected_pkg[0]]
+            stt, trans, tts = p["stt"], p["trans"], p["tts"]
             routing = "gaming" if gaming_cb.isChecked() else "simple"
             mixer = mixer_cb.isChecked()
             self._svc_stt = stt
@@ -9745,27 +9875,41 @@ class SetupWizard(QDialog):
             self._svc_tts = tts
             self._svc_routing = routing
             self._svc_mixer = mixer
+            self._svc_streamdeck = sd_cb.isChecked()
+            self._svc_ha = ha_cb.isChecked()
+            # Listaa vain se mitä OIKEASTI puuttuu tältä koneelta — jo asennettua
+            # (ffmpeg/Voicemeeter/VB-Cable) ei pelotella "tarvitaan vielä" -rivillä.
             needs = []
             if stt == "openai" or trans == "openai" or tts == "elevenlabs":
                 needs.append("OpenAI API-avain")
             if tts == "elevenlabs":
                 needs.append("ElevenLabs API-avain")
-            if stt == "local":
+            if stt == "local" and not shutil.which("ffmpeg"):
                 needs.append("ffmpeg (ilmainen)")
             if mixer:
-                needs.append("Voicemeeter Banana (ilmainen)")
+                try:
+                    _vm_ok = _is_voicemeeter_installed()
+                except Exception:
+                    _vm_ok = False
+                if not _vm_ok:
+                    needs.append("Voicemeeter Banana (ilmainen)")
             elif routing == "gaming":
-                needs.append("VB-Cable (ilmainen)")
+                try:
+                    _vbc_ok = _is_vbcable_installed()
+                except Exception:
+                    _vbc_ok = False
+                if not _vbc_ok:
+                    needs.append("VB-Cable (ilmainen)")
             if needs:
                 summary_lbl.setText("Tarvitaan vielä:  " + "  •  ".join(needs))
                 summary_lbl.setStyleSheet(
-                    "color: #e3b341; font-size: 11px; background: #2b1f0a;"
+                    "color: #ffb830; font-size: 11px; background: #2b1f0a;"
                     " border: 1px solid #9e6a03; border-radius: 6px; padding: 8px 12px;"
                 )
             else:
                 summary_lbl.setText("✅  Täysin ilmainen — ei tarvita tiliä eikä luottokorttia.")
                 summary_lbl.setStyleSheet(
-                    "color: #3fb950; font-size: 11px; background: #0d2b14;"
+                    "color: #00ff88; font-size: 11px; background: #0d2b14;"
                     " border: 1px solid #238636; border-radius: 6px; padding: 8px 12px;"
                 )
 
@@ -9778,32 +9922,33 @@ class SetupWizard(QDialog):
                     )
                 else:
                     c.setStyleSheet(
-                        "QFrame { background: #161b22; border: 1px solid #30363d; border-radius: 10px; }"
+                        "QFrame { background: #0a0f1e; border: 1px solid #1c2c52; border-radius: 10px; }"
                     )
-            p = _PKGS[idx]
-            for rb in [stt_local_rb, stt_api_rb, trans_g_rb, trans_d_rb,
-                       trans_o_rb, tts_edge_rb, tts_el_rb]:
-                rb.blockSignals(True)
-            if p["stt"] == "local":
-                stt_local_rb.setChecked(True)
-            else:
-                stt_api_rb.setChecked(True)
-            trans_g_rb.setChecked(p["trans"] == "google")
-            trans_d_rb.setChecked(p["trans"] == "deepl")
-            trans_o_rb.setChecked(p["trans"] == "openai")
-            tts_edge_rb.setChecked(p["tts"] == "edge")
-            tts_el_rb.setChecked(p["tts"] == "elevenlabs")
-            for rb in [stt_local_rb, stt_api_rb, trans_g_rb, trans_d_rb,
-                       trans_o_rb, tts_edge_rb, tts_el_rb]:
-                rb.blockSignals(False)
             _update_summary()
 
         gaming_cb.toggled.connect(lambda *_: _update_summary())
         mixer_cb.toggled.connect(lambda *_: _update_summary())
-        stt_grp.buttonToggled.connect(lambda *_: _update_summary())
-        trans_grp.buttonToggled.connect(lambda *_: _update_summary())
-        tts_grp.buttonToggled.connect(lambda *_: _update_summary())
+        sd_cb.toggled.connect(lambda *_: _update_summary())
+        ha_cb.toggled.connect(lambda *_: _update_summary())
         _select_pkg(0)  # default: Ilmainen (suositeltu)
+
+        # Asennuksen edistyminen — näkyviin vasta kun "Seuraava" asentaa jotain
+        _inst_w = QWidget()
+        _inst_w.setVisible(False)
+        _inst_w.setStyleSheet("background: transparent;")
+        _inst_bl = QVBoxLayout(_inst_w)
+        _inst_bl.setContentsMargins(0, 4, 0, 0)
+        _inst_bl.setSpacing(4)
+        _inst_lbl = QLabel()
+        _inst_lbl.setStyleSheet("color: #b9c5e6; font-size: 12px; background: transparent;")
+        _inst_lbl.setWordWrap(True)
+        _inst_bar = QProgressBar()
+        _inst_bar.setFixedHeight(10)
+        _inst_bar.setTextVisible(False)
+        _inst_bar.setStyleSheet(self._BAR_IDLE)
+        _inst_bl.addWidget(_inst_lbl)
+        _inst_bl.addWidget(_inst_bar)
+        bl.addWidget(_inst_w)
 
         bl.addStretch()
         scroll.setWidget(body)
@@ -9816,10 +9961,163 @@ class SetupWizard(QDialog):
         nxt = QPushButton("Seuraava  →")
         nxt.setFixedHeight(42)
         nxt.setMinimumWidth(140)
-        nxt.clicked.connect(self._nav_next)
+        nxt.setStyleSheet(self._BTN_PRIMARY)
+
+        _REQ_IMPORTS = [
+            ("PyQt6", "PyQt6"), ("requests", "requests"), ("dotenv", "python-dotenv"),
+            ("sounddevice", "sounddevice"), ("numpy", "numpy"), ("scipy", "scipy"),
+            ("openai", "openai"), ("pyttsx3", "pyttsx3"), ("edge_tts", "edge-tts"),
+            ("deep_translator", "deep-translator"),
+        ]
+
+        _inst_reboot_btn = QPushButton("🔄  Käynnistä tietokone uudelleen")
+        _inst_reboot_btn.setFixedHeight(34)
+        _inst_reboot_btn.setStyleSheet(self._BTN_SEC)
+        _inst_reboot_btn.setVisible(False)
+        _inst_bl.addWidget(_inst_reboot_btn)
+
+        def _inst_do_reboot():
+            from PyQt6.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self, "Käynnistä uudelleen",
+                "Ajurin viimeistely vaatii uudelleenkäynnistyksen.\n\n"
+                "Tietokone käynnistyy uudelleen 15 sekunnin kuluttua — tallenna avoimet "
+                "tiedostot muissa ohjelmissa.\n\nVoice Royale avaa tämän saman sivun "
+                "automaattisesti käynnistyksen jälkeen.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                _rs = load_settings()
+                _rs["_resume_wizard_page"] = self._PAGE_SERVICES
+                save_settings(_rs)
+            except Exception:
+                pass
+            try:
+                subprocess.Popen(
+                    ["shutdown", "/r", "/t", "15"],
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            except Exception as e:
+                QMessageBox.warning(self, "Virhe", f"Uudelleenkäynnistystä ei voitu käynnistää: {e}")
+                return
+            _inst_reboot_btn.setEnabled(False)
+            _inst_reboot_btn.setText("Käynnistyy uudelleen 15 s kuluttua…")
+
+        _inst_reboot_btn.clicked.connect(_inst_do_reboot)
+
+        def _install_then_next():
+            """Asentaa KAIKEN mitä valittu paketti + laitevalinnat vaativat — pip-kirjastot
+            (vain dev-tilassa; exe:ssä bundlattu) sekä Voicemeeter Banana / VB-Cable —
+            edistymispalkilla, ja siirtyy sitten seuraavalle sivulle. Laitteet-sivulle jää
+            vain reitityksen MÄÄRITYS (ei asennuksia normaalipolussa)."""
+            import importlib as _il
+            pip_missing = []
+            if not getattr(sys, "frozen", False):
+                for _imp, _pip in _REQ_IMPORTS:
+                    try:
+                        _il.import_module(_imp)
+                    except Exception:
+                        pip_missing.append(_pip)
+                if self._svc_stt == "local":
+                    try:
+                        _il.import_module("faster_whisper")
+                    except Exception:
+                        pip_missing.append("faster-whisper")
+            need_vm = (sys.platform == "win32" and self._svc_mixer
+                       and not _is_voicemeeter_installed())
+            need_vbc = (sys.platform == "win32" and not self._svc_mixer
+                        and self._svc_routing == "gaming" and not _is_vbcable_installed())
+            steps = [("pip", p) for p in pip_missing]
+            if need_vm:
+                steps.append(("voicemeeter", "Voicemeeter Banana"))
+            if need_vbc:
+                steps.append(("vbcable", "VB-Cable"))
+            if not steps:
+                self._nav_next()
+                return
+            nxt.setEnabled(False)
+            _inst_reboot_btn.setVisible(False)
+            _inst_w.setVisible(True)
+            _inst_bar.setRange(0, len(steps))
+            _inst_bar.setValue(0)
+            _inst_bar.setStyleSheet(self._BAR_IDLE)
+            _inst_lbl.setStyleSheet("color: #b9c5e6; font-size: 12px; background: transparent;")
+            _inst_lbl.setText(f"Asennetaan 1/{len(steps)}: {steps[0][1]} …")
+            import queue as _q
+            _rq = _q.Queue()
+
+            def _bg():
+                import subprocess as _sp
+                for i, (kind_s, label) in enumerate(steps):
+                    _rq.put(("progress", i, label))
+                    try:
+                        if kind_s == "pip":
+                            res = _sp.run(
+                                [sys.executable, "-m", "pip", "install", label],
+                                capture_output=True, text=True, timeout=300,
+                            )
+                            if res.returncode != 0:
+                                _rq.put(("error", label, res.stderr[-200:]))
+                                return
+                        elif kind_s == "voicemeeter":
+                            _install_voicemeeter(lambda m: _rq.put(("progress", i, f"{label}: {m}")))
+                            if not _is_voicemeeter_installed():
+                                _rq.put(("need_reboot", None, None))
+                                return
+                        elif kind_s == "vbcable":
+                            _install_vbcable(lambda m: _rq.put(("progress", i, f"{label}: {m}")))
+                            if not _is_vbcable_installed():
+                                _rq.put(("error", label,
+                                         "asennus ei valmistunut — kokeile uudelleen tai käynnistä kone uudelleen"))
+                                return
+                    except Exception as e:
+                        _rq.put(("error", label, str(e)))
+                        return
+                _rq.put(("done", None, None))
+
+            def _poll():
+                try:
+                    kind, a, b = _rq.get_nowait()
+                except Exception:
+                    return
+                if kind == "progress":
+                    _inst_bar.setValue(a)
+                    _inst_lbl.setText(f"Asennetaan {a + 1}/{len(steps)}: {b}")
+                elif kind == "done":
+                    _ptmr.stop()
+                    _inst_bar.setValue(len(steps))
+                    _inst_bar.setStyleSheet(self._BAR_ACTIVE)
+                    _inst_lbl.setText("✅ Kaikki asennettu.")
+                    nxt.setEnabled(True)
+                    self._nav_next()
+                elif kind == "need_reboot":
+                    _ptmr.stop()
+                    _inst_lbl.setText(
+                        "🔄 Voicemeeter Banana asennettu — ajurin viimeistely vaatii "
+                        "uudelleenkäynnistyksen. Wizard jatkuu automaattisesti sen jälkeen."
+                    )
+                    _inst_lbl.setStyleSheet("color: #ffb830; font-size: 12px; background: transparent;")
+                    _inst_reboot_btn.setVisible(True)
+                    nxt.setEnabled(True)
+                else:
+                    _ptmr.stop()
+                    _inst_lbl.setText(f"✗ Asennus epäonnistui ({a}): {b}")
+                    _inst_lbl.setStyleSheet("color: #ff2e4d; font-size: 12px; background: transparent;")
+                    nxt.setEnabled(True)
+
+            _ptmr = QTimer(self)
+            _ptmr.timeout.connect(_poll)
+            _ptmr.start(150)
+            threading.Thread(target=_bg, daemon=True).start()
+
+        nxt.clicked.connect(_install_then_next)
         nav.addWidget(nxt)
         nav_w = QWidget()
-        nav_w.setStyleSheet("background: #0d1117;")
+        nav_w.setObjectName("wizNavW")
+        nav_w.setStyleSheet("#wizNavW { background: #05070f; }")
         nav_w.setLayout(nav)
         lay.addWidget(nav_w)
         return page
@@ -9860,7 +10158,7 @@ class SetupWizard(QDialog):
         req_all_ok = all(statuses[pip][0] for imp, pip, req, _ in _PKG_LIST if req)
 
         page = QWidget()
-        page.setStyleSheet("background: #0d1117;")
+        page.setStyleSheet("background: #05070f;")
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -9869,7 +10167,7 @@ class SetupWizard(QDialog):
             "Tarkistetaan tarvittavat kirjastot."
         ))
         body = QWidget()
-        body.setStyleSheet("background: #0d1117;")
+        body.setStyleSheet("background: #05070f;")
         bl = QVBoxLayout(body)
         bl.setContentsMargins(32, 14, 32, 16)
         bl.setSpacing(8)
@@ -9878,10 +10176,10 @@ class SetupWizard(QDialog):
         scroll.setWidgetResizable(True)
         scroll.setFixedHeight(250)
         scroll.setStyleSheet(
-            "QScrollArea { background: #161b22; border: 1px solid #30363d; border-radius: 6px; }"
+            "QScrollArea { background: #0a0f1e; border: 1px solid #1c2c52; border-radius: 6px; }"
         )
         cnt = QWidget()
-        cnt.setStyleSheet("background: #161b22;")
+        cnt.setStyleSheet("background: #0a0f1e;")
         cl = QVBoxLayout(cnt)
         cl.setContentsMargins(12, 8, 12, 8)
         cl.setSpacing(3)
@@ -9894,12 +10192,12 @@ class SetupWizard(QDialog):
             rl.setSpacing(8)
             nl = QLabel(pip)
             nl.setFixedWidth(200)
-            nl.setStyleSheet(f"color: {'#c9d1d9' if req else '#6e7681'}; font-size: 11px;")
+            nl.setStyleSheet(f"color: {'#b9c5e6' if req else '#546a94'}; font-size: 11px;")
             dl = QLabel(desc)
-            dl.setStyleSheet("color: #484f58; font-size: 10px;")
+            dl.setStyleSheet("color: #546a94; font-size: 10px;")
             sl = QLabel("✅ " + ver if ok else ("✗ puuttuu" if req else "– ei asennettu"))
             sl.setStyleSheet(
-                f"color: {'#3fb950' if ok else ('#f85149' if req else '#484f58')};"
+                f"color: {'#00ff88' if ok else ('#ff2e4d' if req else '#546a94')};"
                 " font-size: 11px; font-weight: bold;"
             )
             rl.addWidget(nl)
@@ -9915,7 +10213,7 @@ class SetupWizard(QDialog):
             else "Joitakin paketteja puuttuu — paina Asenna."
         )
         summary_lbl.setStyleSheet(
-            f"color: {'#3fb950' if req_all_ok else '#e3b341'};"
+            f"color: {'#00ff88' if req_all_ok else '#ffb830'};"
             " font-size: 12px; font-weight: bold; background: transparent;"
         )
         bl.addWidget(summary_lbl)
@@ -9927,7 +10225,7 @@ class SetupWizard(QDialog):
         def _do_install():
             if getattr(sys, "frozen", False):
                 summary_lbl.setText("EXE-tilassa paketteja ei voi asentaa automaattisesti.\nAvaa terminaali ja aja: pip install [paketti]")
-                summary_lbl.setStyleSheet("color: #e3b341; font-size: 12px; background: transparent;")
+                summary_lbl.setStyleSheet("color: #ffb830; font-size: 12px; background: transparent;")
                 return
             missing = [pip for imp, pip, req, _ in _PKG_LIST if req and not _ck(imp, pip)[0]]
             # Also install faster-whisper if user selected local STT
@@ -9939,7 +10237,7 @@ class SetupWizard(QDialog):
                 return
             install_btn.setEnabled(False)
             summary_lbl.setText("Asennetaan — odota...")
-            summary_lbl.setStyleSheet("color: #8b949e; font-size: 12px; background: transparent;")
+            summary_lbl.setStyleSheet("color: #8a9bc4; font-size: 12px; background: transparent;")
             import queue as _q
             _rq = _q.Queue()
 
@@ -9965,7 +10263,7 @@ class SetupWizard(QDialog):
                 _ptmr.stop()
                 summary_lbl.setText(msg)
                 summary_lbl.setStyleSheet(
-                    f"color: {'#3fb950' if ok2 else '#f85149'};"
+                    f"color: {'#00ff88' if ok2 else '#ff2e4d'};"
                     " font-size: 12px; background: transparent;"
                 )
                 install_btn.setEnabled(not ok2)
@@ -9983,7 +10281,7 @@ class SetupWizard(QDialog):
                 "✅ Kaikki kirjastot — myös faster-whisper — on bundlattu asennuspakettiin."
             )
             frozen_note.setStyleSheet(
-                "color: #3fb950; font-size: 11px; background: transparent;"
+                "color: #00ff88; font-size: 11px; background: transparent;"
             )
             frozen_note.setWordWrap(True)
             bl.addWidget(frozen_note)
@@ -10003,13 +10301,13 @@ class SetupWizard(QDialog):
         ffmpeg_name = QLabel("<b>ffmpeg</b>")
         ffmpeg_name.setFixedWidth(160)
         ffmpeg_name.setStyleSheet(
-            f"color: {'#e6edf3' if _has_ffmpeg else '#e3b341'}; background: transparent;"
+            f"color: {'#dce6ff' if _has_ffmpeg else '#ffb830'}; background: transparent;"
         )
         ffmpeg_desc = QLabel(
             "Edge TTS (faster-whisper ei tarvitse ffmpegiä)" if _has_ffmpeg
             else "Edge TTS — ei löydy PATH:ista  (faster-whisper toimii ilman ffmpegiä)"
         )
-        ffmpeg_desc.setStyleSheet("background: transparent; font-size: 11px; color: #8b949e;")
+        ffmpeg_desc.setStyleSheet("background: transparent; font-size: 11px; color: #8a9bc4;")
         ffmpeg_rl.addWidget(ffmpeg_icon)
         ffmpeg_rl.addWidget(ffmpeg_name)
         ffmpeg_rl.addWidget(ffmpeg_desc, 1)
@@ -10034,7 +10332,7 @@ class SetupWizard(QDialog):
             ffmpeg_install_btn.setStyleSheet(
                 "QPushButton { background: #14281e; border: 1px solid #1a5a30; border-radius: 5px;"
                 " color: #00cc6a; padding: 3px 6px; font-size: 11px; font-weight: 700; }"
-                "QPushButton:hover { border-color: #00FF6A; color: #5AFFAA; }"
+                "QPushButton:hover { border-color: #00ff88; color: #5AFFAA; }"
             )
             _ff_timer = QTimer(ffmpeg_install_btn)
 
@@ -10046,7 +10344,7 @@ class SetupWizard(QDialog):
                             os.environ["PATH"] = _hb + ":" + os.environ.get("PATH", "")
                             _ff_timer.stop()
                             ffmpeg_icon.setText("✅")
-                            ffmpeg_name.setStyleSheet("color: #e6edf3; background: transparent;")
+                            ffmpeg_name.setStyleSheet("color: #dce6ff; background: transparent;")
                             ffmpeg_desc.setText("Edge TTS — asennettu onnistuneesti")
                             ffmpeg_install_btn.setVisible(False)
                             return
@@ -10058,7 +10356,7 @@ class SetupWizard(QDialog):
                 _ff_timer.stop()
                 if found:
                     ffmpeg_icon.setText("✅")
-                    ffmpeg_name.setStyleSheet("color: #e6edf3; background: transparent;")
+                    ffmpeg_name.setStyleSheet("color: #dce6ff; background: transparent;")
                     ffmpeg_desc.setText("Edge TTS — asennettu onnistuneesti")
                     ffmpeg_install_btn.setVisible(False)
                 else:
@@ -10155,7 +10453,7 @@ class SetupWizard(QDialog):
         has_key = bool(existing)
 
         page = QWidget()
-        page.setStyleSheet("background: #0d1117;")
+        page.setStyleSheet("background: #05070f;")
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -10164,7 +10462,7 @@ class SetupWizard(QDialog):
             "Tarvitaan puheentunnistukseen. Ohitettavissa."
         ))
         body = QWidget()
-        body.setStyleSheet("background: #0d1117;")
+        body.setStyleSheet("background: #05070f;")
         bl = QVBoxLayout(body)
         bl.setContentsMargins(32, 20, 32, 20)
         bl.setSpacing(12)
@@ -10173,18 +10471,18 @@ class SetupWizard(QDialog):
             masked = existing[:8] + "…" + existing[-4:] if len(existing) > 12 else "***"
             fl = QLabel(f"✅  Avain löytyy: {masked}")
             fl.setStyleSheet(
-                "color: #3fb950; font-size: 15px; font-weight: bold; background: transparent;"
+                "color: #00ff88; font-size: 15px; font-weight: bold; background: transparent;"
             )
             bl.addWidget(fl)
             hint = QLabel(
                 "Tallennettu credentials.env-tiedostoon. "
                 "Voit jatkaa suoraan tai syöttää uuden avaimen alle."
             )
-            hint.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+            hint.setStyleSheet("color: #8a9bc4; font-size: 11px; background: transparent;")
             hint.setWordWrap(True)
             bl.addWidget(hint)
             sep_lbl = QLabel("— Vaihda avain (valinnainen) —")
-            sep_lbl.setStyleSheet("color: #484f58; font-size: 11px; background: transparent;")
+            sep_lbl.setStyleSheet("color: #546a94; font-size: 11px; background: transparent;")
             bl.addWidget(sep_lbl)
         else:
             desc = QLabel(
@@ -10192,16 +10490,16 @@ class SetupWizard(QDialog):
                 "Luo ilmainen tili → hanki avain → liitä alle.\n"
                 "Jos haluat vain kääntää tekstiä, voit ohittaa tämän."
             )
-            desc.setStyleSheet("color: #c9d1d9; font-size: 13px; background: transparent;")
+            desc.setStyleSheet("color: #b9c5e6; font-size: 13px; background: transparent;")
             desc.setWordWrap(True)
             bl.addWidget(desc)
 
         link_btn = QPushButton("🌐   Avaa  platform.openai.com/api-keys")
         link_btn.setFixedHeight(36)
         link_btn.setStyleSheet(
-            "QPushButton { background: #21262d; color: #58a6ff; border: 1px solid #30363d;"
+            "QPushButton { background: #101a36; color: #6aa8ff; border: 1px solid #1c2c52;"
             " border-radius: 6px; padding: 6px 18px; font-size: 12px; font-weight: normal; }"
-            "QPushButton:hover { background: #30363d; }"
+            "QPushButton:hover { background: #1c2c52; }"
         )
         link_btn.clicked.connect(lambda: webbrowser.open("https://platform.openai.com/api-keys"))
         bl.addWidget(link_btn)
@@ -10246,7 +10544,7 @@ class SetupWizard(QDialog):
             "QPushButton { background: #238636; color: #fff; border: none;"
             " border-radius: 6px; padding: 5px 14px; font-size: 12px; font-weight: bold; }"
             "QPushButton:hover:enabled { background: #2ea043; }"
-            "QPushButton:disabled { background: #21262d; color: #484f58; }"
+            "QPushButton:disabled { background: #101a36; color: #546a94; }"
         )
         self._save_btn.clicked.connect(self._save_key)
         bl.addWidget(self._save_btn)
@@ -10269,62 +10567,36 @@ class SetupWizard(QDialog):
         lay.addWidget(body)
         return page
 
-    def _page_chat_routing(self):
-        """Chat-reititys — YKSI sivu, YKSI nappi. Aiemmin tämä oli 3 pakotettua alisivua
-        (asenna -> valitse laite -> konfiguroi/testaa); nyt "Määritä automaattisesti" tekee
-        kaiken sen taustalla peräkkäin, ja laitetunnistus (mikserin Chat-kanava) on oma
-        riippumaton avainsanahaku joka ei enää edellytä että käyttäjä valitsisi saman
-        laitteen erikseen jollain toisella sivulla."""
-        page = QWidget()
-        page.setStyleSheet("background: #0d1117;")
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(self._header(
-            "Chat-reititys",
-            "Yksi nappi hoitaa asennuksen, määrityksen ja testauksen."
-        ))
-        body = QWidget()
-        body.setStyleSheet("background: #0d1117;")
-        bl = QVBoxLayout(body)
-        bl.setContentsMargins(32, 20, 32, 20)
-        bl.setSpacing(12)
+    def _build_chat_routing_section(self) -> QWidget:
+        """Chat-reititys — OSIO laitteet-sivulla (aiemmin oma sivu). "Määritä
+        automaattisesti" tekee asennuksen+määrityksen+testauksen taustalla peräkkäin,
+        ja laitetunnistus (mikserin Chat-kanava) on oma riippumaton avainsanahaku.
+        Kutsutaan vain Windowsissa (kutsuja guardaa)."""
+        sec = QWidget()
+        sec.setStyleSheet("background: transparent;")
+        bl = QVBoxLayout(sec)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(10)
 
-        if sys.platform != "win32":
-            note = QLabel(
-                "Chat-reititys on tuettu vain Windowsissa.\n"
-                "Mac/Linux: käytä käyttöjärjestelmän omaa virtuaalikaapelia "
-                "(esim. BlackHole macOS:llä) ja valitse se Voice Royalen lähtölaitteeksi."
-            )
-            note.setStyleSheet("color: #8b949e; font-size: 13px; background: transparent;")
-            note.setWordWrap(True)
-            bl.addWidget(note)
-            bl.addStretch()
-            nav = QHBoxLayout()
-            nav.addWidget(self._back_btn())
-            nav.addStretch()
-            nxt2 = QPushButton("Seuraava  →")
-            nxt2.setFixedHeight(42)
-            nxt2.setMinimumWidth(140)
-            nxt2.clicked.connect(self._nav_next)
-            nav.addWidget(nxt2)
-            bl.addLayout(nav)
-            lay.addWidget(body)
-            return page
+        sec_hdr = QLabel("Chat-reititys — kuulu Discordissa ja peleissä")
+        sec_hdr.setStyleSheet(
+            "color: #dce6ff; font-size: 13px; font-weight: bold; background: transparent;"
+        )
+        bl.addWidget(sec_hdr)
 
         # Selitysteksti ja tilariippuvat osat täytetään/päivitetään _refresh_chat_routing_page():ssä
         # (kutsutaan sekä täältä alussa että joka kerta kun sivulle navigoidaan — _svc_mixer on
         # voinut muuttua käyttäjän palattua sivulle 1 sen jälkeen kun tämä sivu jo rakennettiin).
         self._chat_why_lbl = QLabel("")
         self._chat_why_lbl.setStyleSheet(
-            "color: #8b949e; font-size: 12px; background: transparent; line-height: 145%;"
+            "color: #8a9bc4; font-size: 12px; background: transparent; line-height: 145%;"
         )
         self._chat_why_lbl.setWordWrap(True)
         bl.addWidget(self._chat_why_lbl)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #21262d;")
+        sep.setStyleSheet("color: #101a36;")
         bl.addWidget(sep)
 
         # Yksi lyhyt, selkeä lopputulosrivi (✅/⚠️/❌) — EI raakaa tekniikkalokia. Tekniset
@@ -10335,16 +10607,16 @@ class SetupWizard(QDialog):
         self._chat_verdict_lbl = QLabel("")
         self._chat_verdict_lbl.setWordWrap(True)
         self._chat_verdict_lbl.setStyleSheet(
-            "color: #e6edf3; font-size: 14px; font-weight: bold; background: transparent;"
+            "color: #dce6ff; font-size: 14px; font-weight: bold; background: transparent;"
         )
         bl.addWidget(self._chat_verdict_lbl)
 
         self._chat_details_toggle_btn = QPushButton("▸  Näytä tekniset tiedot")
         self._chat_details_toggle_btn.setFlat(True)
         self._chat_details_toggle_btn.setStyleSheet(
-            "QPushButton { background: transparent; border: none; color: #388bfd;"
+            "QPushButton { background: transparent; border: none; color: #6aa8ff;"
             " font-size: 11px; text-align: left; padding: 2px 0; }"
-            "QPushButton:hover { color: #58a6ff; }"
+            "QPushButton:hover { color: #6aa8ff; }"
         )
         self._chat_details_toggle_btn.setVisible(False)
         bl.addWidget(self._chat_details_toggle_btn)
@@ -10355,7 +10627,7 @@ class SetupWizard(QDialog):
         details_lay.setContentsMargins(0, 4, 0, 0)
         self._chat_result_lbl = QLabel("")
         self._chat_result_lbl.setWordWrap(True)
-        self._chat_result_lbl.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        self._chat_result_lbl.setStyleSheet("color: #8a9bc4; font-size: 11px; background: transparent;")
         details_lay.addWidget(self._chat_result_lbl)
         bl.addWidget(self._chat_details_w)
 
@@ -10393,7 +10665,7 @@ class SetupWizard(QDialog):
                 return
             try:
                 _rs = load_settings()
-                _rs["_resume_wizard_page"] = self._PAGE_CHAT_ROUTING
+                _rs["_resume_wizard_page"] = self._PAGE_DEVICES
                 save_settings(_rs)
             except Exception:
                 pass
@@ -10418,15 +10690,15 @@ class SetupWizard(QDialog):
         manual_lay.setContentsMargins(0, 4, 0, 0)
         manual_lay.setSpacing(6)
         manual_hint = QLabel("Emme tunnistaneet mikseriäsi automaattisesti — valitse laite:")
-        manual_hint.setStyleSheet("color: #e3b341; font-size: 11px; background: transparent;")
+        manual_hint.setStyleSheet("color: #ffb830; font-size: 11px; background: transparent;")
         manual_hint.setWordWrap(True)
         self._chat_dev_combo = QComboBox()
         self._chat_dev_combo.setFixedHeight(32)
         self._chat_dev_combo.setStyleSheet(
-            "QComboBox { background: #161b22; border: 1px solid #30363d; border-radius: 6px;"
-            " color: #e6edf3; padding: 4px 10px; font-size: 12px; }"
+            "QComboBox { background: #0a0f1e; border: 1px solid #1c2c52; border-radius: 6px;"
+            " color: #dce6ff; padding: 4px 10px; font-size: 12px; }"
             "QComboBox::drop-down { border: none; }"
-            "QComboBox QAbstractItemView { background: #161b22; color: #e6edf3; }"
+            "QComboBox QAbstractItemView { background: #0a0f1e; color: #dce6ff; }"
         )
         manual_lay.addWidget(manual_hint)
         manual_lay.addWidget(self._chat_dev_combo)
@@ -10444,8 +10716,6 @@ class SetupWizard(QDialog):
             self._chat_dev_combo.blockSignals(False)
             _fit_combo_dropdown(self._chat_dev_combo)
 
-        bl.addStretch()
-
         # -- toissijaiset työkalut: rakennetaan aina, mutta näkyvyys (vain mikseri-polulla)
         # päätetään dynaamisesti _refresh_chat_routing_page():ssä, koska _svc_mixer voi vielä
         # muuttua käyttäjän palatessa sivulle 1 sen jälkeen kun tämä sivu on jo rakennettu kerran.
@@ -10456,7 +10726,7 @@ class SetupWizard(QDialog):
         utility_outer.setSpacing(6)
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
-        sep2.setStyleSheet("color: #21262d;")
+        sep2.setStyleSheet("color: #101a36;")
         utility_outer.addWidget(sep2)
 
         # Piilotettu oletuksena "Lisäasetukset"-linkin taakse — nämä eivät ole osa normaalia
@@ -10465,9 +10735,9 @@ class SetupWizard(QDialog):
         adv_toggle_btn = QPushButton("▸  Lisäasetukset")
         adv_toggle_btn.setFlat(True)
         adv_toggle_btn.setStyleSheet(
-            "QPushButton { background: transparent; border: none; color: #388bfd;"
+            "QPushButton { background: transparent; border: none; color: #6aa8ff;"
             " font-size: 11px; text-align: left; padding: 2px 0; }"
-            "QPushButton:hover { color: #58a6ff; }"
+            "QPushButton:hover { color: #6aa8ff; }"
         )
         utility_outer.addWidget(adv_toggle_btn)
 
@@ -10512,7 +10782,7 @@ class SetupWizard(QDialog):
                 _ptmrc.stop()
                 self._chat_result_lbl.setText(msg)
                 self._chat_result_lbl.setStyleSheet(
-                    f"color: {'#3fb950' if '✅' in msg else '#f85149'};"
+                    f"color: {'#00ff88' if '✅' in msg else '#ff2e4d'};"
                     " font-size: 12px; background: transparent;"
                 )
                 cleanup_btn.setEnabled(True)
@@ -10579,7 +10849,7 @@ class SetupWizard(QDialog):
             self._chat_details_toggle_btn.setText("▸  Näytä tekniset tiedot")
             self._chat_verdict_lbl.setText("⏳  Määritetään...")
             self._chat_verdict_lbl.setStyleSheet(
-                "color: #8b949e; font-size: 14px; font-weight: bold; background: transparent;"
+                "color: #8a9bc4; font-size: 14px; font-weight: bold; background: transparent;"
             )
             self._chat_result_lbl.setText("")
             import queue as _q
@@ -10628,8 +10898,9 @@ class SetupWizard(QDialog):
                         ok = _is_vbcable_installed()
                         if ok:
                             _cb(
-                                "✅ VB-Cable asennettu. Valitse 'CABLE Input' kaiuttimeksi "
-                                "edellisellä sivulla."
+                                "✅ VB-Cable asennettu. Voice Royalen ääni ohjataan kaapeliin "
+                                "automaattisesti — valitse Discordissa/pelissä mikrofoniksi "
+                                "'CABLE Output'."
                             )
                         rq.put(("done", ok))
                 except Exception as exc:
@@ -10657,15 +10928,16 @@ class SetupWizard(QDialog):
                 # mutta pysyy PIILOSSA ellei tulos vaadi käyttäjän huomiota (ks. alla) —
                 # onnistuessa käyttäjän ei tarvitse lukea teknistä lokia ollenkaan.
                 self._chat_details_toggle_btn.setVisible(bool(log_lines))
-                # Ajo on nyt LOPPUNUT (onnistuipa se tai ei) — vapauta "Seuraava".
-                self._chat_next_btn.setEnabled(True)
+                # Ajo on nyt LOPPUNUT (onnistuipa se tai ei) — vapauta "Seuraava"-gate.
+                self._chat_run_finished = True
+                self._update_dev_next_gate()
                 kind, payload = final
                 if kind == "need_reboot":
                     self._chat_verdict_lbl.setText(
                         "🔄  Asennus vaatii uudelleenkäynnistyksen ennen jatkoa."
                     )
                     self._chat_verdict_lbl.setStyleSheet(
-                        "color: #e3b341; font-size: 14px; font-weight: bold; background: transparent;"
+                        "color: #ffb830; font-size: 14px; font-weight: bold; background: transparent;"
                     )
                     self._chat_cfg_btn.setText("🔧  Yritä uudelleen")
                     self._chat_cfg_btn.setStyleSheet(self._BTN_PRIMARY)
@@ -10677,7 +10949,7 @@ class SetupWizard(QDialog):
                         "⚠️  Emme tunnistaneet mikseriäsi automaattisesti — valitse laite alta."
                     )
                     self._chat_verdict_lbl.setStyleSheet(
-                        "color: #e3b341; font-size: 14px; font-weight: bold; background: transparent;"
+                        "color: #ffb830; font-size: 14px; font-weight: bold; background: transparent;"
                     )
                     self._chat_cfg_btn.setText("🔧  Yritä uudelleen")
                     self._chat_cfg_btn.setStyleSheet(self._BTN_PRIMARY)
@@ -10698,7 +10970,7 @@ class SetupWizard(QDialog):
                         self._chat_details_w.setVisible(True)
                         self._chat_details_toggle_btn.setText("▾  Piilota tekniset tiedot")
                     self._chat_verdict_lbl.setStyleSheet(
-                        f"color: {'#3fb950' if ok else '#f85149'};"
+                        f"color: {'#00ff88' if ok else '#ff2e4d'};"
                         " font-size: 14px; font-weight: bold; background: transparent;"
                     )
 
@@ -10709,22 +10981,24 @@ class SetupWizard(QDialog):
 
         self._chat_cfg_btn.clicked.connect(_do_configure_all)
 
-        nav = QHBoxLayout()
-        nav.addWidget(self._back_btn())
-        nav.addStretch()
-        # "Seuraava" lukossa kunnes käyttäjä on ajanut "Määritä automaattisesti" ainakin
-        # kerran LOPPUUN (onnistuipa se tai ei) — muuten tätä sivua voisi ohittaa koskematta
-        # reititykseen ollenkaan eikä käyttäjä koskaan saisi tietää ettei se toimi.
-        self._chat_next_btn = QPushButton("Seuraava  →")
-        self._chat_next_btn.setFixedHeight(42)
-        self._chat_next_btn.setMinimumWidth(140)
-        self._chat_next_btn.setEnabled(False)
-        self._chat_next_btn.clicked.connect(self._nav_next)
-        nav.addWidget(self._chat_next_btn)
-        bl.addLayout(nav)
-        lay.addWidget(body)
         self._refresh_chat_routing_page()
-        return page
+        return sec
+
+    def _update_dev_next_gate(self):
+        """Laitteet-sivun "Seuraava" aukeaa vasta kun 1) mikki on valittu JA 2) chat-
+        reititys on ajettu kertaalleen loppuun (jos osio on tarpeen tällä polulla) —
+        muuten reitityksen voisi ohittaa koskematta eikä käyttäjä koskaan saisi
+        tietää ettei se toimi."""
+        if not hasattr(self, "_dev_next_btn"):
+            return
+        routing_needed = (
+            sys.platform == "win32"
+            and (self._svc_mixer or self._svc_routing == "gaming")
+        )
+        ok = bool(getattr(self, "_dev_mic_ok", False) or self._dev_selected_input is not None)
+        if routing_needed and not getattr(self, "_chat_run_finished", False):
+            ok = False
+        self._dev_next_btn.setEnabled(ok)
 
     def _refresh_chat_routing_page(self):
         """Päivittää chat-reititys-sivun selitystekstin, tilaviestin ja työkalurivin näkyvyyden
@@ -10735,24 +11009,29 @@ class SetupWizard(QDialog):
         if not hasattr(self, "_chat_why_lbl") or sys.platform != "win32":
             return
         mixer_name = self._detected_mixer_name() if self._svc_mixer else None
-        if self._svc_mixer and mixer_name:
+        if self._svc_mixer:
+            _dev_line = (f"Havaitsimme laitteesi: {mixer_name}.\n\n" if mixer_name else "")
             why_text = (
-                f"Havaitsimme laitteesi: {mixer_name}.\n\n"
-                "Mitä tapahtuu: Voicemeeter Banana yhdistää mikserisi Chat-mikin ja Voice Royalen "
-                "käännösäänen SAMAAN virtuaaliseen mikrofoniin, jota Discord/pelit käyttävät "
-                "automaattisesti."
-            )
-        elif self._svc_mixer:
-            why_text = (
-                "Mitä tapahtuu: Voicemeeter Banana yhdistää fyysisen mikserisi (esim. RodeCaster "
-                "Pro 2) Chat-mikin ja Voice Royalen käännösäänen SAMAAN virtuaaliseen mikrofoniin, "
-                "jota Discord/pelit käyttävät automaattisesti."
+                _dev_line
+                + "Mitä \"Määritä automaattisesti\" tekee tällä koneella (Voicemeeter Banana\n"
+                "asennettiin jo edellisellä sivulla — tässä tehdään vain määritykset):\n"
+                "  1.  Asettaa Voicemeeterin reitityksen: mikserisi Chat-mikki ja Voice Royalen\n"
+                "       käännösääni yhdistetään samaan B1-virtuaalikanavaan.\n"
+                "  2.  Vaihtaa Windowsin OLETUSMIKROFONIKSI \"Voicemeeter Out B1\"\n"
+                "       (Ääniasetukset → Tallennus) — Discord ja pelit alkavat käyttää sitä\n"
+                "       automaattisesti, ja muut kuulevat sekä oman äänesi että käännökset.\n"
+                "  3.  Kaiuttimiin/oletustoistolaitteeseen EI kosketa.\n"
+                "  4.  Testaa lopuksi että reititys oikeasti toimii."
             )
         else:
             why_text = (
-                "Mitä tapahtuu: VB-Cable luo virtuaalisen mikrofonin (\"CABLE Input\") johon Voice "
-                "Royalen käännösääni ohjataan. Valitse se kaiuttimeksi edellisellä sivulla, ja "
-                "Discord/pelit kuulevat käännöksesi."
+                "Mitä \"Määritä automaattisesti\" tekee tällä koneella (VB-Cable asennettiin\n"
+                "jo edellisellä sivulla — tässä tehdään vain määritykset):\n"
+                "  1.  Varmistaa että VB-Cable-virtuaalikaapeli toimii.\n"
+                "  2.  Voice Royalen käännösääni ohjataan kaapeliin automaattisesti — valitse\n"
+                "       Discordissa/pelissä mikrofoniksi \"CABLE Output\", niin muut kuulevat\n"
+                "       käännöksesi.\n"
+                "  3.  Windowsin oletuslaitteisiin EI kosketa."
             )
         self._chat_why_lbl.setText(why_text)
         # Verdict/nappitila päivitetään vain ENNEN ensimmäistä "Määritä automaattisesti" -ajoa
@@ -10768,17 +11047,22 @@ class SetupWizard(QDialog):
                 "Ei vielä asennettu — paina alta, hoidamme asennuksen, määrityksen ja testauksen."
             )
             self._chat_verdict_lbl.setStyleSheet(
-                "color: #8b949e; font-size: 14px; font-weight: bold; background: transparent;"
+                "color: #8a9bc4; font-size: 14px; font-weight: bold; background: transparent;"
             )
         if hasattr(self, "_chat_utility_w"):
             self._chat_utility_w.setVisible(self._svc_mixer)
+        # Koko osio näkyy vain jos polku tarvitsee chat-reititystä (mikseri tai pelit/Discord)
+        if hasattr(self, "_chat_section_w"):
+            self._chat_section_w.setVisible(
+                bool(self._svc_mixer or self._svc_routing == "gaming")
+            )
 
     def _page_devices(self):
         """Mikrofoni + kaiuttimet, progressive disclosure -periaatteella: oletusnäkymä näyttää
         vain automaattisen tunnistuksen tuloksen ja yhden testinapin, koko laitelista/lisäasetukset
         avautuvat vain jos käyttäjä itse haluaa tarkistaa/vaihtaa laitteen."""
         page = QWidget()
-        page.setStyleSheet("background: #0d1117;")
+        page.setStyleSheet("background: #05070f;")
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -10789,9 +11073,9 @@ class SetupWizard(QDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setStyleSheet("QScrollArea { background: #0d1117; }")
+        scroll.setStyleSheet("QScrollArea { background: #05070f; }")
         body = QWidget()
-        body.setStyleSheet("background: #0d1117;")
+        body.setStyleSheet("background: #05070f;")
         bl = QVBoxLayout(body)
         bl.setContentsMargins(28, 16, 28, 12)
         bl.setSpacing(10)
@@ -10804,8 +11088,8 @@ class SetupWizard(QDialog):
         self._dev_input_status_lbl = QLabel("🎤  Puhu mikrofoniisi...")
         self._dev_input_status_lbl.setWordWrap(True)
         self._dev_input_status_lbl.setStyleSheet(
-            "color: #e6edf3; font-size: 15px; font-weight: bold; background: #161b22;"
-            " border: 1px solid #30363d; border-radius: 8px; padding: 16px;"
+            "color: #dce6ff; font-size: 15px; font-weight: bold; background: #0a0f1e;"
+            " border: 1px solid #1c2c52; border-radius: 8px; padding: 16px;"
         )
         bl.addWidget(self._dev_input_status_lbl)
 
@@ -10820,9 +11104,9 @@ class SetupWizard(QDialog):
         mic_toggle_btn = QPushButton("▸  Väärä laite? Näytä kaikki mikrofonit")
         mic_toggle_btn.setFlat(True)
         mic_toggle_btn.setStyleSheet(
-            "QPushButton { background: transparent; border: none; color: #388bfd;"
+            "QPushButton { background: transparent; border: none; color: #6aa8ff;"
             " font-size: 11px; text-align: left; padding: 2px 0; }"
-            "QPushButton:hover { color: #58a6ff; }"
+            "QPushButton:hover { color: #6aa8ff; }"
         )
         bl.addWidget(mic_toggle_btn)
 
@@ -10836,20 +11120,29 @@ class SetupWizard(QDialog):
         in_scroll.setWidgetResizable(True)
         in_scroll.setFixedHeight(150)
         in_scroll.setStyleSheet(
-            "QScrollArea { background: #161b22; border: 1px solid #30363d; border-radius: 6px; }"
+            "QScrollArea { background: #0a0f1e; border: 1px solid #1c2c52; border-radius: 6px; }"
         )
         in_cnt = QWidget()
-        in_cnt.setStyleSheet("background: #161b22;")
+        in_cnt.setStyleSheet("background: #0a0f1e;")
         self._dev_bars_layout = QVBoxLayout(in_cnt)
         self._dev_bars_layout.setContentsMargins(10, 8, 10, 8)
         self._dev_bars_layout.setSpacing(6)
 
+        # Suodatus: järjestelmähälyt + Windowsissa disabloidut laitteet + virtuaali-
+        # kaapelit (Voicemeeter/VB-Cable ym.) pois — tällä sivulla valitaan OMA mikki,
+        # virtuaalilaitteet eivät koskaan ole oikea valinta tähän ja vain sekoittavat.
+        _disabled_names = _windows_disabled_audio_names()
+        _VIRTUAL_KW = ("voicemeeter", "vb-audio", "cable", "voicemod", "virtual")
         self._dev_input_devices = [
             (idx, name) for idx, name in list_input_devices()
-            if not name.startswith("{") and not any(
+            if not name.startswith("{")
+            and name.lower().strip() not in ("input ()", "output ()")
+            and not any(
                 k in name.lower()
                 for k in ["microsoft sound mapper", "primary sound capture", "bthhfenum"]
             )
+            and not any(k in name.lower() for k in _VIRTUAL_KW)
+            and not _matches_disabled_name(name, _disabled_names)
         ]
 
         _def_in = -1
@@ -10895,7 +11188,7 @@ class SetupWizard(QDialog):
             display = f"{icon} {name[:36]}{'…' if len(name) > 36 else ''}"
             nl = QLabel(display)
             nl.setFixedWidth(210)
-            nl.setStyleSheet("color: #c9d1d9; font-size: 11px;")
+            nl.setStyleSheet("color: #b9c5e6; font-size: 11px;")
             bar = QProgressBar()
             bar.setRange(0, 1000)
             bar.setValue(0)
@@ -10906,16 +11199,16 @@ class SetupWizard(QDialog):
             st_lbl = QLabel("★ Oletus" if is_def else "")
             st_lbl.setFixedWidth(68)
             st_lbl.setStyleSheet(
-                "color: #e3b341; font-size: 10px;" if is_def
-                else "color: #484f58; font-size: 10px;"
+                "color: #ffb830; font-size: 10px;" if is_def
+                else "color: #546a94; font-size: 10px;"
             )
             sel_btn = QPushButton("Valitse")
             sel_btn.setFixedWidth(60)
             sel_btn.setFixedHeight(24)
             sel_btn.setStyleSheet(
-                "QPushButton { background: #21262d; color: #8b949e; border: 1px solid #30363d;"
+                "QPushButton { background: #101a36; color: #8a9bc4; border: 1px solid #1c2c52;"
                 " border-radius: 4px; font-size: 10px; }"
-                "QPushButton:hover { background: #30363d; color: #e6edf3; }"
+                "QPushButton:hover { background: #1c2c52; color: #dce6ff; }"
             )
             sel_btn.clicked.connect(lambda _, i=idx: self._dev_select_input(i, auto=False))
             rl.addWidget(nl)
@@ -10952,15 +11245,30 @@ class SetupWizard(QDialog):
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #21262d;")
+        sep.setStyleSheet("color: #101a36;")
         bl.addWidget(sep)
 
+        # ── Chat-reititys — ennen ääntestiä (aiemmin oma sivu) ──
+        if sys.platform == "win32":
+            self._chat_section_w = self._build_chat_routing_section()
+            bl.addWidget(self._chat_section_w)
+            sep_cr = QFrame()
+            sep_cr.setFrameShape(QFrame.Shape.HLine)
+            sep_cr.setStyleSheet("color: #101a36;")
+            bl.addWidget(sep_cr)
+
         # ── Kaiuttimet: oletuslaite + testi, muut laitteet piilotettuna ──
+        # Sama suodatus kuin mikeille: disabloidut + virtuaalikaapelit pois —
+        # kuuntelulaitteeksi valitaan oma kuuloke/kaiutin, ei koskaan virtuaalikaapelia.
         _raw_out = [
             (idx, name) for idx, name in list_output_devices()
-            if not name.startswith("{") and not any(
+            if not name.startswith("{")
+            and name.lower().strip() not in ("input ()", "output ()")
+            and not any(
                 k in name.lower() for k in ["primary sound", "microsoft sound"]
             )
+            and not any(k in name.lower() for k in _VIRTUAL_KW)
+            and not _matches_disabled_name(name, _disabled_names)
         ]
         _def_out = -1
         try:
@@ -10979,10 +11287,11 @@ class SetupWizard(QDialog):
         except Exception:
             pass
 
-        # Same RodeCaster Pro II "...Chat..." preference as the mic above.
+        # RodeCaster Pro II: kuuntelun oletus on Main Stereo -ulostulo (kuulokkeet/
+        # kaiuttimet) — EI Chat-kanava, joka on mikkisyöte peliin/Discordiin päin.
         for _i, _n in _raw_out:
             _nl = _n.lower()
-            if "rode" in _nl and "chat" in _nl:
+            if "rode" in _nl and "main" in _nl:
                 _def_out = _i
                 break
 
@@ -10993,33 +11302,24 @@ class SetupWizard(QDialog):
 
         out_hdr = QLabel("Kaiuttimet / kuulokkeet")
         out_hdr.setStyleSheet(
-            "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;"
+            "color: #dce6ff; font-size: 13px; font-weight: bold; background: transparent;"
         )
         bl.addWidget(out_hdr)
 
         _def_out_name = next((n for i, n in self._dev_output_devices if i == _def_out), "")
         out_row = QHBoxLayout()
         out_default_lbl = QLabel(f"🔊  {_def_out_name or 'Ei oletuslaitetta löytynyt'}")
-        out_default_lbl.setStyleSheet("color: #c9d1d9; font-size: 12px; background: transparent;")
+        out_default_lbl.setStyleSheet("color: #b9c5e6; font-size: 12px; background: transparent;")
         out_default_lbl.setWordWrap(True)
-        out_test_btn = QPushButton("▶ Testaa")
-        out_test_btn.setFixedWidth(90)
-        out_test_btn.setFixedHeight(30)
-        out_test_btn.setStyleSheet(self._BTN_SEC)
-        if _def_out >= 0:
-            out_test_btn.clicked.connect(lambda _, i=_def_out, b=out_test_btn: self._dev_test_output(i, b))
-        else:
-            out_test_btn.setEnabled(False)
         out_row.addWidget(out_default_lbl, 1)
-        out_row.addWidget(out_test_btn)
         bl.addLayout(out_row)
 
-        out_toggle_btn = QPushButton("▸  Käytä useampaa laitetta / valitse toinen")
+        out_toggle_btn = QPushButton("▸  Vaihda laite")
         out_toggle_btn.setFlat(True)
         out_toggle_btn.setStyleSheet(
-            "QPushButton { background: transparent; border: none; color: #388bfd;"
+            "QPushButton { background: transparent; border: none; color: #6aa8ff;"
             " font-size: 11px; text-align: left; padding: 2px 0; }"
-            "QPushButton:hover { color: #58a6ff; }"
+            "QPushButton:hover { color: #6aa8ff; }"
         )
         bl.addWidget(out_toggle_btn)
 
@@ -11032,10 +11332,10 @@ class SetupWizard(QDialog):
         out_scroll.setWidgetResizable(True)
         out_scroll.setFixedHeight(130)
         out_scroll.setStyleSheet(
-            "QScrollArea { background: #161b22; border: 1px solid #30363d; border-radius: 6px; }"
+            "QScrollArea { background: #0a0f1e; border: 1px solid #1c2c52; border-radius: 6px; }"
         )
         out_cnt = QWidget()
-        out_cnt.setStyleSheet("background: #161b22;")
+        out_cnt.setStyleSheet("background: #0a0f1e;")
         out_lay = QVBoxLayout(out_cnt)
         out_lay.setContentsMargins(10, 8, 10, 8)
         out_lay.setSpacing(5)
@@ -11060,19 +11360,19 @@ class SetupWizard(QDialog):
             cb = QCheckBox(f"{icon} {display_name}")
             cb.setChecked(is_def)
             cb.setStyleSheet(
-                "QCheckBox { color: #c9d1d9; font-size: 11px; padding: 2px; background: transparent; }"
+                "QCheckBox { color: #b9c5e6; font-size: 11px; padding: 2px; background: transparent; }"
             )
             def_lbl = QLabel("★ Oletus" if is_def else "")
             def_lbl.setFixedWidth(60)
-            def_lbl.setStyleSheet("color: #e3b341; font-size: 10px; background: transparent;")
+            def_lbl.setStyleSheet("color: #ffb830; font-size: 10px; background: transparent;")
             bp = QPushButton("▶ Beep")
             bp.setFixedWidth(68)
             bp.setFixedHeight(26)
             bp.setStyleSheet(
-                "QPushButton { background: #21262d; color: #8b949e; border: 1px solid #30363d;"
+                "QPushButton { background: #101a36; color: #8a9bc4; border: 1px solid #1c2c52;"
                 " border-radius: 4px; font-size: 11px; }"
-                "QPushButton:hover { background: #30363d; color: #e6edf3; }"
-                "QPushButton:disabled { color: #30363d; }"
+                "QPushButton:hover { background: #1c2c52; color: #dce6ff; }"
+                "QPushButton:disabled { color: #1c2c52; }"
             )
             bp.clicked.connect(lambda _, i=idx, b=bp: self._dev_test_output(i, b))
             rl.addWidget(cb, 1)
@@ -11093,37 +11393,37 @@ class SetupWizard(QDialog):
             out_list_w.setVisible(vis)
             out_toggle_btn.setText(
                 "▾  Piilota laitelista" if vis
-                else "▸  Käytä useampaa laitetta / valitse toinen"
+                else "▸  Vaihda laite"
             )
 
         out_toggle_btn.clicked.connect(_toggle_out_list)
 
         self._dev_out_status_lbl = QLabel("")
         self._dev_out_status_lbl.setStyleSheet(
-            "color: #8b949e; font-size: 11px; background: transparent;"
+            "color: #8a9bc4; font-size: 11px; background: transparent;"
         )
         bl.addWidget(self._dev_out_status_lbl)
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
-        sep2.setStyleSheet("color: #21262d;")
+        sep2.setStyleSheet("color: #101a36;")
         bl.addWidget(sep2)
 
         # ── Yhdistetty ääntesti (TTS + soundboard yhdellä napilla) ──────
         test_hdr = QLabel("Testaa ääni")
         test_hdr.setStyleSheet(
-            "color: #e6edf3; font-size: 13px; font-weight: bold; background: transparent;"
+            "color: #dce6ff; font-size: 13px; font-weight: bold; background: transparent;"
         )
         bl.addWidget(test_hdr)
         test_hint = QLabel("Kuuletko käännösäänen ja soundboard-piippauksen kaiuttimistasi?")
-        test_hint.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        test_hint.setStyleSheet("color: #8a9bc4; font-size: 11px; background: transparent;")
         bl.addWidget(test_hint)
         sound_test_btn = QPushButton("🔊  Testaa ääni")
         sound_test_btn.setFixedHeight(36)
         sound_test_btn.setStyleSheet(self._BTN_SEC)
         sound_result = QLabel("")
         sound_result.setWordWrap(True)
-        sound_result.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        sound_result.setStyleSheet("color: #8a9bc4; font-size: 11px; background: transparent;")
         bl.addWidget(sound_test_btn)
         bl.addWidget(sound_result)
 
@@ -11184,7 +11484,7 @@ class SetupWizard(QDialog):
                 sound_test_btn.setText("🔊  Testaa ääni")
                 sound_result.setText(msg)
                 sound_result.setStyleSheet(
-                    f"color: {'#3fb950' if ok else '#e3b341'}; font-size: 11px; background: transparent;"
+                    f"color: {'#00ff88' if ok else '#ffb830'}; font-size: 11px; background: transparent;"
                 )
 
             _ptmr = QTimer(self)
@@ -11203,7 +11503,8 @@ class SetupWizard(QDialog):
         self._dev_next_btn = QPushButton("Seuraava  →")
         self._dev_next_btn.setFixedHeight(42)
         self._dev_next_btn.setMinimumWidth(140)
-        self._dev_next_btn.setEnabled(self._dev_selected_input is not None)
+        self._dev_next_btn.setStyleSheet(self._BTN_PRIMARY)
+        self._dev_next_btn.setEnabled(False)
         self._dev_next_btn.clicked.connect(self._nav_next)
         nav.addWidget(self._dev_next_btn)
         bl.addLayout(nav)
@@ -11215,7 +11516,7 @@ class SetupWizard(QDialog):
         """Viimeistelysivu. Mikrofoni-, TTS- ja soundboard-testit tehdään jo devices-sivulla
         (samalla sivulla missä laitteet valitaan) — ei toisteta niitä enää tässä."""
         page = QWidget()
-        page.setStyleSheet("background: #0d1117;")
+        page.setStyleSheet("background: #05070f;")
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -11224,23 +11525,191 @@ class SetupWizard(QDialog):
             "Asennus on valmis."
         ))
         body = QWidget()
-        body.setStyleSheet("background: #0d1117;")
+        body.setStyleSheet("background: #05070f;")
         bl = QVBoxLayout(body)
         bl.setContentsMargins(32, 24, 32, 20)
         bl.setSpacing(14)
 
         summary = QLabel(
-            "Kaikki tarvittavat vaiheet on käyty läpi:\n\n"
-            "  •  Puheentunnistus, käännös ja äänisynteesi valittu\n"
-            "  •  Mikrofoni ja kaiuttimet valittu ja testattu\n"
-            "  •  TTS ja soundboard testattu\n\n"
-            "Voit muuttaa mitä tahansa näistä myöhemmin Asetukset-ikkunasta."
+            "Perusasennus on valmis — mikrofoni, kaiuttimet ja chat-reititys on määritetty.\n"
+            "Voit muuttaa mitä tahansa myöhemmin Asetukset-ikkunasta."
         )
         summary.setStyleSheet(
-            "color: #c9d1d9; font-size: 13px; background: transparent; line-height: 1.6;"
+            "color: #b9c5e6; font-size: 14px; background: transparent; line-height: 1.6;"
         )
         summary.setWordWrap(True)
         bl.addWidget(summary)
+
+        # ── Stream Deck -osio (näkyy vain jos valittu sivulla 2) ──
+        self._fin_sd_w = QWidget()
+        self._fin_sd_w.setVisible(False)
+        self._fin_sd_w.setStyleSheet(
+            "QWidget { background: #0a0f1e; border: 1px solid #1c2c52; border-radius: 8px; }"
+        )
+        _sd_bl = QVBoxLayout(self._fin_sd_w)
+        _sd_bl.setContentsMargins(16, 12, 16, 14)
+        _sd_bl.setSpacing(6)
+        _sd_hdr = QLabel("🎛️  Stream Deck")
+        _sd_hdr.setStyleSheet(
+            "color: #dce6ff; font-size: 13px; font-weight: bold; background: transparent; border: none;"
+        )
+        _sd_bl.addWidget(_sd_hdr)
+        self._fin_sd_status = QLabel()
+        self._fin_sd_status.setStyleSheet(
+            "color: #b9c5e6; font-size: 12px; background: transparent; border: none;"
+        )
+        _sd_bl.addWidget(self._fin_sd_status)
+        _sd_steps = QLabel(
+            "1.  Varmista että Elgato Stream Deck -ohjelmisto on asennettu.\n"
+            "2.  Paina alla olevaa nappia — plugin asentuu itsestään.\n"
+            "3.  Vedä Voice Royale -toiminnot haluamillesi napeille.\n"
+            "Napit päivittyvät automaattisesti kun Voice Royale on käynnissä."
+        )
+        _sd_steps.setStyleSheet(
+            "color: #8a9bc4; font-size: 11px; background: transparent; border: none; line-height: 150%;"
+        )
+        _sd_steps.setWordWrap(True)
+        _sd_bl.addWidget(_sd_steps)
+
+        _sd_open_btn = QPushButton("📂  Asenna Stream Deck -plugin")
+        _sd_open_btn.setFixedHeight(32)
+        _sd_open_btn.setStyleSheet(self._BTN_SEC)
+
+        def _open_sd_plugin():
+            cands = []
+            if getattr(sys, "frozen", False):
+                cands.append(os.path.join(
+                    os.path.dirname(sys.executable), "StreamDeck",
+                    "com.voiceroyale.streamDeckPlugin"))
+            cands.append(os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "streamdeck-plugin",
+                "com.voiceroyale.streamDeckPlugin"))
+            for _p in cands:
+                if os.path.exists(_p):
+                    try:
+                        os.startfile(_p)
+                        self._fin_sd_status.setText(
+                            "✅ Plugin-tiedosto avattu — Stream Deck -ohjelmisto viimeistelee asennuksen."
+                        )
+                    except Exception as e:
+                        self._fin_sd_status.setText(f"❌ Avaus epäonnistui: {e}")
+                    return
+            self._fin_sd_status.setText(
+                "❌ Plugin-tiedostoa ei löytynyt — asenna se Asetukset → Stream Deck -välilehdeltä."
+            )
+
+        _sd_open_btn.clicked.connect(_open_sd_plugin)
+        _sd_bl.addWidget(_sd_open_btn)
+        bl.addWidget(self._fin_sd_w)
+
+        # ── Home Assistant -osio (näkyy vain jos valittu sivulla 2) ──
+        self._fin_ha_w = QWidget()
+        self._fin_ha_w.setVisible(False)
+        self._fin_ha_w.setStyleSheet(
+            "QWidget { background: #0a0f1e; border: 1px solid #1c2c52; border-radius: 8px; }"
+        )
+        _ha_bl = QVBoxLayout(self._fin_ha_w)
+        _ha_bl.setContentsMargins(16, 12, 16, 14)
+        _ha_bl.setSpacing(6)
+        _ha_hdr = QLabel("🏠  Home Assistant")
+        _ha_hdr.setStyleSheet(
+            "color: #dce6ff; font-size: 13px; font-weight: bold; background: transparent; border: none;"
+        )
+        _ha_bl.addWidget(_ha_hdr)
+        _ha_url_row = QHBoxLayout()
+        _ha_url_lbl = QLabel("HA-osoite:")
+        _ha_url_lbl.setFixedWidth(110)
+        _ha_url_lbl.setStyleSheet("color: #8a9bc4; font-size: 12px; background: transparent; border: none;")
+        self._fin_ha_url_edit = QLineEdit(load_settings().get("ha_url", ""))
+        self._fin_ha_url_edit.setPlaceholderText("http://homeassistant.local:8123")
+        _ha_url_row.addWidget(_ha_url_lbl)
+        _ha_url_row.addWidget(self._fin_ha_url_edit, 1)
+        _ha_bl.addLayout(_ha_url_row)
+        _ha_tok_row = QHBoxLayout()
+        _ha_tok_lbl = QLabel("Token:")
+        _ha_tok_lbl.setFixedWidth(110)
+        _ha_tok_lbl.setStyleSheet("color: #8a9bc4; font-size: 12px; background: transparent; border: none;")
+        self._fin_ha_token_edit = QLineEdit(load_settings().get("ha_token", ""))
+        self._fin_ha_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._fin_ha_token_edit.setPlaceholderText("Long-lived access token (HA: Profiili → Turvallisuus)")
+        _ha_tok_row.addWidget(_ha_tok_lbl)
+        _ha_tok_row.addWidget(self._fin_ha_token_edit, 1)
+        _ha_bl.addLayout(_ha_tok_row)
+        _ha_test_row = QHBoxLayout()
+        _ha_test_btn = QPushButton("🔌  Testaa yhteys")
+        _ha_test_btn.setFixedHeight(30)
+        _ha_test_btn.setFixedWidth(150)
+        _ha_test_btn.setStyleSheet(self._BTN_SEC)
+        self._fin_ha_test_lbl = QLabel("")
+        self._fin_ha_test_lbl.setStyleSheet(
+            "color: #8a9bc4; font-size: 12px; background: transparent; border: none;"
+        )
+        self._fin_ha_test_lbl.setWordWrap(True)
+        _ha_test_row.addWidget(_ha_test_btn)
+        _ha_test_row.addWidget(self._fin_ha_test_lbl, 1)
+        _ha_bl.addLayout(_ha_test_row)
+
+        def _test_ha_connection():
+            url = self._fin_ha_url_edit.text().strip().rstrip("/")
+            tok = self._fin_ha_token_edit.text().strip()
+            if not url or not tok:
+                self._fin_ha_test_lbl.setText("Täytä ensin osoite ja token.")
+                self._fin_ha_test_lbl.setStyleSheet(
+                    "color: #ffb830; font-size: 12px; background: transparent; border: none;")
+                return
+            _ha_test_btn.setEnabled(False)
+            self._fin_ha_test_lbl.setText("Testataan…")
+            self._fin_ha_test_lbl.setStyleSheet(
+                "color: #8a9bc4; font-size: 12px; background: transparent; border: none;")
+            import queue as _q
+            _hq = _q.Queue()
+
+            def _bg():
+                try:
+                    r = requests.get(
+                        f"{url}/api/",
+                        headers={"Authorization": f"Bearer {tok}"},
+                        timeout=6,
+                    )
+                    if r.status_code == 200:
+                        _hq.put((True, "✅ Yhteys toimii!"))
+                    elif r.status_code == 401:
+                        _hq.put((False, "❌ Token ei kelpaa (401) — tarkista long-lived token."))
+                    else:
+                        _hq.put((False, f"❌ HA vastasi koodilla {r.status_code}."))
+                except Exception as e:
+                    _hq.put((False, f"❌ Ei yhteyttä: {e}"))
+
+            def _poll():
+                try:
+                    ok, msg = _hq.get_nowait()
+                except Exception:
+                    return
+                _htmr.stop()
+                _ha_test_btn.setEnabled(True)
+                self._fin_ha_test_lbl.setText(msg)
+                self._fin_ha_test_lbl.setStyleSheet(
+                    f"color: {'#00ff88' if ok else '#ff2e4d'};"
+                    " font-size: 12px; background: transparent; border: none;")
+
+            _htmr = QTimer(self)
+            _htmr.timeout.connect(_poll)
+            _htmr.start(200)
+            threading.Thread(target=_bg, daemon=True).start()
+
+        _ha_test_btn.clicked.connect(_test_ha_connection)
+
+        _ha_hint = QLabel(
+            "Tallennetaan Valmis-napista. Laitteiden valinta soundboard-napeille tehdään "
+            "Asetukset → Home Assistant -välilehdellä."
+        )
+        _ha_hint.setStyleSheet(
+            "color: #8a9bc4; font-size: 11px; background: transparent; border: none;"
+        )
+        _ha_hint.setWordWrap(True)
+        _ha_bl.addWidget(_ha_hint)
+        bl.addWidget(self._fin_ha_w)
+
         bl.addStretch()
 
         nav = QHBoxLayout()
@@ -11249,11 +11718,28 @@ class SetupWizard(QDialog):
         fin = QPushButton("Valmis  ✓")
         fin.setFixedHeight(42)
         fin.setMinimumWidth(140)
+        fin.setStyleSheet(self._BTN_PRIMARY)
         fin.clicked.connect(self._finish_setup)
         nav.addWidget(fin)
         bl.addLayout(nav)
         lay.addWidget(body)
         return page
+
+    def _refresh_finish_page(self):
+        """Näyttää/piilottaa Valmis-sivun Stream Deck- ja Home Assistant -osiot sivun 2
+        valintojen mukaan — valinnat voivat muuttua ennen tänne paluuta."""
+        if not hasattr(self, "_fin_sd_w"):
+            return
+        sd_on = bool(getattr(self, "_svc_streamdeck", False))
+        ha_on = bool(getattr(self, "_svc_ha", False))
+        self._fin_sd_w.setVisible(sd_on)
+        self._fin_ha_w.setVisible(ha_on)
+        if sd_on:
+            _port = StreamDeckHttpServer.PORT
+            self._fin_sd_status.setText(
+                f"Voice Royale kuuntelee Stream Deck -pluginia portissa localhost:{_port} "
+                "aina kun appi on käynnissä."
+            )
 
     # ── device monitoring ──────────────────────────────────────────────
 
@@ -11298,7 +11784,7 @@ class SetupWizard(QDialog):
                 st = self._dev_status_labels.get(idx)
                 if st and not st.text():
                     st.setText("Ei yhteyttä")
-                    st.setStyleSheet("color: #484f58; font-size: 10px;")
+                    st.setStyleSheet("color: #546a94; font-size: 10px;")
         if self._dev_input_streams:
             self._dev_monitor_timer.start()
 
@@ -11335,14 +11821,20 @@ class SetupWizard(QDialog):
             else:
                 self._dev_sustained[idx] = max(0, self._dev_sustained.get(idx, 0) - 1)
 
-        # Yhdistetty mittari (aina näkyvissä, ks. _page_devices) — näyttää suurimman tason
-        # KAIKISTA tarkkailtavista laitteista, jotta käyttäjä näkee heti onko ääntä tulossa
-        # ollenkaan, vaikka tarkka per-laite-lista olisi piilossa.
+        # Yhdistetty mittari (aina näkyvissä, ks. _page_devices):
+        # - kun mikki on jo valittu (auto tai käsin), näytä VAIN sen taso — muuten
+        #   mittari heiluu jonkin toisen laitteen (esim. webcam-mikin) äänestä ja
+        #   käyttäjä luulee valitun mikin kuuluvan vaikka se on mykistetty
+        # - ennen valintaa näytä suurin taso kaikista, jotta näkyy tuleeko ääntä ollenkaan
         if hasattr(self, "_dev_combined_bar"):
-            combined_peak = max(
-                (self._dev_level_peak.get(i, 0.0) for i in self._dev_stream_opened),
-                default=0.0,
-            )
+            _sel = getattr(self, "_dev_selected_input", None)
+            if _sel is not None and _sel in self._dev_stream_opened:
+                combined_peak = self._dev_level_peak.get(_sel, 0.0)
+            else:
+                combined_peak = max(
+                    (self._dev_level_peak.get(i, 0.0) for i in self._dev_stream_opened),
+                    default=0.0,
+                )
             self._dev_combined_bar.setValue(int(min(combined_peak * 1000, 1000)))
             self._dev_combined_bar.setStyleSheet(
                 self._BAR_ACTIVE if combined_peak > THRESHOLD else self._BAR_IDLE
@@ -11392,11 +11884,11 @@ class SetupWizard(QDialog):
         if self._dev_input_status_lbl:
             self._dev_input_status_lbl.setText(f"✓  {prefix}: {name}")
             self._dev_input_status_lbl.setStyleSheet(
-                "color: #3fb950; font-size: 15px; font-weight: bold; background: #0d2b14;"
+                "color: #00ff88; font-size: 15px; font-weight: bold; background: #0d2b14;"
                 " border: 1px solid #238636; border-radius: 8px; padding: 16px;"
             )
-        if hasattr(self, "_dev_next_btn"):
-            self._dev_next_btn.setEnabled(True)
+        self._dev_mic_ok = True
+        self._update_dev_next_gate()
 
     def _dev_test_output(self, device_idx, btn):
         import queue as _q
@@ -11404,7 +11896,7 @@ class SetupWizard(QDialog):
         if self._dev_out_status_lbl:
             self._dev_out_status_lbl.setText("Soitetaan testiääni...")
             self._dev_out_status_lbl.setStyleSheet(
-                "color: #8b949e; font-size: 11px; background: transparent;"
+                "color: #8a9bc4; font-size: 11px; background: transparent;"
             )
         _result_q = _q.Queue()
 
@@ -11439,7 +11931,7 @@ class SetupWizard(QDialog):
                 if self._dev_out_status_lbl:
                     self._dev_out_status_lbl.setText(msg)
                     self._dev_out_status_lbl.setStyleSheet(
-                        f"color: {'#3fb950' if ok else '#f85149'};"
+                        f"color: {'#00ff88' if ok else '#ff2e4d'};"
                         " font-size: 11px; background: transparent;"
                     )
                 if ok:
@@ -11454,8 +11946,8 @@ class SetupWizard(QDialog):
                     if cb and not is_v:
                         cb.setChecked(True)
                     btn.setStyleSheet(
-                        "QPushButton { background: #1a4731; color: #3fb950;"
-                        " border: 1px solid #3fb950; border-radius: 4px; font-size: 11px; }"
+                        "QPushButton { background: #1a4731; color: #00ff88;"
+                        " border: 1px solid #00ff88; border-radius: 4px; font-size: 11px; }"
                     )
                     btn.setText("✓ OK")
                 else:
@@ -11479,8 +11971,8 @@ class SetupWizard(QDialog):
         self._stack.addWidget(self._page_services())       # 1
         self._stack.addWidget(self._page_packages())       # 2  (vain dev-tilassa sekvenssissä)
         self._stack.addWidget(self._page_api_key())        # 3
-        self._stack.addWidget(self._page_devices())        # 4  mikrofoni + kaiuttimet + ääntesti
-        self._stack.addWidget(self._page_chat_routing())   # 5  chat-reititys (mikseri TAI pelit/Discord)
+        self._stack.addWidget(self._page_devices())        # 4  mikrofoni + kaiuttimet + chat-reititys + ääntesti
+        self._stack.addWidget(QWidget())                   # 5  (vanha chat-reititys-sivu — nyt osio sivulla 4; placeholder säilyttää indeksit)
         self._stack.addWidget(self._page_final_test())     # 6  Valmis
 
     def _on_key_changed(self, text):
@@ -11494,14 +11986,14 @@ class SetupWizard(QDialog):
         self._test_btn.setEnabled(False)
         self._status_lbl.setText("Testataan...")
         self._status_lbl.setStyleSheet(
-            "color: #8b949e; font-size: 12px; padding-left: 8px; background: transparent;"
+            "color: #8a9bc4; font-size: 12px; padding-left: 8px; background: transparent;"
         )
         QApplication.processEvents()
         try:
             OpenAI(api_key=key).models.list()
             self._status_lbl.setText("✓ Toimii!")
             self._status_lbl.setStyleSheet(
-                "color: #3fb950; font-size: 12px; padding-left: 8px; background: transparent;"
+                "color: #00ff88; font-size: 12px; padding-left: 8px; background: transparent;"
             )
             self._save_btn.setEnabled(True)
         except Exception as e:
@@ -11514,7 +12006,7 @@ class SetupWizard(QDialog):
                 txt = f"✗ {msg[:60]}"
             self._status_lbl.setText(txt)
             self._status_lbl.setStyleSheet(
-                "color: #f85149; font-size: 12px; padding-left: 8px; background: transparent;"
+                "color: #ff2e4d; font-size: 12px; padding-left: 8px; background: transparent;"
             )
         self._test_btn.setEnabled(True)
 
@@ -11566,6 +12058,22 @@ class SetupWizard(QDialog):
                         selected_out.append(_pi)
                 except Exception:
                     pass
+            # Chat-reititys: lisää oikea virtuaalikaapeli output-laitteisiin AUTOMAATTISESTI —
+            # wizardin laitelistat eivät enää näytä virtuaalilaitteita, joten käyttäjä ei voi
+            # (eikä hänen tarvitse) valita niitä käsin. TTS/soundboard soittaa näihin.
+            try:
+                _routing_needed = self._svc_mixer or getattr(self, "_svc_routing", "") == "gaming"
+                if _routing_needed:
+                    _want = ("voicemeeter input (vb-audio voicemeeter vaio)"
+                             if self._svc_mixer else "cable input")
+                    for _oi, _on in list_output_devices():
+                        _onl = _on.lower()
+                        if (_onl == _want if self._svc_mixer else _want in _onl):
+                            if _oi not in selected_out:
+                                selected_out.append(_oi)
+                            break
+            except Exception:
+                pass
             # Safety net: if no physical output selected, add system default
             _phys = []
             for _si in selected_out:
@@ -11609,6 +12117,14 @@ class SetupWizard(QDialog):
             settings.setdefault("translation_backend", "DeepL")
         else:
             settings.setdefault("translation_backend", "Google (free)")
+        # Home Assistant -asetukset Valmis-sivun kentistä (jos HA valittiin sivulla 2)
+        if getattr(self, "_svc_ha", False) and getattr(self, "_fin_ha_url_edit", None) is not None:
+            _ha_u = self._fin_ha_url_edit.text().strip()
+            _ha_t = self._fin_ha_token_edit.text().strip()
+            if _ha_u:
+                settings["ha_url"] = _ha_u
+            if _ha_t:
+                settings["ha_token"] = _ha_t
         settings["_last_wizard_version"] = APP_VERSION
         save_settings(settings)
         self.accept()
@@ -11682,7 +12198,7 @@ if __name__ == "__main__":
             Qt.TransformationMode.SmoothTransformation,
         )
         canvas = QPixmap(_WIN_W, _WIN_H)
-        canvas.fill(QColor("#0d1117"))
+        canvas.fill(QColor("#05070f"))
         p = QPainter(canvas)
         p.drawPixmap((_WIN_W - logo.width()) // 2, (_WIN_H - logo.height()) // 2, logo)
         p.end()
