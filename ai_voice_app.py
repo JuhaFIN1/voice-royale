@@ -332,7 +332,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.87"
+APP_VERSION = "1.3.88"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -6471,6 +6471,12 @@ class App(QWidget):
             return
 
         saved_devices = self.history_data.get("selected_output_devices", []) or []
+        # Nimipohjainen tallennus (kuten mikrofonivalinnalla jo) — PortAudio-indeksit
+        # eivät pysy vakioina uudelleenkäynnistysten välillä (virtuaalikaapelit/USB-
+        # laitteet siirtävät numerointia), joten pelkkä indeksivertailu voi jättää
+        # tallennetun laitteen valitsematta TAI valita väärän laitteen jolla nyt
+        # sattuu olemaan sama numero. Nimi on ainoa pysyvä tunniste istuntojen yli.
+        saved_names = set(self.history_data.get("selected_output_device_names", []) or [])
 
         # Prioritize routing-capable devices (VoiceMeeter, virtual, Rodecaster, etc.)
         routing_devices = [
@@ -6482,10 +6488,15 @@ class App(QWidget):
             if not any(keyword in name.lower() for keyword in ["voicemeeter", "virtual", "vb-audio", "voice", "rodecaster", "rode caster"])
         ]
 
+        def _was_selected(index, name):
+            if saved_names:
+                return name in saved_names
+            return index in saved_devices  # vanha data ilman nimiä — index-fallback
+
         for index, name in routing_devices:
-            self._add_device_row(index, f"🎛️ {name}", name, was_selected=(index in saved_devices))
+            self._add_device_row(index, f"🎛️ {name}", name, was_selected=_was_selected(index, name))
         for index, name in other_devices[:8]:
-            self._add_device_row(index, f"🔊 {name}", name, was_selected=(index in saved_devices))
+            self._add_device_row(index, f"🔊 {name}", name, was_selected=_was_selected(index, name))
 
         device_count = len(routing_devices) + min(len(other_devices), 8)
         self.append_status(f"Found {device_count} output devices ({len(routing_devices)} routing-capable)")
@@ -6582,9 +6593,15 @@ class App(QWidget):
         return index if isinstance(index, int) and index >= 0 else None
 
     def on_output_device_changed(self):
-        """Called when a device checkbox is toggled — persist selection."""
+        """Called when a device checkbox is toggled — persist selection by index
+        AND by name (name is what survives PortAudio re-enumeration across restarts)."""
         selected_devices = self.get_selected_devices()
         self.history_data["selected_output_devices"] = selected_devices or []
+        self.history_data["selected_output_device_names"] = [
+            self._device_widgets[idx]["full_name"]
+            for idx in (selected_devices or [])
+            if idx in self._device_widgets
+        ]
         save_history_data(self.history_data)
         for w in self._device_widgets.values():
             if not w["checkbox"].isChecked():
@@ -10779,11 +10796,16 @@ class SetupWizard(QDialog):
         # -- pääpainike: asenna (jos tarpeen) + konfiguroi + testaa, kaikki yhdessä --
 
         def _auto_detect_mixer_input_name():
+            # list_input_devices() (_best_audio_devices) deduplikoi saman fyysisen
+            # laitteen useista ajurirajapinnoista ja pitää PARHAAN (täyden, ei-
+            # katkaistun) nimen — raaka sd.query_devices() voi palauttaa MME:n
+            # katkaiseman ~31 merkin version ensin, jota Voicemeeter ei tunnista
+            # omassa laitehaussaan (näkyy punaisena "no device" -tilana Hardware
+            # Input 1 -stripissä vaikka mikki toimii muualla appissa).
             try:
-                devs = sd.query_devices()
+                names = [n for _, n in list_input_devices()]
             except Exception:
                 return None
-            names = [d["name"] for d in devs if d["max_input_channels"] > 0]
             for keywords in (("chat",), ("mix minus", "mix-minus"), ("rodecaster", "rode caster")):
                 for n in names:
                     if any(k in n.lower() for k in keywords):
@@ -12049,6 +12071,15 @@ class SetupWizard(QDialog):
                     hd["selected_input_device_name"] = f"🎤 {_dev_name}"
             if selected_out:
                 hd["selected_output_devices"] = selected_out
+                # Nimet mukaan indeksien lisäksi — sama syy kuin selected_input_device_name:
+                # PortAudio-indeksit eivät pysy vakioina seuraavalle käynnistyskerralle.
+                try:
+                    _out_names_now = dict(list_output_devices())
+                    hd["selected_output_device_names"] = [
+                        _out_names_now[i] for i in selected_out if i in _out_names_now
+                    ]
+                except Exception:
+                    pass
             with open(HISTORY_FILE, "w", encoding="utf-8") as f:
                 json.dump(hd, f, ensure_ascii=False, indent=2)
         except Exception:
