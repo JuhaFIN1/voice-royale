@@ -332,7 +332,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.89"
+APP_VERSION = "1.3.91"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -835,97 +835,94 @@ def _install_voicemeeter(status_cb) -> None:
 
 
 def _disable_unused_voicemeeter_endpoints(status_cb) -> None:
-    """Disable all Voicemeeter virtual audio endpoints except Input and Out B1.
+    """Hide all Voicemeeter virtual audio endpoints except Input and Out B1 from
+    Windows' device lists (Sound settings, volume mixer, every app's device picker).
 
-    Voice Royale's chat routing only ever uses "Voicemeeter Input" (TTS playback
-    target) and "Voicemeeter Out B1" (virtual mic for Discord/games). Voicemeeter
-    Potato registers 16 endpoints total (In1-5, AUX/VAIO3 Input, Out A1-A5, Out B2-B3
-    are all unused by this app) which clutters Windows' sound device lists. Disabling
-    via Device Manager keeps Voicemeeter itself fully functional and is reversible.
-    Requires admin — triggers a UAC prompt.
+    Voice Royale's chat routing only ever uses "Voicemeeter Input" (TTS/soundboard
+    playback target) and "Voicemeeter Out B1" (virtual mic for Discord/games).
+    Some Voicemeeter installations register far more endpoints (In1-5, AUX/VAIO3
+    Input, Out A1-A5, Out B2-B3 — up to 14 unused ones observed on real hardware)
+    which clutters every device list in Windows, not just Voice Royale's own.
+
+    IMPORTANT — history of two failed approaches before this one, verified on real
+    hardware, kept here so nobody re-attempts them:
+    1. Disable-PnpDevice on the AudioEndpoint class device (elevated via UAC):
+       the cmdlet reports success, but the devices remain fully visible in Windows
+       Sound settings afterwards — PnP-level disable does not affect the MMDevice
+       enumerator's endpoint visibility.
+    2. Writing DeviceState=2 directly into the endpoint's own registry key
+       (HKLM\\...\\MMDevices\\Audio\\{Render,Capture}\\{GUID}), even when elevated:
+       fails with "Requested registry access is not allowed" — that key is owned
+       by SYSTEM/TrustedInstaller and rejects direct writes even from Administrator.
+
+    The actual mechanism (confirmed working, matches what Windows' own Settings UI
+    does when you manually toggle a device off, and requires NO elevation/UAC at
+    all): IPolicyConfig::SetEndpointVisibility(id, false) via COM — the same
+    interface already used by _set_windows_default_recording() for SetDefaultEndpoint
+    (vtable slot 11), with SetEndpointVisibility at the next slot (12).
     """
     if sys.platform != "win32":
         return
-    import tempfile
+    ps = r"""
+Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices;
+[ComImport, Guid("F8679F50-850A-41CF-9C72-430F290290C8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IPolicyConfigVR2 {
+  [PreserveSig] int _1();[PreserveSig] int _2();[PreserveSig] int _3();
+  [PreserveSig] int _4();[PreserveSig] int _5();[PreserveSig] int _6();
+  [PreserveSig] int _7();[PreserveSig] int _8();[PreserveSig] int _9();[PreserveSig] int _10();
+  [PreserveSig] int SetDefaultEndpoint([MarshalAs(UnmanagedType.LPWStr)] string id, uint role);
+  [PreserveSig] int SetEndpointVisibility([MarshalAs(UnmanagedType.LPWStr)] string id, [MarshalAs(UnmanagedType.Bool)] bool visible);
+}
+[ComImport, Guid("870AF99C-171D-4F9E-AF0D-E63DF40C2BC9"), ClassInterface(ClassInterfaceType.None)]
+public class PolicyConfigClientVR2 {}
+public static class PolicyConfigHelperVR2 {
+  public static int Hide(string epId) {
+    var pc = (IPolicyConfigVR2)new PolicyConfigClientVR2();
+    return pc.SetEndpointVisibility(epId, false);
+  }
+}
+'@ -ErrorAction Stop
 
-    # The PnP-filter script is written to its own .ps1 file and invoked with -File +
-    # an array -ArgumentList, instead of embedding it as a nested -Command string
-    # (avoids the quote-nesting that used to break the outer Start-Process call
-    # silently before the UAC prompt could even appear).
-    #
-    # Device MATCHING is registry-based, not PnP FriendlyName-based. Verified directly
-    # on real hardware: Get-PnpDevice -Class AudioEndpoint reports every Voicemeeter
-    # endpoint's Status as "Error" (never "OK") and its FriendlyName as a generic,
-    # indistinguishable string ("Speakers (VB-Audio Voicemeeter VAIO)", "Voicemeeter
-    # Out 1..8") that does NOT match the names Windows/sd.query_devices() actually show
-    # ("Voicemeeter Input", "Voicemeeter Out B1", etc). The real, distinguishable name
-    # lives in the registry (same property _set_windows_default_recording() already
-    # reads), and that registry GUID appears verbatim inside Get-PnpDevice's InstanceId
-    # (SWD\MMDEVAPI\{0.0.1.00000000}.{GUID} for capture, {0.0.0.00000000}.{GUID} for
-    # render) — so endpoints are identified by GUID lookup instead of by name/status.
-    tmp_dir = tempfile.mkdtemp(prefix="vr_vmcleanup_")
-    script_path = os.path.join(tmp_dir, "cleanup.ps1")
-    result_path = os.path.join(tmp_dir, "result.txt")
-    ps_script = (
-        "try {\n"
-        "  $renderBase = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Render'\n"
-        "  $captureBase = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Capture'\n"
-        "  $keep = @('Voicemeeter Input', 'Voicemeeter Out B1')\n"
-        "  $guids = @()\n"
-        "  foreach ($base in @($renderBase, $captureBase)) {\n"
-        "    Get-ChildItem $base -ErrorAction SilentlyContinue | ForEach-Object {\n"
-        "      $propPath = Join-Path $_.PSPath 'Properties'\n"
-        "      $name = (Get-ItemProperty -Path $propPath -Name '{a45c254e-df1c-4efd-8020-67d146a850e0},2' -ErrorAction SilentlyContinue).'{a45c254e-df1c-4efd-8020-67d146a850e0},2'\n"
-        "      if ($name -like '*Voicemeeter*' -and ($keep -notcontains $name)) {\n"
-        "        $guids += $_.PSChildName\n"
-        "      }\n"
-        "    }\n"
-        "  }\n"
-        "  $disabledCount = 0\n"
-        "  foreach ($guid in $guids) {\n"
-        "    Get-PnpDevice -Class AudioEndpoint -PresentOnly | Where-Object { $_.InstanceId -like \"*$guid*\" } | ForEach-Object {\n"
-        "      Disable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false -ErrorAction SilentlyContinue\n"
-        "      $disabledCount++\n"
-        "    }\n"
-        "  }\n"
-        f"  \"OK:$disabledCount\" | Out-File -FilePath '{result_path}' -Encoding utf8\n"
-        "} catch {\n"
-        f"  \"ERROR: $_\" | Out-File -FilePath '{result_path}' -Encoding utf8\n"
-        "}\n"
-    )
+$renderBase = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render'
+$captureBase = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture'
+$keep = @('Voicemeeter Input', 'Voicemeeter Out B1')
+$hidden = 0
+
+foreach ($pair in @(@{base=$renderBase; flow=0}, @{base=$captureBase; flow=1})) {
+    Get-ChildItem $pair.base -ErrorAction SilentlyContinue | ForEach-Object {
+        $propPath = Join-Path $_.PSPath 'Properties'
+        $name = (Get-ItemProperty -Path $propPath -Name '{a45c254e-df1c-4efd-8020-67d146a850e0},2' -ErrorAction SilentlyContinue).'{a45c254e-df1c-4efd-8020-67d146a850e0},2'
+        if ($name -like '*Voicemeeter*' -and ($keep -notcontains $name)) {
+            $epId = "{0.0.$($pair.flow).00000000}." + $_.PSChildName
+            $ret = [PolicyConfigHelperVR2]::Hide($epId)
+            if ($ret -eq 0) { $hidden++ }
+        }
+    }
+}
+Write-Output "OK:$hidden"
+"""
     try:
-        with open(script_path, "w", encoding="utf-8") as f:
-            f.write(ps_script)
-        status_cb("Siivotaan turhat Voicemeeter-virtuaalilaitteet — hyväksy UAC-pyyntö...")
-        subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "Start-Process -FilePath powershell -Verb RunAs -Wait -ArgumentList "
-             f"@('-NoProfile','-ExecutionPolicy','Bypass','-File','{script_path}')"],
-            capture_output=True, timeout=60,
+        status_cb("Piilotetaan turhat Voicemeeter-virtuaalilaitteet...")
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True, timeout=30,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
-        result_text = ""
-        if os.path.isfile(result_path):
-            with open(result_path, "r", encoding="utf-8") as f:
-                result_text = f.read().strip()
-        if result_text.startswith("OK:"):
-            count = result_text.split(":", 1)[1]
+        out = r.stdout.strip()
+        if out.startswith("OK:"):
+            count = out.split(":", 1)[1]
             if count != "0":
                 status_cb(
-                    f"✅ {count} turhaa Voicemeeter-virtuaalilaitetta piilotettu "
-                    "(Voicemeeter Input + Out B1 jäivät käyttöön)."
+                    f"✅ {count} turhaa Voicemeeter-virtuaalilaitetta piilotettu Windowsin "
+                    "laitelistoista (Voicemeeter Input + Out B1 jäivät käyttöön)."
                 )
             else:
                 status_cb("⚠ Ei löytynyt piilotettavia Voicemeeter-laitteita.")
-        elif result_text.startswith("ERROR"):
-            status_cb(f"Laitteiden siivous epäonnistui: {result_text}")
         else:
-            status_cb("⚠ UAC-pyyntöä ei hyväksytty tai se peruttiin — laitteita ei siivottu.")
+            status_cb(f"Laitteiden piilotus epäonnistui: {r.stderr.strip() or out}")
     except Exception as exc:
-        status_cb(f"Laitteiden siivous epäonnistui: {exc}")
-    finally:
-        import shutil as _sh_cleanup
-        _sh_cleanup.rmtree(tmp_dir, ignore_errors=True)
+        status_cb(f"Laitteiden piilotus epäonnistui: {exc}")
 
 
 def _check_voicemeeter_routing() -> tuple[str, bool]:
@@ -1056,9 +1053,12 @@ def _voicemeeter_configure(mic_device_name: str, status_cb) -> None:
     """Configure Voicemeeter Banana routing via VoicemeeterRemote64.dll.
 
     Routes:
-      - Hardware Input 1 → selected recording device (RodeCaster Chat / Mix Minus)
-      - Virtual Input (VB-Cable Out) → VR TTS audio
-      Both → B1 virtual output bus (becomes Windows default mic for games)
+      - Hardware Input 1 (Strip[0]) → selected recording device (RodeCaster Chat / Mix Minus)
+      - Virtual Input ("Voicemeeter Input" VAIO) → VR TTS/soundboard audio.
+        Set on BOTH Strip[2] and Strip[3] since the virtual input's strip index
+        varies by installation (2 physical + 1 virtual vs. 3 physical + 2 virtual) —
+        see comment at the Strip[2]/Strip[3] loop below.
+      All → B1 virtual output bus (becomes Windows default mic for games)
     """
     import ctypes
     import ctypes.wintypes
@@ -1088,22 +1088,38 @@ def _voicemeeter_configure(mic_device_name: str, status_cb) -> None:
             vm.VBVMR_SetParameterFloat(param.encode(), ctypes.c_float(value))
 
         # Hardware Input 1 (Strip[0]): route RodeCaster/physical mic → B1
-        # Try WDM first, then MME — Voicemeeter may accept either format
+        # KRIITTINEN: aseta VAIN .wdm, älä koskaan myös .mme perään samalla nimellä.
+        # Voicemeeterin oma laitelista käyttää ERI nimimuotoa WDM:lle (täysi nimi)
+        # ja MME:lle (MME-rajapinnan katkaisema ~31 merkin versio) — jos .mme saa
+        # täyden (WDM-muotoisen) nimen joka ei täsmää mihinkään oikeaan MME-laitteeseen,
+        # se sekoittaa Voicemeeterin sisäisen laitesidonnan: laitenimi näkyy silti
+        # oikein Hardware Input -stripissä (punaisella), mutta ääntä ei tule läpi
+        # ollenkaan. Todennettu käyttäjän oikealla RodeCaster Pro II -laitteistolla:
+        # pelkkä .wdm korjasi punaisen tilan ja mikrofonin taso alkoi liikkua heti.
         if mic_device_name:
             set_param_str("Strip[0].device.wdm", mic_device_name)
-            time.sleep(0.3)
-            set_param_str("Strip[0].device.mme", mic_device_name)
         set_param_float("Strip[0].A1", 0.0)
         set_param_float("Strip[0].A2", 0.0)
         set_param_float("Strip[0].B1", 1.0)   # → B1 bus
         set_param_float("Strip[0].B2", 0.0)
 
-        # Virtual Input Strip[2] (= "Voicemeeter Input" VAIO) → B1
-        # Voice Royale sends TTS/soundboard here
-        set_param_float("Strip[2].A1", 0.0)
-        set_param_float("Strip[2].A2", 0.0)
-        set_param_float("Strip[2].B1", 1.0)   # → B1
-        set_param_float("Strip[2].B2", 0.0)
+        # Virtual Input ("Voicemeeter Input" VAIO) → B1 — Voice Royale lähettää
+        # TTS/soundboard-äänen tänne. HUOM: standardi Banana-asennuksella (2 fyysistä
+        # + 1 virtuaalinen tulo) virtuaalitulo on Strip[2], mutta joillain asennuksilla
+        # (havaittu käyttäjän oikealla koneella: 3 fyysistä + 2 virtuaalista tuloa,
+        # 5 stripiä yhteensä) virtuaalitulo on Strip[3] eikä Strip[2] — Strip[2] on
+        # tällöin kolmas FYYSINEN tulo. Remote API ei tarjoa luotettavaa tapaa erottaa
+        # nämä (molemmat näyttävät tyhjän device.name:n kun laitetta ei ole kytketty),
+        # joten asetetaan B1-reititys sekä Strip[2] että Strip[3] -kanaville — jos
+        # jompikumpi on käyttämätön/olematon fyysinen tulo, asetus ei tee mitään
+        # haittaa (ei laitetta -> ei signaalia), mutta oikea virtuaalitulo saa aina
+        # reitityksensä kummalla tahansa asennustyypillä. Todennettu toimivaksi
+        # (0.7 amplitudin testisignaali kulki Strip[3]:sta Voicemeeter Out B1:een asti).
+        for _strip_idx in (2, 3):
+            set_param_float(f"Strip[{_strip_idx}].A1", 0.0)
+            set_param_float(f"Strip[{_strip_idx}].A2", 0.0)
+            set_param_float(f"Strip[{_strip_idx}].B1", 1.0)   # → B1
+            set_param_float(f"Strip[{_strip_idx}].B2", 0.0)
 
         # Bus B1 on
         set_param_float("Bus[3].On", 1.0)
@@ -5874,6 +5890,7 @@ class App(QWidget):
     def _populate_fx_monitor_combo(self):
         self._fx_monitor_combo.clear()
         saved = self.settings.get("voice_fx_monitor_device")
+        saved_name = self.settings.get("voice_fx_monitor_device_name")
         virtual_kw = ("cable", "voicemeeter", "voicemod", "virtual")
         junk_kw = ("microsoft sound mapper", "primary sound", "bthhfenum")
         disabled_names = _windows_disabled_audio_names()
@@ -5883,7 +5900,18 @@ class App(QWidget):
                     and not any(k in nl for k in junk_kw)
                     and not _matches_disabled_name(n, disabled_names)):
                 self._fx_monitor_combo.addItem(f"🎧 {n}", i)
-        target_idx = saved
+        # Nimi käy AINA ennen indeksiä, ml. jo tallennettu valinta — sama PortAudio-
+        # indeksien epävakaus koskee tätäkin (ks. output-laitteiden vastaava korjaus).
+        if saved_name:
+            for idx in range(self._fx_monitor_combo.count()):
+                if self._fx_monitor_combo.itemText(idx) == f"🎧 {saved_name}":
+                    self._fx_monitor_combo.setCurrentIndex(idx)
+                    _fit_combo_dropdown(self._fx_monitor_combo)
+                    return
+            # Nimeä ei löytynyt (laite poistettu) — jatka alle kuin mitään ei olisi tallennettu.
+            target_idx = None
+        else:
+            target_idx = saved
         target_name = None
         if target_idx is None:
             # sd.default.device -indeksi elää eri ajuri-indeksiavaruudessa kuin
@@ -5920,12 +5948,27 @@ class App(QWidget):
                 if _fallback_idx is not None:
                     self._fx_monitor_combo.setCurrentIndex(_fallback_idx)
         _fit_combo_dropdown(self._fx_monitor_combo)
+        # Itseparantava migraatio: jos tänne asti päädyttiin, tallennettua nimeä ei
+        # joko ollut (vanha data, pelkkä indeksi) tai se oli vanhentunut (laite
+        # poistettu) — kirjoita nykyinen valinta nimellä talteen nyt, samalla
+        # periaatteella kuin output-laitteilla. Seuraavasta käynnistyksestä lähtien
+        # valinta selviää nimellä vaikka PortAudio numeroisi laitteet eri järjestykseen.
+        if self._fx_monitor_combo.currentIndex() >= 0:
+            cur_name = self._fx_monitor_combo.currentText()
+            if cur_name.startswith("🎧 "):
+                self.settings["voice_fx_monitor_device_name"] = cur_name[2:]
+                self.settings["voice_fx_monitor_device"] = self._fx_monitor_combo.currentData()
+                save_settings(self.settings)
 
     def _on_fx_monitor_device_changed(self):
         mon_dev = self._fx_monitor_combo.currentData()
         if mon_dev is None:
             return
         self.settings["voice_fx_monitor_device"] = mon_dev
+        mon_text = self._fx_monitor_combo.currentText()
+        self.settings["voice_fx_monitor_device_name"] = (
+            mon_text[2:] if mon_text.startswith("🎧 ") else mon_text
+        )
         save_settings(self.settings)
         if self._hear_myself_btn.isChecked():
             self._voice_fx.set_monitor(mon_dev, True)
@@ -5934,8 +5977,12 @@ class App(QWidget):
         enabled = self._hear_myself_btn.isChecked()
         self._hear_myself_btn.setText("Hear Myself: ON" if enabled else "Hear Myself: OFF")
         mon_dev = self._fx_monitor_combo.currentData()
+        mon_text = self._fx_monitor_combo.currentText()
         self.settings["voice_fx_hear_myself"] = enabled
         self.settings["voice_fx_monitor_device"] = mon_dev
+        self.settings["voice_fx_monitor_device_name"] = (
+            mon_text[2:] if mon_text.startswith("🎧 ") else mon_text
+        )
         save_settings(self.settings)
         self._voice_fx.set_monitor(mon_dev, enabled)
 
@@ -6500,6 +6547,30 @@ class App(QWidget):
 
         device_count = len(routing_devices) + min(len(other_devices), 8)
         self.append_status(f"Found {device_count} output devices ({len(routing_devices)} routing-capable)")
+
+        # Siivous: useampi OHJELMISTOVIRTUAALIKAAPELI (Voicemeeter/VB-Cable) valittuna
+        # yhtä aikaa on AINA jäännettä vanhoista testeistä — vain YKSI virtuaalikanava
+        # voi koskaan olla se johon reititys (_voicemeeter_configure/VB-Cable) oikeasti
+        # syöttää ääntä, ylimääräiset vain lisäävät turhia mittareita eivätkä johda
+        # mihinkään. HUOM: routing_devices-ryhmä sisältää myös fyysiset RodeCaster-
+        # kanavat (käyttäjän omat kaiuttimet) — niitä EI SAA poistaa, siksi kapeampi
+        # avainsanajoukko tässä kuin routing_devices-luokittelussa.
+        _true_virtual_kw = ("voicemeeter", "vb-audio", "vb cable", "cable", "voicemod")
+        _virt_checked = [
+            idx for idx, name in routing_devices
+            if any(k in name.lower() for k in _true_virtual_kw)
+            and idx in self._device_widgets and self._device_widgets[idx]["checkbox"].isChecked()
+        ]
+        if len(_virt_checked) > 1:
+            _routing_names = dict(routing_devices)
+            _keep = next(
+                (i for i in _virt_checked
+                 if _routing_names[i].lower() in self._FX_CANONICAL_OUTPUT_NAMES),
+                _virt_checked[0],
+            )
+            for i in _virt_checked:
+                if i != _keep:
+                    self._device_widgets[i]["checkbox"].setChecked(False)
 
         # Itseparantava migraatio: jos vanhassa datassa ei ollut nimiä (vain indeksejä),
         # kirjoita ne nyt talteen ilman että käyttäjän tarvitsee koskea mihinkään —
@@ -10880,6 +10951,15 @@ class SetupWizard(QDialog):
                             test_msg, test_ok = _check_voicemeeter_routing()
                             _cb(test_msg)
                             ok = ok and test_ok
+                            # Piilota turhat Voicemeeter-virtuaalilaitteet (In1-5, AUX/VAIO3
+                            # Input, Out A1-A5, Out B2-B3 ym.) Windowsin laitelistoista —
+                            # Voice Royale käyttää vain "Voicemeeter Input" + "Voicemeeter
+                            # Out B1", loput ovat pelkkää sekaannusta aiheuttavaa jäännettä.
+                            # Aiemmin piilotettu "Lisäasetukset"-linkin taakse, nyt osa
+                            # automaattista määritystä niin ettei käyttäjän tarvitse löytää
+                            # sitä itse. Vaatii UAC:n — käyttäjä hyväksyy sen itse tästä
+                            # napista, ei ohitettu tai automatisoitu ilman käyttäjän lupaa.
+                            _disable_unused_voicemeeter_endpoints(_cb)
                         rq.put(("done", ok))
                     else:
                         if not _is_vbcable_installed():
