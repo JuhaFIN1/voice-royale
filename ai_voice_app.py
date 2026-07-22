@@ -332,7 +332,7 @@ EDGE_VOICES = {
     "Arabic": "ar-SA-ZariyahNeural",
 }
 
-APP_VERSION = "1.3.88"
+APP_VERSION = "1.3.89"
 GITHUB_REPO = "JuhaFIN1/voice-royale"
 
 # =========================
@@ -6500,6 +6500,22 @@ class App(QWidget):
 
         device_count = len(routing_devices) + min(len(other_devices), 8)
         self.append_status(f"Found {device_count} output devices ({len(routing_devices)} routing-capable)")
+
+        # Itseparantava migraatio: jos vanhassa datassa ei ollut nimiä (vain indeksejä),
+        # kirjoita ne nyt talteen ilman että käyttäjän tarvitsee koskea mihinkään —
+        # seuraavasta käynnistyksestä lähtien valinta selviää nimellä vaikka PortAudio
+        # numeroisi laitteet eri järjestykseen (esim. reboot/USB-kytkennän jälkeen).
+        # Samalla vanhentuneet/kadonneet indeksit (esim. poistettu virtuaalilaite)
+        # putoavat pois automaattisesti, koska niille ei koskaan piirretä riviä.
+        if not saved_names:
+            _checked = [idx for idx, w in self._device_widgets.items() if w["checkbox"].isChecked()]
+            if _checked:
+                self.history_data["selected_output_devices"] = _checked
+                self.history_data["selected_output_device_names"] = [
+                    self._device_widgets[i]["full_name"] for i in _checked
+                ]
+                save_history_data(self.history_data)
+
         self._refresh_bottom_meters()
         # Checkbox stateChanged only fires for devices whose checked state actually
         # CHANGES during population — if nothing changed (or PortAudio re-enumerated
