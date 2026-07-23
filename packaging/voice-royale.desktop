@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Voice Royale
+Comment=Mikrofoni -> kaannos -> puhesynteesi
+Exec=/opt/voice-royale/voice-royale
+Icon=voice-royale
+Terminal=false
+Categories=AudioVideo;Audio;Utility;
+StartupWMClass=Voice Royale

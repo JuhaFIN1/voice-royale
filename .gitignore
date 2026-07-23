@@ -21,6 +21,10 @@ temp_edge_tts_*.py
 dist/
 build/
 *.spec
+!packaging/*.spec
+
+# Linux build output (RPM published via GitHub Releases, not committed)
+dist-linux/
 
 # Stream Deck plugin binary (re-built from streamdeck-plugin/ source)
 streamdeck-plugin/*.streamDeckPlugin
